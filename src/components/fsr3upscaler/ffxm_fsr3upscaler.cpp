@@ -28,9 +28,18 @@
 #include "ffxm_fsr3upscaler_private.h"
 #include "host/ffxm_util.h"
 #include "host/ffxm_assert.h"
+#include "src/shared/ffxm_object_management.h"
 
 namespace arm
 {
+
+// Lanczos kernel generator for LUT construction
+static float lanczos2(float value)
+{
+    return fabsf(value) < FFXM_EPSILON
+        ? 1.0f
+        : (sinf(FFXM_PI * value) / (FFXM_PI * value)) * (sinf(0.5f * FFXM_PI * value) / (0.5f * FFXM_PI * value));
+}
 
 // Halton sequence generator for subpixel camera jitter
 static float halton(int32_t index, int32_t base)
@@ -74,7 +83,65 @@ static inline void stageConstantBuffer(
     memcpy(dstBuffer->data, srcData, srcSizeBytes);
 }
 
-// Internal creation function
+// Internal resource destruction helper
+FfxmErrorCode fsr3UpscalerDestroy(FfxmFsr3UpscalerContext_Private* context)
+{
+    if (context == nullptr) {
+        return FFXM_OK;
+    }
+
+    FfxmInterface* backendInterface = &context->contextDescription.backendInterface;
+
+    // 1. Release copy staging resources for surfaces created with initial data
+    if (backendInterface->fpDestroyResource != nullptr) {
+        const uint32_t copyResourceIds[] = {
+            FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_SPD_ATOMIC_COUNT,
+            FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LANCZOS_LUT,
+            FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_DEFAULT_REACTIVITY,
+            FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_DEFAULT_EXPOSURE
+        };
+
+        for (uint32_t id : copyResourceIds) {
+            if (context->srvResources[id].internalIndex != -1) {
+                ffxmSafeReleaseCopyResource(backendInterface, context->srvResources[id]);
+            }
+        }
+
+        // 2. Destroy internal GPU resources in reverse order of allocation
+        for (int32_t i = static_cast<int32_t>(context->allocatedResourceCount) - 1; i >= 0; --i) {
+            uint32_t id = context->allocatedResourceIds[i];
+            if (context->srvResources[id].internalIndex != -1) {
+                backendInterface->fpDestroyResource(backendInterface, context->srvResources[id]);
+                context->srvResources[id].internalIndex = -1;
+                context->uavResources[id].internalIndex = -1;
+                context->rtResources[id].internalIndex = -1;
+            }
+        }
+
+        // Ensure any remaining tracked slots are also cleared
+        for (uint32_t i = 0; i < FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_COUNT; ++i) {
+            if (context->srvResources[i].internalIndex != -1) {
+                backendInterface->fpDestroyResource(backendInterface, context->srvResources[i]);
+                context->srvResources[i].internalIndex = -1;
+                context->uavResources[i].internalIndex = -1;
+                context->rtResources[i].internalIndex = -1;
+            }
+        }
+    }
+    context->allocatedResourceCount = 0;
+
+    // 3. Destroy backend context AFTER destroying all resources
+    if (context->backendContextCreated) {
+        if (backendInterface->fpDestroyBackendContext != nullptr) {
+            backendInterface->fpDestroyBackendContext(backendInterface, context->effectContextId);
+        }
+        context->backendContextCreated = false;
+    }
+
+    return FFXM_OK;
+}
+
+// Internal resource creation helper
 FfxmErrorCode fsr3UpscalerCreate(
     FfxmFsr3UpscalerContext_Private* context,
     const FfxmFsr3UpscalerContextDescription* contextDescription)
@@ -82,9 +149,20 @@ FfxmErrorCode fsr3UpscalerCreate(
     FFXM_ASSERT(context != nullptr);
     FFXM_ASSERT(contextDescription != nullptr);
 
-    // Setup the data for implementation
-    memset(context, 0, sizeof(FfxmFsr3UpscalerContext_Private));
+    // Ensure all resource tracking indices are reset to -1 (unallocated)
+    for (uint32_t i = 0; i < FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_COUNT; ++i) {
+        context->srvResources[i].internalIndex = -1;
+        context->uavResources[i].internalIndex = -1;
+        context->rtResources[i].internalIndex = -1;
+    }
+    context->backendContextCreated = false;
+    context->allocatedResourceCount = 0;
+
     context->device = contextDescription->backendInterface.device;
+    if (context->device == nullptr) {
+        return FFXM_ERROR_NULL_DEVICE;
+    }
+
     memcpy(&context->contextDescription, contextDescription, sizeof(FfxmFsr3UpscalerContextDescription));
 
     // Retrieve device capabilities first
@@ -92,15 +170,16 @@ FfxmErrorCode fsr3UpscalerCreate(
         &context->contextDescription.backendInterface, &context->deviceCapabilities);
     FFXM_RETURN_ON_ERROR(errorCode == FFXM_OK, errorCode);
 
-    // Reject unsupported FP16 hardware cleanly
+    // Reject unsupported FP16 hardware cleanly using existing error semantics
     if (!context->deviceCapabilities.fp16Supported) {
-        return FFXM_ERROR_BACKEND_API_ERROR;
+        return FFXM_ERROR_INVALID_ARGUMENT;
     }
 
     // Create backend context space
     errorCode = context->contextDescription.backendInterface.fpCreateBackendContext(
         &context->contextDescription.backendInterface, &context->effectContextId);
     FFXM_RETURN_ON_ERROR(errorCode == FFXM_OK, errorCode);
+    context->backendContextCreated = true;
 
     // Setup constant buffer sizes
     context->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_FSR3UPSCALER].num32BitEntries =
@@ -121,8 +200,8 @@ FfxmErrorCode fsr3UpscalerCreate(
     context->constants.velocityFactor = 1.0f;
     context->constants.reactivenessScale = 1.0f;
     context->constants.shadingChangeScale = 1.0f;
-    context->constants.accumulationAddedPerFrame = 0.333f;
-    context->constants.minDisocclusionAccumulation = -0.333f;
+    context->constants.accumulationAddedPerFrame = 0.33333333f;
+    context->constants.minDisocclusionAccumulation = -0.33333333f;
 
     context->firstExecution = true;
     context->resourceFrameIndex = 0;
@@ -135,30 +214,332 @@ FfxmErrorCode fsr3UpscalerCreate(
         &context->constants,
         sizeof(context->constants));
 
-    return FFXM_OK;
-}
+    // Generate initial data for LUT and single-value surfaces
+    const uint32_t lanczos2LutWidth = 128;
+    int16_t lanczos2Weights[lanczos2LutWidth] = {};
+    for (uint32_t currentLanczosWidthIndex = 0; currentLanczosWidthIndex < lanczos2LutWidth; currentLanczosWidthIndex++) {
+        const float x = 2.0f * static_cast<float>(currentLanczosWidthIndex) / static_cast<float>(lanczos2LutWidth - 1);
+        const float y = lanczos2(x);
+        lanczos2Weights[currentLanczosWidthIndex] = static_cast<int16_t>(roundf(y * 32767.0f));
+    }
 
-// Internal destruction function
-FfxmErrorCode fsr3UpscalerDestroy(FfxmFsr3UpscalerContext_Private* context)
-{
-    FFXM_ASSERT(context != nullptr);
+    uint8_t defaultReactiveMaskData = 0U;
+    uint32_t atomicInitData = 0U;
+    float defaultExposure[2] = { 0.0f, 0.0f };
 
-    // Destroy any allocated internal resources
-    if (context->contextDescription.backendInterface.fpDestroyResource) {
-        for (uint32_t i = 0; i < FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_COUNT; ++i) {
-            if (context->srvResources[i].internalIndex != 0) {
-                context->contextDescription.backendInterface.fpDestroyResource(
-                    &context->contextDescription.backendInterface, context->srvResources[i]);
-                context->srvResources[i].internalIndex = 0;
-            }
+    const FfxmDimensions2D maxRenderSizeDiv2 = {
+        contextDescription->maxRenderSize.width / 2,
+        contextDescription->maxRenderSize.height / 2
+    };
+
+    // The complete 19 internal surfaces specified by upstream FSR 3.1.4
+    const FfxmInternalResourceDescription internalSurfaceDesc[FFXM_FSR3UPSCALER_INTERNAL_SURFACE_COUNT] = {
+        // 1. Accumulation 1
+        {
+            FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_ACCUMULATION_1,
+            L"FSR3UPSCALER_Accumulation1",
+            FFXM_RESOURCE_TYPE_TEXTURE2D,
+            static_cast<FfxmResourceUsage>(FFXM_RESOURCE_USAGE_RENDERTARGET | FFXM_RESOURCE_USAGE_UAV),
+            FFXM_SURFACE_FORMAT_R8_UNORM,
+            contextDescription->maxRenderSize.width,
+            contextDescription->maxRenderSize.height,
+            1,
+            FFXM_RESOURCE_FLAGS_NONE,
+            0,
+            nullptr
+        },
+        // 2. Accumulation 2
+        {
+            FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_ACCUMULATION_2,
+            L"FSR3UPSCALER_Accumulation2",
+            FFXM_RESOURCE_TYPE_TEXTURE2D,
+            static_cast<FfxmResourceUsage>(FFXM_RESOURCE_USAGE_RENDERTARGET | FFXM_RESOURCE_USAGE_UAV),
+            FFXM_SURFACE_FORMAT_R8_UNORM,
+            contextDescription->maxRenderSize.width,
+            contextDescription->maxRenderSize.height,
+            1,
+            FFXM_RESOURCE_FLAGS_NONE,
+            0,
+            nullptr
+        },
+        // 3. Luma 1
+        {
+            FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_1,
+            L"FSR3UPSCALER_Luma1",
+            FFXM_RESOURCE_TYPE_TEXTURE2D,
+            static_cast<FfxmResourceUsage>(FFXM_RESOURCE_USAGE_RENDERTARGET | FFXM_RESOURCE_USAGE_UAV),
+            FFXM_SURFACE_FORMAT_R16_FLOAT,
+            contextDescription->maxRenderSize.width,
+            contextDescription->maxRenderSize.height,
+            1,
+            FFXM_RESOURCE_FLAGS_NONE,
+            0,
+            nullptr
+        },
+        // 4. Luma 2
+        {
+            FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_2,
+            L"FSR3UPSCALER_Luma2",
+            FFXM_RESOURCE_TYPE_TEXTURE2D,
+            static_cast<FfxmResourceUsage>(FFXM_RESOURCE_USAGE_RENDERTARGET | FFXM_RESOURCE_USAGE_UAV),
+            FFXM_SURFACE_FORMAT_R16_FLOAT,
+            contextDescription->maxRenderSize.width,
+            contextDescription->maxRenderSize.height,
+            1,
+            FFXM_RESOURCE_FLAGS_NONE,
+            0,
+            nullptr
+        },
+        // 5. Intermediate FP16x1 (Aliasable)
+        {
+            FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERMEDIATE_FP16x1,
+            L"FSR3UPSCALER_IntermediateFp16x1",
+            FFXM_RESOURCE_TYPE_TEXTURE2D,
+            static_cast<FfxmResourceUsage>(FFXM_RESOURCE_USAGE_RENDERTARGET | FFXM_RESOURCE_USAGE_UAV),
+            FFXM_SURFACE_FORMAT_R16_FLOAT,
+            contextDescription->maxRenderSize.width,
+            contextDescription->maxRenderSize.height,
+            1,
+            FFXM_RESOURCE_FLAGS_ALIASABLE,
+            0,
+            nullptr
+        },
+        // 6. Shading Change (Aliasable)
+        {
+            FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_SHADING_CHANGE,
+            L"FSR3UPSCALER_ShadingChange",
+            FFXM_RESOURCE_TYPE_TEXTURE2D,
+            static_cast<FfxmResourceUsage>(FFXM_RESOURCE_USAGE_RENDERTARGET | FFXM_RESOURCE_USAGE_UAV),
+            FFXM_SURFACE_FORMAT_R8_UNORM,
+            maxRenderSizeDiv2.width,
+            maxRenderSizeDiv2.height,
+            1,
+            FFXM_RESOURCE_FLAGS_ALIASABLE,
+            0,
+            nullptr
+        },
+        // 7. New Locks (Aliasable)
+        {
+            FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_NEW_LOCKS,
+            L"FSR3UPSCALER_NewLocks",
+            FFXM_RESOURCE_TYPE_TEXTURE2D,
+            FFXM_RESOURCE_USAGE_UAV,
+            FFXM_SURFACE_FORMAT_R8_UNORM,
+            contextDescription->maxUpscaleSize.width,
+            contextDescription->maxUpscaleSize.height,
+            1,
+            FFXM_RESOURCE_FLAGS_ALIASABLE,
+            0,
+            nullptr
+        },
+        // 8. Internal Upscaled Color 1
+        {
+            FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_UPSCALED_COLOR_1,
+            L"FSR3UPSCALER_InternalUpscaled1",
+            FFXM_RESOURCE_TYPE_TEXTURE2D,
+            static_cast<FfxmResourceUsage>(FFXM_RESOURCE_USAGE_RENDERTARGET | FFXM_RESOURCE_USAGE_UAV),
+            FFXM_SURFACE_FORMAT_R16G16B16A16_FLOAT,
+            contextDescription->maxUpscaleSize.width,
+            contextDescription->maxUpscaleSize.height,
+            1,
+            FFXM_RESOURCE_FLAGS_NONE,
+            0,
+            nullptr
+        },
+        // 9. Internal Upscaled Color 2
+        {
+            FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_UPSCALED_COLOR_2,
+            L"FSR3UPSCALER_InternalUpscaled2",
+            FFXM_RESOURCE_TYPE_TEXTURE2D,
+            static_cast<FfxmResourceUsage>(FFXM_RESOURCE_USAGE_RENDERTARGET | FFXM_RESOURCE_USAGE_UAV),
+            FFXM_SURFACE_FORMAT_R16G16B16A16_FLOAT,
+            contextDescription->maxUpscaleSize.width,
+            contextDescription->maxUpscaleSize.height,
+            1,
+            FFXM_RESOURCE_FLAGS_NONE,
+            0,
+            nullptr
+        },
+        // 10. SPD Mips (Aliasable, auto mip count)
+        {
+            FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_SPD_MIPS,
+            L"FSR3UPSCALER_SpdMips",
+            FFXM_RESOURCE_TYPE_TEXTURE2D,
+            FFXM_RESOURCE_USAGE_UAV,
+            FFXM_SURFACE_FORMAT_R16G16_FLOAT,
+            maxRenderSizeDiv2.width,
+            maxRenderSizeDiv2.height,
+            0,
+            FFXM_RESOURCE_FLAGS_ALIASABLE,
+            0,
+            nullptr
+        },
+        // 11. Farthest Depth Mip 1 (Aliasable)
+        {
+            FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FARTHEST_DEPTH_MIP1,
+            L"FSR3UPSCALER_FarthestDepthMip1",
+            FFXM_RESOURCE_TYPE_TEXTURE2D,
+            FFXM_RESOURCE_USAGE_UAV,
+            FFXM_SURFACE_FORMAT_R16_FLOAT,
+            maxRenderSizeDiv2.width,
+            maxRenderSizeDiv2.height,
+            1,
+            FFXM_RESOURCE_FLAGS_ALIASABLE,
+            0,
+            nullptr
+        },
+        // 12. Luma History 1
+        {
+            FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_HISTORY_1,
+            L"FSR3UPSCALER_LumaHistory1",
+            FFXM_RESOURCE_TYPE_TEXTURE2D,
+            static_cast<FfxmResourceUsage>(FFXM_RESOURCE_USAGE_RENDERTARGET | FFXM_RESOURCE_USAGE_UAV),
+            FFXM_SURFACE_FORMAT_R16G16B16A16_FLOAT,
+            contextDescription->maxRenderSize.width,
+            contextDescription->maxRenderSize.height,
+            1,
+            FFXM_RESOURCE_FLAGS_NONE,
+            0,
+            nullptr
+        },
+        // 13. Luma History 2
+        {
+            FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_HISTORY_2,
+            L"FSR3UPSCALER_LumaHistory2",
+            FFXM_RESOURCE_TYPE_TEXTURE2D,
+            static_cast<FfxmResourceUsage>(FFXM_RESOURCE_USAGE_RENDERTARGET | FFXM_RESOURCE_USAGE_UAV),
+            FFXM_SURFACE_FORMAT_R16G16B16A16_FLOAT,
+            contextDescription->maxRenderSize.width,
+            contextDescription->maxRenderSize.height,
+            1,
+            FFXM_RESOURCE_FLAGS_NONE,
+            0,
+            nullptr
+        },
+        // 14. SPD Atomic Counter (Init value: 0)
+        {
+            FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_SPD_ATOMIC_COUNT,
+            L"FSR3UPSCALER_SpdAtomicCounter",
+            FFXM_RESOURCE_TYPE_TEXTURE2D,
+            FFXM_RESOURCE_USAGE_UAV,
+            FFXM_SURFACE_FORMAT_R32_UINT,
+            1,
+            1,
+            1,
+            FFXM_RESOURCE_FLAGS_NONE,
+            static_cast<uint32_t>(sizeof(atomicInitData)),
+            &atomicInitData
+        },
+        // 15. Dilated Reactive Masks (Aliasable)
+        {
+            FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_REACTIVE_MASKS,
+            L"FSR3UPSCALER_DilatedReactiveMasks",
+            FFXM_RESOURCE_TYPE_TEXTURE2D,
+            static_cast<FfxmResourceUsage>(FFXM_RESOURCE_USAGE_RENDERTARGET | FFXM_RESOURCE_USAGE_UAV),
+            FFXM_SURFACE_FORMAT_R8G8B8A8_UNORM,
+            contextDescription->maxRenderSize.width,
+            contextDescription->maxRenderSize.height,
+            1,
+            FFXM_RESOURCE_FLAGS_ALIASABLE,
+            0,
+            nullptr
+        },
+        // 16. Lanczos LUT (Init buffer: lanczos2Weights)
+        {
+            FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LANCZOS_LUT,
+            L"FSR3UPSCALER_LanczosLutData",
+            FFXM_RESOURCE_TYPE_TEXTURE2D,
+            FFXM_RESOURCE_USAGE_READ_ONLY,
+            FFXM_SURFACE_FORMAT_R16_SNORM,
+            lanczos2LutWidth,
+            1,
+            1,
+            FFXM_RESOURCE_FLAGS_NONE,
+            static_cast<uint32_t>(sizeof(lanczos2Weights)),
+            lanczos2Weights
+        },
+        // 17. Internal Default Reactivity Mask (Init value: 0)
+        {
+            FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_DEFAULT_REACTIVITY,
+            L"FSR3UPSCALER_DefaultReactivityMask",
+            FFXM_RESOURCE_TYPE_TEXTURE2D,
+            FFXM_RESOURCE_USAGE_READ_ONLY,
+            FFXM_SURFACE_FORMAT_R8_UNORM,
+            1,
+            1,
+            1,
+            FFXM_RESOURCE_FLAGS_NONE,
+            static_cast<uint32_t>(sizeof(defaultReactiveMaskData)),
+            &defaultReactiveMaskData
+        },
+        // 18. Internal Default Exposure (Init buffer: {0.0f, 0.0f})
+        {
+            FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_DEFAULT_EXPOSURE,
+            L"FSR3UPSCALER_DefaultExposure",
+            FFXM_RESOURCE_TYPE_TEXTURE2D,
+            FFXM_RESOURCE_USAGE_READ_ONLY,
+            FFXM_SURFACE_FORMAT_R32G32_FLOAT,
+            1,
+            1,
+            1,
+            FFXM_RESOURCE_FLAGS_NONE,
+            static_cast<uint32_t>(sizeof(defaultExposure)),
+            defaultExposure
+        },
+        // 19. Frame Info
+        {
+            FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FRAME_INFO,
+            L"FSR3UPSCALER_FrameInfo",
+            FFXM_RESOURCE_TYPE_TEXTURE2D,
+            FFXM_RESOURCE_USAGE_UAV,
+            FFXM_SURFACE_FORMAT_R32G32B32A32_FLOAT,
+            1,
+            1,
+            1,
+            FFXM_RESOURCE_FLAGS_NONE,
+            0,
+            nullptr
         }
+    };
+
+    // Allocate all 19 internal surfaces through the backend interface
+    for (uint32_t currentSurfaceIndex = 0; currentSurfaceIndex < FFXM_FSR3UPSCALER_INTERNAL_SURFACE_COUNT; ++currentSurfaceIndex) {
+        const FfxmInternalResourceDescription* currentSurfaceDescription = &internalSurfaceDesc[currentSurfaceIndex];
+
+        FfxmCreateResourceDescription createResourceDescription = {};
+        createResourceDescription.heapType = FFXM_HEAP_TYPE_DEFAULT;
+        createResourceDescription.resourceDescription.type = currentSurfaceDescription->type;
+        createResourceDescription.resourceDescription.format = currentSurfaceDescription->format;
+        createResourceDescription.resourceDescription.width = currentSurfaceDescription->width;
+        createResourceDescription.resourceDescription.height = currentSurfaceDescription->height;
+        createResourceDescription.resourceDescription.depth = 1;
+        createResourceDescription.resourceDescription.mipCount = currentSurfaceDescription->mipCount;
+        createResourceDescription.resourceDescription.flags = currentSurfaceDescription->flags;
+        createResourceDescription.resourceDescription.usage = currentSurfaceDescription->usage;
+        createResourceDescription.initalState = (currentSurfaceDescription->usage == FFXM_RESOURCE_USAGE_READ_ONLY)
+            ? FFXM_RESOURCE_STATE_COMPUTE_READ
+            : FFXM_RESOURCE_STATE_UNORDERED_ACCESS;
+        createResourceDescription.initDataSize = currentSurfaceDescription->initDataSize;
+        createResourceDescription.initData = currentSurfaceDescription->initData;
+        createResourceDescription.name = currentSurfaceDescription->name;
+        createResourceDescription.id = currentSurfaceDescription->id;
+
+        FfxmErrorCode res = context->contextDescription.backendInterface.fpCreateResource(
+            &context->contextDescription.backendInterface,
+            &createResourceDescription,
+            context->effectContextId,
+            &context->srvResources[currentSurfaceDescription->id]);
+        if (res != FFXM_OK) {
+            // Partial initialization failure: return immediately to trigger transactional rollback
+            return res;
+        }
+
+        context->allocatedResourceIds[context->allocatedResourceCount++] = currentSurfaceDescription->id;
     }
 
-    // Destroy backend context
-    if (context->contextDescription.backendInterface.fpDestroyBackendContext) {
-        context->contextDescription.backendInterface.fpDestroyBackendContext(
-            &context->contextDescription.backendInterface, context->effectContextId);
-    }
+    // Mirror internal handles to UAV and RT binding tracking arrays
+    memcpy(context->uavResources, context->srvResources, sizeof(context->srvResources));
+    memcpy(context->rtResources, context->srvResources, sizeof(context->srvResources));
 
     return FFXM_OK;
 }
@@ -195,9 +576,19 @@ FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextCreate(
     memset(pContext, 0, sizeof(FfxmFsr3UpscalerContext));
 
     FfxmFsr3UpscalerContext_Private* contextPrivate = reinterpret_cast<FfxmFsr3UpscalerContext_Private*>(pContext);
+
+    // Explicitly initialize all resource slots to -1 (unallocated sentinel)
+    for (uint32_t i = 0; i < FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_COUNT; ++i) {
+        contextPrivate->srvResources[i].internalIndex = -1;
+        contextPrivate->uavResources[i].internalIndex = -1;
+        contextPrivate->rtResources[i].internalIndex = -1;
+    }
+    contextPrivate->backendContextCreated = false;
+    contextPrivate->allocatedResourceCount = 0;
+
     const FfxmErrorCode errorCode = fsr3UpscalerCreate(contextPrivate, pContextDescription);
     if (errorCode != FFXM_OK) {
-        // Transactional rollback on failure
+        // Transactional rollback on failure: cleans up only what was acquired
         fsr3UpscalerDestroy(contextPrivate);
         memset(pContext, 0, sizeof(FfxmFsr3UpscalerContext));
         return errorCode;
@@ -281,14 +672,23 @@ FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextDispatch(
 {
     FFXM_RETURN_ON_ERROR(pContext != nullptr, FFXM_ERROR_INVALID_POINTER);
     FFXM_RETURN_ON_ERROR(pDispatchDescription != nullptr, FFXM_ERROR_INVALID_POINTER);
+    FFXM_RETURN_ON_ERROR(pDispatchDescription->commandList != nullptr, FFXM_ERROR_INVALID_POINTER);
 
     FfxmFsr3UpscalerContext_Private* contextPrivate = reinterpret_cast<FfxmFsr3UpscalerContext_Private*>(pContext);
+
+    FFXM_RETURN_ON_ERROR(contextPrivate->device != nullptr, FFXM_ERROR_NULL_DEVICE);
 
     FFXM_RETURN_ON_ERROR(
         pDispatchDescription->renderSize.width <= contextPrivate->contextDescription.maxRenderSize.width,
         FFXM_ERROR_OUT_OF_RANGE);
     FFXM_RETURN_ON_ERROR(
         pDispatchDescription->renderSize.height <= contextPrivate->contextDescription.maxRenderSize.height,
+        FFXM_ERROR_OUT_OF_RANGE);
+    FFXM_RETURN_ON_ERROR(
+        pDispatchDescription->upscaleSize.width <= contextPrivate->contextDescription.maxUpscaleSize.width,
+        FFXM_ERROR_OUT_OF_RANGE);
+    FFXM_RETURN_ON_ERROR(
+        pDispatchDescription->upscaleSize.height <= contextPrivate->contextDescription.maxUpscaleSize.height,
         FFXM_ERROR_OUT_OF_RANGE);
 
     // Update frame constants
@@ -312,7 +712,9 @@ FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextDispatch(
         &contextPrivate->constants,
         sizeof(contextPrivate->constants));
 
-    return FFXM_OK;
+    // Milestone 2 boundary: GPU compute dispatch passes are scheduled in Milestone 3.
+    // Return FFXM_ERROR_INCOMPLETE_INTERFACE to prevent reporting execution before GPU jobs are scheduled.
+    return FFXM_ERROR_INCOMPLETE_INTERFACE;
 }
 
 FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextGenerateReactiveMask(
@@ -321,8 +723,11 @@ FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextGenerateReactiveMask(
 {
     FFXM_RETURN_ON_ERROR(pContext != nullptr, FFXM_ERROR_INVALID_POINTER);
     FFXM_RETURN_ON_ERROR(pParams != nullptr, FFXM_ERROR_INVALID_POINTER);
+    FFXM_RETURN_ON_ERROR(pParams->commandList != nullptr, FFXM_ERROR_INVALID_POINTER);
 
     FfxmFsr3UpscalerContext_Private* contextPrivate = reinterpret_cast<FfxmFsr3UpscalerContext_Private*>(pContext);
+
+    FFXM_RETURN_ON_ERROR(contextPrivate->device != nullptr, FFXM_ERROR_NULL_DEVICE);
 
     // Stage GenerateReactive parameters into dedicated constant buffer slot 3
     Fsr3UpscalerGenerateReactiveConstants genReactiveConsts = {};
@@ -336,7 +741,9 @@ FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextGenerateReactiveMask(
         &genReactiveConsts,
         sizeof(genReactiveConsts));
 
-    return FFXM_OK;
+    // Milestone 2 boundary: GPU reactive mask generation pass is scheduled in Milestone 3.
+    // Return FFXM_ERROR_INCOMPLETE_INTERFACE to prevent reporting execution before GPU jobs are scheduled.
+    return FFXM_ERROR_INCOMPLETE_INTERFACE;
 }
 
 FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextDestroy(

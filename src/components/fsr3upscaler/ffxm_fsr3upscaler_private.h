@@ -26,6 +26,9 @@
 namespace arm
 {
 
+/// Number of internal GPU surfaces managed by FSR 3.1.4 upscaler.
+#define FFXM_FSR3UPSCALER_INTERNAL_SURFACE_COUNT 19
+
 /// An enumeration of all the permutations that can be passed to the FSR3 Upscaler algorithm.
 ///
 /// FSR3 Upscaler features are organized through a set of pre-defined compile
@@ -108,6 +111,9 @@ struct FfxmPipelineState;
 typedef struct FfxmFsr3UpscalerContext_Private {
     FfxmFsr3UpscalerContextDescription  contextDescription;
     FfxmUInt32                          effectContextId;
+    bool                                backendContextCreated;
+    uint32_t                            allocatedResourceCount;
+    uint32_t                            allocatedResourceIds[FFXM_FSR3UPSCALER_INTERNAL_SURFACE_COUNT];
     Fsr3UpscalerConstants               constants;
     FfxmDevice                          device;
     FfxmDeviceCapabilities              deviceCapabilities;
