@@ -133,7 +133,9 @@ namespace arm
 #define UPLOAD_JOB_COUNT               (16)
 
 // Off by default warnings
+#if defined(_MSC_VER)
 #pragma warning(disable : 4365 4710 4820 5039)
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -589,7 +591,7 @@ typedef struct FfxmViewDescription
     wchar_t name[64];
 } FfxmViewDescription;
 
-static FfxmViewDescription s_FfxmViewDescInit = { false, FFXM_RESOURCE_VIEW_DIMENSION_TEXTURE_2D, -1, -1, -1, L"" };
+static FfxmViewDescription s_FfxmViewDescInit = { false, FFXM_RESOURCE_VIEW_DIMENSION_TEXTURE_2D, {-1}, {-1}, -1, L"" };
 
 /// A structure defining a resource bind point
 ///
