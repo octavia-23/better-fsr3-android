@@ -355,7 +355,7 @@ typedef uint32_t FfxmVersionNumber;
 /// @retval
 /// FFXM_OK                              The operation completed successfully.
 /// @retval
-/// FFXM_ERROR_CODE_NULL_POINTER         The operation failed because either <c><i>pContext</i></c> or <c><i>pContextDescription</i></c> was <c><i>NULL</i></c>.
+/// FFXM_ERROR_INVALID_POINTER           The operation failed because either <c><i>pContext</i></c> or <c><i>pContextDescription</i></c> was <c><i>NULL</i></c>.
 /// @retval
 /// FFXM_ERROR_INCOMPLETE_INTERFACE      The operation failed because the <c><i>FfxmFsr3UpscalerContextDescription.backendInterface</i></c> was not fully specified.
 /// @retval
@@ -377,7 +377,7 @@ FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextCreate(
 /// @retval
 /// FFXM_OK                              The operation completed successfully.
 /// @retval
-/// FFXM_ERROR_CODE_NULL_POINTER         The operation failed because either <c><i>pContext</i></c> or <c><i>pSharedResources</i></c> was <c><i>NULL</i></c>.
+/// FFXM_ERROR_INVALID_POINTER           The operation failed because either <c><i>pContext</i></c> or <c><i>pSharedResources</i></c> was <c><i>NULL</i></c>.
 ///
 /// @ingroup ffxmFsr3Upscaler
 FFXM_API FfxmErrorCode ffxmFsr3UpscalerGetSharedResourceDescriptions(
@@ -397,7 +397,7 @@ FFXM_API FfxmErrorCode ffxmFsr3UpscalerGetSharedResourceDescriptions(
 /// @retval
 /// FFXM_OK                              The operation completed successfully.
 /// @retval
-/// FFXM_ERROR_CODE_NULL_POINTER         The operation failed because either <c><i>pContext</i></c> or <c><i>pDispatchDescription</i></c> was <c><i>NULL</i></c>.
+/// FFXM_ERROR_INVALID_POINTER           The operation failed because either <c><i>pContext</i></c> or <c><i>pDispatchDescription</i></c> was <c><i>NULL</i></c>.
 /// @retval
 /// FFXM_ERROR_OUT_OF_RANGE              The operation failed because <c><i>pDispatchDescription->renderSize</i></c> was larger than the maximum render resolution.
 /// @retval
@@ -418,7 +418,7 @@ FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextDispatch(
 /// @retval
 /// FFXM_OK                              The operation completed successfully.
 /// @retval
-/// FFXM_ERROR_CODE_NULL_POINTER         The operation failed because either <c><i>pContext</i></c> or <c><i>pParams</i></c> was <c><i>NULL</i></c>.
+/// FFXM_ERROR_INVALID_POINTER           The operation failed because either <c><i>pContext</i></c> or <c><i>pParams</i></c> was <c><i>NULL</i></c>.
 ///
 /// @ingroup ffxmFsr3Upscaler
 FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextGenerateReactiveMask(
@@ -434,7 +434,7 @@ FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextGenerateReactiveMask(
 /// @retval
 /// FFXM_OK                              The operation completed successfully.
 /// @retval
-/// FFXM_ERROR_CODE_NULL_POINTER         The operation failed because <c><i>pContext</i></c> was <c><i>NULL</i></c>.
+/// FFXM_ERROR_INVALID_POINTER           The operation failed because <c><i>pContext</i></c> was <c><i>NULL</i></c>.
 ///
 /// @ingroup ffxmFsr3Upscaler
 FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextDestroy(
@@ -551,7 +551,7 @@ FFXM_API FfxmVersionNumber ffxmFsr3UpscalerGetEffectVersion(void);
 /// @retval
 /// FFXM_ERROR_INVALID_ENUM              An invalid FfxmFsr3UpscalerConfigureKey was specified.
 /// @retval
-/// FFXM_ERROR_CODE_NULL_POINTER         <c><i>pContext</i></c> or <c><i>valuePtr</i></c> was NULL.
+/// FFXM_ERROR_INVALID_POINTER           <c><i>pContext</i></c> or <c><i>valuePtr</i></c> was NULL.
 ///
 /// @ingroup ffxmFsr3Upscaler
 FFXM_API FfxmErrorCode ffxmFsr3UpscalerSetConstant(

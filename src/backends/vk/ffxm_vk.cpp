@@ -311,7 +311,7 @@ FFXM_API size_t ffxmGetScratchMemorySizeVK(VkPhysicalDevice physicalDevice, size
     FfxmUInt32 resourceArraySize = FFXM_ALIGN_UP(maxContexts * FFXM_MAX_RESOURCE_COUNT * sizeof(BackendContext_VK::Resource), sizeof(FfxmUInt32));
     FfxmUInt32 contextArraySize = FFXM_ALIGN_UP(maxContexts * sizeof(BackendContext_VK::EffectContext), sizeof(FfxmUInt32));
 
-    return FFXM_ALIGN_UP(sizeof(BackendContext_VK) + extensionPropArraySize + gpuJobDescArraySize + resourceArraySize + ringBufferArraySize +
+    return FFXM_ALIGN_UP(sizeof(BackendContext_VK) + extensionPropArraySize + gpuJobDescArraySize + resourceViewArraySize + ringBufferArraySize +
         pipelineArraySize + resourceArraySize + contextArraySize, sizeof(uint64_t));
 }
 
@@ -983,6 +983,15 @@ FfxmErrorCode CreateBackendContextVK(FfxmInterface* backendInterface, FfxmUInt32
 
         // Map extension array
         backendContext->extensionProperties = (VkExtensionProperties*)pMem;
+        FfxmUInt32 numDeviceExtensions = 0;
+        if (vkDeviceContext->vkPhysicalDevice) {
+            vkEnumerateDeviceExtensionProperties(vkDeviceContext->vkPhysicalDevice, nullptr, &numDeviceExtensions, nullptr);
+        }
+        FfxmUInt32 extensionPropArraySize = sizeof(VkExtensionProperties) * numDeviceExtensions;
+        pMem += extensionPropArraySize;
+
+        // Bounds assertion after complete pointer carving
+        FFXM_ASSERT(static_cast<size_t>(pMem - (uint8_t*)backendContext) <= backendInterface->scratchBufferSize);
 
 
         // if vkGetDeviceProcAddr is NULL, use the one from the vulkan header

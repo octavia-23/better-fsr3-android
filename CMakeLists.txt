@@ -111,6 +111,7 @@ endif()
 set(SRC "${FFXM_SHARED_PATH}/ffxm_assert.cpp")
 list(APPEND SRC "${FFXM_SHARED_PATH}/ffxm_object_management.cpp")
 list(APPEND SRC "${FFXM_COMPONENTS_PATH}/fsr2/ffxm_fsr2.cpp")
+list(APPEND SRC "${FFXM_COMPONENTS_PATH}/fsr3upscaler/ffxm_fsr3upscaler.cpp")
 
 add_library(Arm_ASR_api ${SRC})
 
