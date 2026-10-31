@@ -130,6 +130,17 @@ FFXM_API FfxmResource ffxmGetResourceVK(void*  vkResource,
     wchar_t*                                ffxmResName,
     FfxmResourceStates                       state = FFXM_RESOURCE_STATE_COMPUTE_READ);
 
+/// Execute all queued GPU jobs recorded in the backend context.
+///
+/// @param [in] backendInterface           A pointer to a <c><i>FfxmInterface</i></c> structure.
+/// @param [in] commandList                The Vulkan command buffer wrapped in a <c><i>FfxmCommandList</i></c>.
+///
+/// @returns
+/// FFXM_OK on success, or the first error code encountered during execution.
+///
+/// @ingroup VKBackend
+FFXM_API FfxmErrorCode ExecuteGpuJobsVK(FfxmInterface* backendInterface, FfxmCommandList commandList);
+
 #if defined(__cplusplus)
 }
 #endif // #if defined(__cplusplus)

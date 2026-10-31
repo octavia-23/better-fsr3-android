@@ -76,7 +76,7 @@ FfxmErrorCode		   CreateComputePipelineVK(FfxmInterface* backendInterface, FfxmE
 FfxmErrorCode		   CreateGraphicsPipelineVK(FfxmInterface* backendInterface, FfxmEffect effect, FfxmPass passId, FfxmShaderQuality qualityPreset, FfxmUInt32 permutationOptions, const FfxmPipelineDescription* desc, FfxmUInt32 effectContextId, FfxmPipelineState* outPass);
 FfxmErrorCode           DestroyPipelineVK(FfxmInterface* backendInterface, FfxmPipelineState* pipeline, FfxmUInt32 effectContextId);
 FfxmErrorCode           ScheduleGpuJobVK(FfxmInterface* backendInterface, const FfxmGpuJobDescription* job);
-FfxmErrorCode           ExecuteGpuJobsVK(FfxmInterface* backendInterface, FfxmCommandList commandList);
+FFXM_API FfxmErrorCode  ExecuteGpuJobsVK(FfxmInterface* backendInterface, FfxmCommandList commandList);
 
 static VkDeviceContext sVkDeviceContext = { VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE };
 
@@ -3199,6 +3199,8 @@ FfxmErrorCode ScheduleGpuJobVK(FfxmInterface* backendInterface, const FfxmGpuJob
 static FfxmErrorCode executeGpuJobCompute(BackendContext_VK* backendContext, FfxmGpuJobDescription* job, VkCommandBuffer vkCommandBuffer)
 {
     BackendContext_VK::PipelineLayout* pipelineLayout = reinterpret_cast<BackendContext_VK::PipelineLayout*>(job->computeJobDescriptor.pipeline.rootSignature);
+    FFXM_RETURN_ON_ERROR(pipelineLayout != nullptr, FFXM_ERROR_INVALID_ARGUMENT);
+    FFXM_RETURN_ON_ERROR(job->computeJobDescriptor.pipeline.pipeline != 0, FFXM_ERROR_INVALID_ARGUMENT);
 
     // bind texture & buffer UAVs (note the binding order here MUST match the root signature mapping order from CreatePipeline!)
     FfxmUInt32               descriptorWriteIndex = 0;
@@ -3227,7 +3229,8 @@ static FfxmErrorCode executeGpuJobCompute(BackendContext_VK* backendContext, Ffx
         for (FfxmUInt32 uavEntry = 0; uavEntry < job->computeJobDescriptor.pipeline.uavTextureBindings[currentPipelineUavIndex].bindCount; ++uavEntry, ++imageDescriptorIndex, ++descriptorWriteIndex)
         {
             // source: UAV of resource to bind
-            const FfxmUInt32 resourceIndex = job->computeJobDescriptor.uavTextures[currentPipelineUavIndex].internalIndex;
+            const int32_t resourceIndex = job->computeJobDescriptor.uavTextures[currentPipelineUavIndex].internalIndex;
+            FFXM_RETURN_ON_ERROR(resourceIndex >= 0 && resourceIndex < FFXM_MAX_RESOURCE_COUNT, FFXM_ERROR_OUT_OF_RANGE);
             const FfxmUInt32 uavViewIndex = backendContext->pResources[resourceIndex].uavViewIndex + job->computeJobDescriptor.uavTextureMips[imageDescriptorIndex];
 
             writeDescriptorSets[descriptorWriteIndex] = {};
@@ -3251,7 +3254,8 @@ static FfxmErrorCode executeGpuJobCompute(BackendContext_VK* backendContext, Ffx
         addBarrier(backendContext, &job->computeJobDescriptor.uavBuffers[currentPipelineUavIndex], FFXM_RESOURCE_STATE_UNORDERED_ACCESS);
 
         // source: UAV of buffer to bind
-        const FfxmUInt32 resourceIndex = job->computeJobDescriptor.uavBuffers[currentPipelineUavIndex].internalIndex;
+        const int32_t resourceIndex = job->computeJobDescriptor.uavBuffers[currentPipelineUavIndex].internalIndex;
+        FFXM_RETURN_ON_ERROR(resourceIndex >= 0 && resourceIndex < FFXM_MAX_RESOURCE_COUNT, FFXM_ERROR_OUT_OF_RANGE);
 
         // where to bind it
         const FfxmUInt32 currentUavResourceIndex = job->computeJobDescriptor.pipeline.uavBufferBindings[currentPipelineUavIndex].slotIndex;
@@ -3292,7 +3296,8 @@ static FfxmErrorCode executeGpuJobCompute(BackendContext_VK* backendContext, Ffx
         {
             addBarrier(backendContext, &job->computeJobDescriptor.srvTextures[currentPipelineSrvIndex + i], FFXM_RESOURCE_STATE_COMPUTE_READ);
 
-            const FfxmUInt32 resourceIndex = job->computeJobDescriptor.srvTextures[currentPipelineSrvIndex + i].internalIndex;
+            const int32_t resourceIndex = job->computeJobDescriptor.srvTextures[currentPipelineSrvIndex + i].internalIndex;
+            FFXM_RETURN_ON_ERROR(resourceIndex >= 0 && resourceIndex < FFXM_MAX_RESOURCE_COUNT, FFXM_ERROR_OUT_OF_RANGE);
             const FfxmUInt32 srvViewIndex  = backendContext->pResources[resourceIndex].srvViewIndex;
 
             imageDescriptorInfos[imageDescriptorIndex]             = {};
@@ -3308,7 +3313,8 @@ static FfxmErrorCode executeGpuJobCompute(BackendContext_VK* backendContext, Ffx
         addBarrier(backendContext, &job->computeJobDescriptor.srvBuffers[currentPipelineSrvIndex], FFXM_RESOURCE_STATE_COMPUTE_READ);
 
         // source: SRV of buffer to bind
-        const FfxmUInt32 resourceIndex = job->computeJobDescriptor.srvBuffers[currentPipelineSrvIndex].internalIndex;
+        const int32_t resourceIndex = job->computeJobDescriptor.srvBuffers[currentPipelineSrvIndex].internalIndex;
+        FFXM_RETURN_ON_ERROR(resourceIndex >= 0 && resourceIndex < FFXM_MAX_RESOURCE_COUNT, FFXM_ERROR_OUT_OF_RANGE);
 
         // where to bind it
         const FfxmUInt32 currentSrvResourceIndex = job->computeJobDescriptor.pipeline.srvBufferBindings[currentPipelineSrvIndex].slotIndex;
@@ -3416,6 +3422,8 @@ static FfxmErrorCode executeGpuJobCompute(BackendContext_VK* backendContext, Ffx
 static FfxmErrorCode executeGpuJobFragment(BackendContext_VK* backendContext, FfxmGpuJobDescription* job, VkCommandBuffer vkCommandBuffer)
 {
     BackendContext_VK::PipelineLayout* pipelineLayout = reinterpret_cast<BackendContext_VK::PipelineLayout*>(job->fragmentJobDescription.pipeline->rootSignature);
+    FFXM_RETURN_ON_ERROR(pipelineLayout != nullptr, FFXM_ERROR_INVALID_ARGUMENT);
+    FFXM_RETURN_ON_ERROR(job->fragmentJobDescription.pipeline->pipeline != 0, FFXM_ERROR_INVALID_ARGUMENT);
 
     // bind texture & buffer UAVs (note the binding order here MUST match the root signature mapping order from CreatePipeline!)
     FfxmUInt32               descriptorWriteIndex = 0;
@@ -3599,6 +3607,11 @@ static FfxmErrorCode executeGpuJobFragment(BackendContext_VK* backendContext, Ff
 
 static FfxmErrorCode executeGpuJobCopy(BackendContext_VK* backendContext, FfxmGpuJobDescription* job, VkCommandBuffer vkCommandBuffer)
 {
+    int32_t srcIdx = job->copyJobDescriptor.src.internalIndex;
+    int32_t dstIdx = job->copyJobDescriptor.dst.internalIndex;
+    FFXM_RETURN_ON_ERROR(srcIdx >= 0 && srcIdx < FFXM_MAX_RESOURCE_COUNT, FFXM_ERROR_OUT_OF_RANGE);
+    FFXM_RETURN_ON_ERROR(dstIdx >= 0 && dstIdx < FFXM_MAX_RESOURCE_COUNT, FFXM_ERROR_OUT_OF_RANGE);
+
     BackendContext_VK::Resource ffxmResourceSrc = backendContext->pResources[job->copyJobDescriptor.src.internalIndex];
     BackendContext_VK::Resource ffxmResourceDst = backendContext->pResources[job->copyJobDescriptor.dst.internalIndex];
 
@@ -3712,7 +3725,8 @@ static FfxmErrorCode executeGpuJobCopy(BackendContext_VK* backendContext, FfxmGp
 
 static FfxmErrorCode executeGpuJobClearFloat(BackendContext_VK* backendContext, FfxmGpuJobDescription* job, VkCommandBuffer vkCommandBuffer)
 {
-    FfxmUInt32 idx = job->clearJobDescriptor.target.internalIndex;
+    int32_t idx = job->clearJobDescriptor.target.internalIndex;
+    FFXM_RETURN_ON_ERROR(idx >= 0 && idx < FFXM_MAX_RESOURCE_COUNT, FFXM_ERROR_OUT_OF_RANGE);
     BackendContext_VK::Resource ffxmResource = backendContext->pResources[idx];
 
     if (ffxmResource.resourceDescription.type == FFXM_RESOURCE_TYPE_BUFFER)
@@ -3751,53 +3765,64 @@ static FfxmErrorCode executeGpuJobClearFloat(BackendContext_VK* backendContext, 
     return FFXM_OK;
 }
 
-FfxmErrorCode ExecuteGpuJobsVK(FfxmInterface* backendInterface, FfxmCommandList commandList)
+FFXM_API FfxmErrorCode ExecuteGpuJobsVK(FfxmInterface* backendInterface, FfxmCommandList commandList)
 {
-    FFXM_ASSERT(NULL != backendInterface);
+    FFXM_RETURN_ON_ERROR(backendInterface != NULL, FFXM_ERROR_INVALID_POINTER);
     BackendContext_VK* backendContext = (BackendContext_VK*)backendInterface->scratchBuffer;
+    FFXM_RETURN_ON_ERROR(backendContext != NULL, FFXM_ERROR_INVALID_POINTER);
 
-    FfxmErrorCode errorCode = FFXM_OK;
+    if (backendContext->gpuJobCount > 0 && commandList == NULL)
+    {
+        backendContext->gpuJobCount = 0;
+        return FFXM_ERROR_INVALID_POINTER;
+    }
+
+    FfxmErrorCode firstErrorCode = FFXM_OK;
 
     // execute all renderjobs
     for (FfxmUInt32 i = 0; i < backendContext->gpuJobCount; ++i)
     {
         FfxmGpuJobDescription* gpuJob = &backendContext->pGpuJobs[i];
         VkCommandBuffer vkCommandBuffer = reinterpret_cast<VkCommandBuffer>(commandList);
+        FfxmErrorCode jobError = FFXM_OK;
 
         switch (gpuJob->jobType)
         {
         case FFXM_GPU_JOB_CLEAR_FLOAT:
         {
-            errorCode = executeGpuJobClearFloat(backendContext, gpuJob, vkCommandBuffer);
+            jobError = executeGpuJobClearFloat(backendContext, gpuJob, vkCommandBuffer);
             break;
         }
         case FFXM_GPU_JOB_COPY:
         {
-            errorCode = executeGpuJobCopy(backendContext, gpuJob, vkCommandBuffer);
+            jobError = executeGpuJobCopy(backendContext, gpuJob, vkCommandBuffer);
             break;
         }
         case FFXM_GPU_JOB_COMPUTE:
         {
-            errorCode = executeGpuJobCompute(backendContext, gpuJob, vkCommandBuffer);
+            jobError = executeGpuJobCompute(backendContext, gpuJob, vkCommandBuffer);
             break;
         }
         case FFXM_GPU_JOB_FRAGMENT:
         {
-            errorCode = executeGpuJobFragment(backendContext, gpuJob, vkCommandBuffer);
+            jobError = executeGpuJobFragment(backendContext, gpuJob, vkCommandBuffer);
             break;
         }
-        default:;
+        default:
+            jobError = FFXM_ERROR_INVALID_ENUM;
+            break;
+        }
+
+        if (jobError != FFXM_OK)
+        {
+            firstErrorCode = jobError;
+            break;
         }
     }
 
     backendContext->gpuJobCount = 0;
 
-    // check the execute function returned cleanly.
-    FFXM_RETURN_ON_ERROR(
-        errorCode == FFXM_OK,
-        FFXM_ERROR_BACKEND_API_ERROR);
-
-    return FFXM_OK;
+    return firstErrorCode;
 }
 
 } // namespace arm

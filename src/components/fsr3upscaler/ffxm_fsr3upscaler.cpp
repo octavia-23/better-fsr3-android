@@ -340,6 +340,10 @@ FfxmErrorCode fsr3UpscalerDestroy(FfxmFsr3UpscalerContext_Private* context)
         backendInterface->fpDestroyPipeline(backendInterface, &context->pipelineLumaPyramid, context->effectContextId);
         memset(&context->pipelineLumaPyramid, 0, sizeof(context->pipelineLumaPyramid));
     }
+    if (context->pipelineShadingChangePyramid.pipeline != nullptr && backendInterface->fpDestroyPipeline != nullptr) {
+        backendInterface->fpDestroyPipeline(backendInterface, &context->pipelineShadingChangePyramid, context->effectContextId);
+        memset(&context->pipelineShadingChangePyramid, 0, sizeof(context->pipelineShadingChangePyramid));
+    }
 
     // 1. Release copy staging resources for surfaces created with initial data
     if (backendInterface->fpDestroyResource != nullptr) {
@@ -851,6 +855,26 @@ FfxmErrorCode fsr3UpscalerCreate(
         return pipelineErr;
     }
 
+    // Create compute pipeline for Compute Shading Change Pyramid pass
+    wcscpy(pipelineDescription.name, L"FSR3-SHADING-CHANGE-PYRAMID");
+    pipelineErr = context->contextDescription.backendInterface.fpCreateComputePipeline(
+        &context->contextDescription.backendInterface,
+        FFXM_EFFECT_FSR3UPSCALER,
+        FFXM_FSR3UPSCALER_PASS_SHADING_CHANGE_PYRAMID,
+        0,
+        getPipelinePermutationFlags(contextDescription->flags, FFXM_FSR3UPSCALER_PASS_SHADING_CHANGE_PYRAMID, supportedFP16, canForceWave64, useLut),
+        &pipelineDescription,
+        context->effectContextId,
+        &context->pipelineShadingChangePyramid);
+    if (pipelineErr != FFXM_OK) {
+        return pipelineErr;
+    }
+
+    pipelineErr = patchResourceBindings(&context->pipelineShadingChangePyramid);
+    if (pipelineErr != FFXM_OK) {
+        return pipelineErr;
+    }
+
     return FFXM_OK;
 }
 
@@ -1050,6 +1074,23 @@ FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextDispatch(
     luminancePyramidConstants.renderSize[0] = pDispatchDescription->renderSize.width;
     luminancePyramidConstants.renderSize[1] = pDispatchDescription->renderSize.height;
 
+    // Half-resolution SPD constants setup for Shading Change Pyramid
+    const uint32_t halfRenderWidth = (pDispatchDescription->renderSize.width + 1) / 2;
+    const uint32_t halfRenderHeight = (pDispatchDescription->renderSize.height + 1) / 2;
+    uint32_t dispatchShadingThreadGroupCountXY[2];
+    uint32_t workGroupOffsetShading[2];
+    uint32_t numWorkGroupsAndMipsShading[2];
+    uint32_t rectInfoShading[4] = { 0, 0, halfRenderWidth, halfRenderHeight };
+    ffxSpdSetup(dispatchShadingThreadGroupCountXY, workGroupOffsetShading, numWorkGroupsAndMipsShading, rectInfoShading);
+
+    Fsr3UpscalerSpdConstants shadingChangePyramidConstants;
+    shadingChangePyramidConstants.mips = numWorkGroupsAndMipsShading[1];
+    shadingChangePyramidConstants.numWorkGroups = numWorkGroupsAndMipsShading[0];
+    shadingChangePyramidConstants.workGroupOffset[0] = workGroupOffsetShading[0];
+    shadingChangePyramidConstants.workGroupOffset[1] = workGroupOffsetShading[1];
+    shadingChangePyramidConstants.renderSize[0] = halfRenderWidth;
+    shadingChangePyramidConstants.renderSize[1] = halfRenderHeight;
+
     // RCAS sharpening constants
     Fsr3UpscalerRcasConstants rcasConsts = {};
     const float sharpnessRemapped = (-2.0f * pDispatchDescription->sharpness) + 2.0f;
@@ -1102,6 +1143,23 @@ FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextDispatch(
     }
 
     if (dispatchResult == FFXM_OK) {
+        // Route exposure resource: if external exposure provided, register it; otherwise alias to default exposure
+        if (pDispatchDescription->exposure.resource != nullptr) {
+            FfxmErrorCode expRes = contextPrivate->contextDescription.backendInterface.fpRegisterResource(
+                &contextPrivate->contextDescription.backendInterface,
+                &pDispatchDescription->exposure,
+                contextPrivate->effectContextId,
+                &contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_EXPOSURE]);
+            if (expRes != FFXM_OK) {
+                dispatchResult = expRes;
+            } else {
+                registeredCount++;
+            }
+        } else {
+            contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_EXPOSURE] =
+                contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_DEFAULT_EXPOSURE];
+        }
+
         // Ping-pong & aliasable resource routing
         const bool isOddFrame = !!(contextPrivate->resourceFrameIndex & 1);
         const uint32_t currentLumaResourceIndex = isOddFrame
@@ -1218,7 +1276,30 @@ FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextDispatch(
 
         // Schedule Compute Luminance Pyramid compute pass
         if (dispatchResult == FFXM_OK) {
+            stageConstantBuffer(
+                &contextPrivate->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_SPD],
+                &luminancePyramidConstants,
+                sizeof(luminancePyramidConstants));
             dispatchResult = scheduleDispatch(contextPrivate, pDispatchDescription, &contextPrivate->pipelineLumaPyramid, dispatchThreadGroupCountXY[0], dispatchThreadGroupCountXY[1]);
+        }
+
+        // Schedule Compute Shading Change Pyramid compute pass
+        if (dispatchResult == FFXM_OK) {
+            // Reset SPD atomic counter before second SPD downsampling pass
+            FfxmGpuJobDescription clearSpdAtomicJob = { FFXM_GPU_JOB_CLEAR_FLOAT };
+            const float clearZeroValue[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+            memcpy(clearSpdAtomicJob.clearJobDescriptor.color, clearZeroValue, 4 * sizeof(float));
+            clearSpdAtomicJob.clearJobDescriptor.target = contextPrivate->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_SPD_ATOMIC_COUNT];
+            dispatchResult = contextPrivate->contextDescription.backendInterface.fpScheduleGpuJob(
+                &contextPrivate->contextDescription.backendInterface, &clearSpdAtomicJob);
+
+            if (dispatchResult == FFXM_OK) {
+                stageConstantBuffer(
+                    &contextPrivate->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_SPD],
+                    &shadingChangePyramidConstants,
+                    sizeof(shadingChangePyramidConstants));
+                dispatchResult = scheduleDispatch(contextPrivate, pDispatchDescription, &contextPrivate->pipelineShadingChangePyramid, dispatchShadingThreadGroupCountXY[0], dispatchShadingThreadGroupCountXY[1]);
+            }
         }
 
         // Execute scheduled GPU jobs only if all jobs scheduled successfully
@@ -1249,6 +1330,7 @@ FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextDispatch(
                 contextPrivate->uavResources[registrations[i].uavIdentifier].internalIndex = -1;
             }
         }
+        contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_EXPOSURE].internalIndex = -1;
     }
 
     // Only advance frame state and clear firstExecution on completely successful execution

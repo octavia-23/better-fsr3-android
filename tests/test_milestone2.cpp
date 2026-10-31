@@ -368,7 +368,7 @@ static FfxmErrorCode MockCreatePipeline(
     FfxmShaderBlob shaderBlob = {};
     FfxmErrorCode err = arm::ffxmGetPermutationBlobByIndex(effect, pass, permutationOptions, &shaderBlob);
     if (err == FFXM_OK && shaderBlob.data != nullptr) {
-        outPipeline->pipeline = reinterpret_cast<FfxmPipeline>(static_cast<uintptr_t>(0x1234));
+        outPipeline->pipeline = reinterpret_cast<FfxmPipeline>(static_cast<uintptr_t>(0x1000 + s_CreatePipelineCallCount * 0x100));
         outPipeline->srvTextureCount = shaderBlob.srvTextureCount;
         for (uint32_t i = 0; i < shaderBlob.srvTextureCount; ++i) {
             outPipeline->srvTextureBindings[i].slotIndex = shaderBlob.boundSRVTextures[i];
@@ -391,7 +391,7 @@ static FfxmErrorCode MockCreatePipeline(
             ffxmWidenAscii(outPipeline->constantBufferBindings[i].name, shaderBlob.boundConstantBufferNames[i]);
         }
     } else {
-        outPipeline->pipeline = reinterpret_cast<FfxmPipeline>(static_cast<uintptr_t>(0x5678));
+        outPipeline->pipeline = reinterpret_cast<FfxmPipeline>(static_cast<uintptr_t>(0x5000 + s_CreatePipelineCallCount * 0x100));
     }
 
     return FFXM_OK;
@@ -953,11 +953,13 @@ void TestConstantBufferStagingSlots()
     TEST_CHECK(memcmp(priv->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_FSR3UPSCALER].data,
         &priv->constants, sizeof(Fsr3UpscalerConstants)) == 0);
 
-    // Verify Slot 1 (SPD) - computed via ffxSpdSetup
+    // Verify Slot 1 (SPD) - computed via ffxSpdSetup for half-resolution Shading Change Pyramid
     uint32_t expDispatchThreadGroupCountXY[2];
     uint32_t expWorkGroupOffset[2];
     uint32_t expNumWorkGroupsAndMips[2];
-    uint32_t expRectInfo[4] = { 0, 0, 1280, 720 };
+    const uint32_t expHalfRenderW = (1280 + 1) / 2;
+    const uint32_t expHalfRenderH = (720 + 1) / 2;
+    uint32_t expRectInfo[4] = { 0, 0, expHalfRenderW, expHalfRenderH };
     ffxSpdSetup(expDispatchThreadGroupCountXY, expWorkGroupOffset, expNumWorkGroupsAndMips, expRectInfo);
 
     Fsr3UpscalerSpdConstants expectedSpd = {};
@@ -965,8 +967,8 @@ void TestConstantBufferStagingSlots()
     expectedSpd.numWorkGroups = expNumWorkGroupsAndMips[0];
     expectedSpd.workGroupOffset[0] = expWorkGroupOffset[0];
     expectedSpd.workGroupOffset[1] = expWorkGroupOffset[1];
-    expectedSpd.renderSize[0] = 1280;
-    expectedSpd.renderSize[1] = 720;
+    expectedSpd.renderSize[0] = expHalfRenderW;
+    expectedSpd.renderSize[1] = expHalfRenderH;
 
     TEST_CHECK(priv->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_SPD].num32BitEntries == 6);
     TEST_CHECK(memcmp(priv->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_SPD].data,
@@ -1499,7 +1501,7 @@ void TestM3PrepareInputsPassExecution()
     SetupMockInterface(&desc.backendInterface);
 
     TEST_CHECK(ffxmFsr3UpscalerContextCreate(&context, &desc) == FFXM_OK);
-    TEST_CHECK(s_CreatePipelineCallCount == 2);
+    TEST_CHECK(s_CreatePipelineCallCount == 3);
 
     FfxmFsr3UpscalerContext_Private* priv = reinterpret_cast<FfxmFsr3UpscalerContext_Private*>(&context);
     TEST_CHECK(priv->pipelinePrepareInputs.pipeline != nullptr);
@@ -1536,6 +1538,28 @@ void TestM3PrepareInputsPassExecution()
 
     TEST_CHECK(priv->pipelineLumaPyramid.constantBufferBindings[0].resourceIdentifier == FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_FSR3UPSCALER);
     TEST_CHECK(priv->pipelineLumaPyramid.constantBufferBindings[1].resourceIdentifier == FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_SPD);
+
+    // Verify ShadingChangePyramid pipeline
+    TEST_CHECK(priv->pipelineShadingChangePyramid.pipeline != nullptr);
+    TEST_CHECK(priv->pipelineShadingChangePyramid.srvTextureCount == 4);
+    TEST_CHECK(priv->pipelineShadingChangePyramid.uavTextureCount == 7);
+    TEST_CHECK(priv->pipelineShadingChangePyramid.constCount == 2);
+
+    TEST_CHECK(priv->pipelineShadingChangePyramid.srvTextureBindings[0].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_CURRENT_LUMA);
+    TEST_CHECK(priv->pipelineShadingChangePyramid.srvTextureBindings[1].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_PREVIOUS_LUMA);
+    TEST_CHECK(priv->pipelineShadingChangePyramid.srvTextureBindings[2].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_MOTION_VECTORS);
+    TEST_CHECK(priv->pipelineShadingChangePyramid.srvTextureBindings[3].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_EXPOSURE);
+
+    TEST_CHECK(priv->pipelineShadingChangePyramid.uavTextureBindings[0].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_SPD_ATOMIC_COUNT);
+    TEST_CHECK(priv->pipelineShadingChangePyramid.uavTextureBindings[1].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_SPD_MIPS_LEVEL_0);
+    TEST_CHECK(priv->pipelineShadingChangePyramid.uavTextureBindings[2].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_SPD_MIPS_LEVEL_1);
+    TEST_CHECK(priv->pipelineShadingChangePyramid.uavTextureBindings[3].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_SPD_MIPS_LEVEL_2);
+    TEST_CHECK(priv->pipelineShadingChangePyramid.uavTextureBindings[4].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_SPD_MIPS_LEVEL_3);
+    TEST_CHECK(priv->pipelineShadingChangePyramid.uavTextureBindings[5].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_SPD_MIPS_LEVEL_4);
+    TEST_CHECK(priv->pipelineShadingChangePyramid.uavTextureBindings[6].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_SPD_MIPS_LEVEL_5);
+
+    TEST_CHECK(priv->pipelineShadingChangePyramid.constantBufferBindings[0].resourceIdentifier == FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_FSR3UPSCALER);
+    TEST_CHECK(priv->pipelineShadingChangePyramid.constantBufferBindings[1].resourceIdentifier == FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_SPD);
 
     // 3. Dispatch a real frame
     FfxmCommandList dummyCmdList = reinterpret_cast<FfxmCommandList>(0xABCD);
@@ -1578,7 +1602,9 @@ void TestM3PrepareInputsPassExecution()
     // 3: Clear Float for SPD_MIPS
     // 4: Compute dispatch for PrepareInputs
     // 5: Compute dispatch for LumaPyramid
-    TEST_CHECK(s_ScheduledGpuJobs.size() == 6);
+    // 6: Clear Float for SPD_ATOMIC_COUNT (reset before Shading Change SPD)
+    // 7: Compute dispatch for ShadingChangePyramid
+    TEST_CHECK(s_ScheduledGpuJobs.size() == 8);
 
     // Check clear jobs
     TEST_CHECK(s_ScheduledGpuJobs[0].jobType == FFXM_GPU_JOB_CLEAR_FLOAT);
@@ -1631,6 +1657,36 @@ void TestM3PrepareInputsPassExecution()
     TEST_CHECK(lumaJob.computeJobDescriptor.cbs[0].num32BitEntries == sizeof(Fsr3UpscalerConstants) / sizeof(uint32_t));
     TEST_CHECK(lumaJob.computeJobDescriptor.cbs[1].num32BitEntries == sizeof(Fsr3UpscalerSpdConstants) / sizeof(uint32_t));
 
+    // Check atomic counter clear job between SPD passes
+    TEST_CHECK(s_ScheduledGpuJobs[6].jobType == FFXM_GPU_JOB_CLEAR_FLOAT);
+
+    // Check compute dispatch job for ShadingChangePyramid
+    const FfxmGpuJobDescription& shadingJob = s_ScheduledGpuJobs[7];
+    TEST_CHECK(shadingJob.jobType == FFXM_GPU_JOB_COMPUTE);
+    // Half-res SPD dispatch dimensions: (960 + 63) / 64 = 15, (540 + 63) / 64 = 9, 1
+    TEST_CHECK(shadingJob.computeJobDescriptor.dimensions[0] == 15);
+    TEST_CHECK(shadingJob.computeJobDescriptor.dimensions[1] == 9);
+    TEST_CHECK(shadingJob.computeJobDescriptor.dimensions[2] == 1);
+
+    // Verify SRVs in ShadingChangePyramid compute job (4 SRVs)
+    TEST_CHECK(shadingJob.computeJobDescriptor.srvTextures[0].internalIndex != -1);
+    TEST_CHECK(shadingJob.computeJobDescriptor.srvTextures[1].internalIndex != -1);
+    TEST_CHECK(shadingJob.computeJobDescriptor.srvTextures[2].internalIndex != -1);
+    TEST_CHECK(shadingJob.computeJobDescriptor.srvTextures[3].internalIndex != -1);
+
+    // Verify UAVs in ShadingChangePyramid compute job (7 UAVs)
+    for (uint32_t u = 0; u < 7; ++u) {
+        TEST_CHECK(shadingJob.computeJobDescriptor.uavTextures[u].internalIndex != -1);
+    }
+
+    // Verify Constant Buffers in ShadingChangePyramid compute job
+    TEST_CHECK(shadingJob.computeJobDescriptor.cbs[0].num32BitEntries == sizeof(Fsr3UpscalerConstants) / sizeof(uint32_t));
+    TEST_CHECK(shadingJob.computeJobDescriptor.cbs[1].num32BitEntries == sizeof(Fsr3UpscalerSpdConstants) / sizeof(uint32_t));
+    const Fsr3UpscalerSpdConstants* shadingSpd = reinterpret_cast<const Fsr3UpscalerSpdConstants*>(shadingJob.computeJobDescriptor.cbs[1].data);
+    TEST_CHECK(shadingSpd->numWorkGroups == 135);
+    TEST_CHECK(shadingSpd->renderSize[0] == 960);
+    TEST_CHECK(shadingSpd->renderSize[1] == 540);
+
     // Verify execution and cleanup calls
     TEST_CHECK(s_ExecuteGpuJobsCallCount == 1);
     TEST_CHECK(s_UnregisterResourcesCallCount == 1);
@@ -1639,14 +1695,14 @@ void TestM3PrepareInputsPassExecution()
     FfxmFsr3UpscalerDispatchDescription dispDesc2 = dispDesc;
     s_ScheduledGpuJobs.clear();
     TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, &dispDesc2) == FFXM_OK);
-    // Frame 2 has no history reset, so 5 jobs scheduled (3 clears + 2 compute)
-    TEST_CHECK(s_ScheduledGpuJobs.size() == 5);
+    // Frame 2 has no history reset, so 7 jobs scheduled (3 clears + 1 prepare inputs + 1 luma pyramid + 1 atomic clear + 1 shading change pyramid)
+    TEST_CHECK(s_ScheduledGpuJobs.size() == 7);
     TEST_CHECK(priv->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_CURRENT_LUMA].internalIndex ==
         priv->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_2].internalIndex);
 
     // 5. Test clean destruction
     TEST_CHECK(ffxmFsr3UpscalerContextDestroy(&context) == FFXM_OK);
-    TEST_CHECK(s_DestroyPipelineCallCount >= 1);
+    TEST_CHECK(s_DestroyPipelineCallCount >= 3);
     VerifyOccurrenceAwareResourceBalance();
 
     // 6. Test pipeline creation failure rollback
@@ -1801,7 +1857,7 @@ static void TestM3DispatchErrorHandling()
         FfxmErrorCode err = ffxmFsr3UpscalerContextDispatch(&context, &dispDesc);
         TEST_CHECK(err == FFXM_ERROR_BACKEND_API_ERROR);
         TEST_CHECK(s_RegisterResourceCallCount == 6);
-        TEST_CHECK(s_ScheduleGpuJobCallCount == 6);
+        TEST_CHECK(s_ScheduleGpuJobCallCount == 8);
         TEST_CHECK(s_ExecuteGpuJobsCallCount == 1);
         TEST_CHECK(s_UnregisterResourcesCallCount == 1);
         TEST_CHECK(priv->resourceFrameIndex == 0);
@@ -1845,7 +1901,7 @@ static void TestM3DispatchErrorHandling()
         FfxmErrorCode err = ffxmFsr3UpscalerContextDispatch(&context, &dispDesc);
         TEST_CHECK(err == FFXM_OK);
         TEST_CHECK(s_RegisterResourceCallCount == 6);
-        TEST_CHECK(s_ScheduleGpuJobCallCount == 6);
+        TEST_CHECK(s_ScheduleGpuJobCallCount == 8);
         TEST_CHECK(s_ExecuteGpuJobsCallCount == 1);
         TEST_CHECK(s_UnregisterResourcesCallCount == 1);
         TEST_CHECK(priv->resourceFrameIndex == 1);
@@ -1886,7 +1942,7 @@ static void TestM3ComputeLuminancePyramid()
     // 2. Context creation & SPD Constant Buffer setup verification
     FfxmFsr3UpscalerContext context;
     FfxmFsr3UpscalerContextDescription desc = {};
-    desc.maxRenderSize = { 1920, 1080 };
+    desc.maxRenderSize = { 2560, 1440 };
     desc.maxUpscaleSize = { 3840, 2160 };
     desc.flags = FFXM_FSR3UPSCALER_ENABLE_AUTO_EXPOSURE;
     SetupMockInterface(&desc.backendInterface);
@@ -1924,37 +1980,236 @@ static void TestM3ComputeLuminancePyramid()
     // dispatchThreadGroupCountXY[0] = (1920 + 63) / 64 = 30
     // dispatchThreadGroupCountXY[1] = (1080 + 63) / 64 = 17
     // numWorkGroups = 30 * 17 = 510
-    const Fsr3UpscalerSpdConstants* spdData = reinterpret_cast<const Fsr3UpscalerSpdConstants*>(
-        priv->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_SPD].data);
-    TEST_CHECK(spdData != nullptr);
-    TEST_CHECK(spdData->numWorkGroups == 510);
-    TEST_CHECK(spdData->renderSize[0] == 1920);
-    TEST_CHECK(spdData->renderSize[1] == 1080);
-    TEST_CHECK(spdData->workGroupOffset[0] == 0);
-    TEST_CHECK(spdData->workGroupOffset[1] == 0);
+    const FfxmGpuJobDescription* lumaJob1080 = nullptr;
+    for (const auto& job : s_ScheduledGpuJobs) {
+        if (job.jobType == FFXM_GPU_JOB_COMPUTE &&
+            job.computeJobDescriptor.pipeline.pipeline == priv->pipelineLumaPyramid.pipeline) {
+            lumaJob1080 = &job;
+            break;
+        }
+    }
+    TEST_REQUIRE(lumaJob1080 != nullptr);
+    TEST_CHECK(lumaJob1080->computeJobDescriptor.dimensions[0] == 30);
+    TEST_CHECK(lumaJob1080->computeJobDescriptor.dimensions[1] == 17);
+    TEST_CHECK(lumaJob1080->computeJobDescriptor.dimensions[2] == 1);
+
+    const Fsr3UpscalerSpdConstants* spdData1080 = reinterpret_cast<const Fsr3UpscalerSpdConstants*>(
+        lumaJob1080->computeJobDescriptor.cbs[1].data);
+    TEST_CHECK(spdData1080 != nullptr);
+    TEST_CHECK(spdData1080->numWorkGroups == 510);
+    TEST_CHECK(spdData1080->renderSize[0] == 1920);
+    TEST_CHECK(spdData1080->renderSize[1] == 1080);
+    TEST_CHECK(spdData1080->workGroupOffset[0] == 0);
+    TEST_CHECK(spdData1080->workGroupOffset[1] == 0);
 
     // 4. Test dispatch for different render resolution (1280x720)
     dispDesc.renderSize = { 1280, 720 };
     s_ScheduledGpuJobs.clear();
     TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, &dispDesc) == FFXM_OK);
-    // (1280 + 63)/64 = 20, (720 + 63)/64 = 12, numWorkGroups = 240
-    TEST_CHECK(spdData->numWorkGroups == 240);
-    TEST_CHECK(spdData->renderSize[0] == 1280);
-    TEST_CHECK(spdData->renderSize[1] == 720);
 
-    // Verify LumaPyramid compute job dimensions for 1280x720
-    const FfxmGpuJobDescription& lumaJob720 = s_ScheduledGpuJobs.back();
-    TEST_CHECK(lumaJob720.jobType == FFXM_GPU_JOB_COMPUTE);
-    TEST_CHECK(lumaJob720.computeJobDescriptor.dimensions[0] == 20);
-    TEST_CHECK(lumaJob720.computeJobDescriptor.dimensions[1] == 12);
-    TEST_CHECK(lumaJob720.computeJobDescriptor.dimensions[2] == 1);
+    const FfxmGpuJobDescription* lumaJob720 = nullptr;
+    for (const auto& job : s_ScheduledGpuJobs) {
+        if (job.jobType == FFXM_GPU_JOB_COMPUTE &&
+            job.computeJobDescriptor.pipeline.pipeline == priv->pipelineLumaPyramid.pipeline) {
+            lumaJob720 = &job;
+            break;
+        }
+    }
+    TEST_REQUIRE(lumaJob720 != nullptr);
+    TEST_CHECK(lumaJob720->computeJobDescriptor.dimensions[0] == 20);
+    TEST_CHECK(lumaJob720->computeJobDescriptor.dimensions[1] == 12);
+    TEST_CHECK(lumaJob720->computeJobDescriptor.dimensions[2] == 1);
+
+    const Fsr3UpscalerSpdConstants* spdData720 = reinterpret_cast<const Fsr3UpscalerSpdConstants*>(
+        lumaJob720->computeJobDescriptor.cbs[1].data);
+    TEST_CHECK(spdData720 != nullptr);
+    TEST_CHECK(spdData720->numWorkGroups == 240);
+    TEST_CHECK(spdData720->renderSize[0] == 1280);
+    TEST_CHECK(spdData720->renderSize[1] == 720);
 
     // 5. Clean destroy
     TEST_CHECK(ffxmFsr3UpscalerContextDestroy(&context) == FFXM_OK);
-    TEST_CHECK(s_DestroyPipelineCallCount >= 2);
+    TEST_CHECK(s_DestroyPipelineCallCount >= 3);
     VerifyOccurrenceAwareResourceBalance();
 
     std::cout << "PASS: M3 Compute Luminance Pyramid stage and SPD verification verified." << std::endl;
+}
+
+static void TestM3ComputeShadingChangePyramid()
+{
+    std::cout << "--- Test 20: M3 Compute Shading Change Pyramid Stage Verification ---" << std::endl;
+
+    // 1. Verify shader permutations via accessor
+    FfxmShaderBlob blobDefault = {};
+    TEST_CHECK(arm::ffxmGetPermutationBlobByIndex(FFXM_EFFECT_FSR3UPSCALER, FFXM_FSR3UPSCALER_PASS_SHADING_CHANGE_PYRAMID,
+        0, &blobDefault) == FFXM_OK);
+    TEST_CHECK(blobDefault.data != nullptr);
+    TEST_CHECK(blobDefault.size > 0);
+    TEST_CHECK(blobDefault.srvTextureCount == 4);
+    TEST_CHECK(blobDefault.uavTextureCount == 7);
+    TEST_CHECK(blobDefault.cbvCount == 2);
+
+    // Verify reflection names and bindings
+    TEST_CHECK(blobDefault.boundSRVTextures[0] == 0); // r_current_luma
+    TEST_CHECK(blobDefault.boundSRVTextures[1] == 1); // r_previous_luma
+    TEST_CHECK(blobDefault.boundSRVTextures[2] == 2); // r_dilated_motion_vectors
+    TEST_CHECK(blobDefault.boundSRVTextures[3] == 3); // r_input_exposure
+
+    TEST_CHECK(blobDefault.boundUAVTextures[0] == 4);  // rw_spd_global_atomic
+    TEST_CHECK(blobDefault.boundUAVTextures[1] == 5);  // rw_spd_mip0
+    TEST_CHECK(blobDefault.boundUAVTextures[2] == 6);  // rw_spd_mip1
+    TEST_CHECK(blobDefault.boundUAVTextures[3] == 7);  // rw_spd_mip2
+    TEST_CHECK(blobDefault.boundUAVTextures[4] == 8);  // rw_spd_mip3
+    TEST_CHECK(blobDefault.boundUAVTextures[5] == 9);  // rw_spd_mip4
+    TEST_CHECK(blobDefault.boundUAVTextures[6] == 10); // rw_spd_mip5
+
+    TEST_CHECK(blobDefault.boundConstantBuffers[0] == 11); // cbFSR3Upscaler
+    TEST_CHECK(blobDefault.boundConstantBuffers[1] == 12); // cbSPD
+
+    // 2. Context creation & SPD Constant Buffer setup verification
+    FfxmFsr3UpscalerContext context;
+    FfxmFsr3UpscalerContextDescription desc = {};
+    desc.maxRenderSize = { 2560, 1440 };
+    desc.maxUpscaleSize = { 3840, 2160 };
+    desc.flags = FFXM_FSR3UPSCALER_ENABLE_AUTO_EXPOSURE;
+    SetupMockInterface(&desc.backendInterface);
+
+    TEST_CHECK(ffxmFsr3UpscalerContextCreate(&context, &desc) == FFXM_OK);
+
+    FfxmFsr3UpscalerContext_Private* priv = reinterpret_cast<FfxmFsr3UpscalerContext_Private*>(&context);
+    TEST_CHECK(priv->pipelineShadingChangePyramid.pipeline != nullptr);
+
+    // 3. Dispatch and check SPD constants calculation for half-resolution render dimensions across resolutions
+    FfxmCommandList dummyCmdList = reinterpret_cast<FfxmCommandList>(0xABCD);
+    FfxmFsr3UpscalerDispatchDescription dispDesc = {};
+    dispDesc.commandList = dummyCmdList;
+    dispDesc.renderSize = { 1920, 1080 };
+    dispDesc.upscaleSize = { 3840, 2160 };
+    dispDesc.jitterOffset = { 0.0f, 0.0f };
+    dispDesc.motionVectorScale = { 1.0f, 1.0f };
+    dispDesc.frameTimeDelta = 16.666f;
+    dispDesc.cameraFovAngleVertical = 1.0f;
+    dispDesc.cameraNear = 0.1f;
+    dispDesc.cameraFar = 1000.0f;
+
+    static int s_Res = 1;
+    dispDesc.color.resource = &s_Res;
+    dispDesc.depth.resource = &s_Res;
+    dispDesc.motionVectors.resource = &s_Res;
+    dispDesc.dilatedMotionVectors.resource = &s_Res;
+    dispDesc.dilatedDepth.resource = &s_Res;
+    dispDesc.reconstructedPrevNearestDepth.resource = &s_Res;
+
+    s_ScheduledGpuJobs.clear();
+    TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, &dispDesc) == FFXM_OK);
+
+    // For 1920x1080: halfRenderWidth = 960, halfRenderHeight = 540
+    // dispatchThreadGroupCountXY[0] = (960 + 63) / 64 = 15
+    // dispatchThreadGroupCountXY[1] = (540 + 63) / 64 = 9
+    // numWorkGroups = 15 * 9 = 135
+    const FfxmGpuJobDescription* shadingJob1080 = nullptr;
+    for (const auto& job : s_ScheduledGpuJobs) {
+        if (job.jobType == FFXM_GPU_JOB_COMPUTE &&
+            job.computeJobDescriptor.pipeline.pipeline == priv->pipelineShadingChangePyramid.pipeline) {
+            shadingJob1080 = &job;
+            break;
+        }
+    }
+    TEST_REQUIRE(shadingJob1080 != nullptr);
+    TEST_CHECK(shadingJob1080->computeJobDescriptor.dimensions[0] == 15);
+    TEST_CHECK(shadingJob1080->computeJobDescriptor.dimensions[1] == 9);
+    TEST_CHECK(shadingJob1080->computeJobDescriptor.dimensions[2] == 1);
+
+    const Fsr3UpscalerSpdConstants* spdData1080 = reinterpret_cast<const Fsr3UpscalerSpdConstants*>(
+        shadingJob1080->computeJobDescriptor.cbs[1].data);
+    TEST_CHECK(spdData1080 != nullptr);
+    TEST_CHECK(spdData1080->numWorkGroups == 135);
+    TEST_CHECK(spdData1080->renderSize[0] == 960);
+    TEST_CHECK(spdData1080->renderSize[1] == 540);
+    TEST_CHECK(spdData1080->workGroupOffset[0] == 0);
+    TEST_CHECK(spdData1080->workGroupOffset[1] == 0);
+
+    // 4. Test dispatch for 1280x720: halfRenderWidth = 640, halfRenderHeight = 360
+    dispDesc.renderSize = { 1280, 720 };
+    s_ScheduledGpuJobs.clear();
+    TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, &dispDesc) == FFXM_OK);
+
+    const FfxmGpuJobDescription* shadingJob720 = nullptr;
+    for (const auto& job : s_ScheduledGpuJobs) {
+        if (job.jobType == FFXM_GPU_JOB_COMPUTE &&
+            job.computeJobDescriptor.pipeline.pipeline == priv->pipelineShadingChangePyramid.pipeline) {
+            shadingJob720 = &job;
+            break;
+        }
+    }
+    TEST_REQUIRE(shadingJob720 != nullptr);
+    // (640 + 63) / 64 = 10, (360 + 63) / 64 = 6, numWorkGroups = 60
+    TEST_CHECK(shadingJob720->computeJobDescriptor.dimensions[0] == 10);
+    TEST_CHECK(shadingJob720->computeJobDescriptor.dimensions[1] == 6);
+    TEST_CHECK(shadingJob720->computeJobDescriptor.dimensions[2] == 1);
+
+    const Fsr3UpscalerSpdConstants* spdData720 = reinterpret_cast<const Fsr3UpscalerSpdConstants*>(
+        shadingJob720->computeJobDescriptor.cbs[1].data);
+    TEST_CHECK(spdData720 != nullptr);
+    TEST_CHECK(spdData720->numWorkGroups == 60);
+    TEST_CHECK(spdData720->renderSize[0] == 640);
+    TEST_CHECK(spdData720->renderSize[1] == 360);
+
+    // 5. Test odd resolution boundary: 1279x719
+    // (1279 + 1) / 2 = 640, (719 + 1) / 2 = 360
+    dispDesc.renderSize = { 1279, 719 };
+    s_ScheduledGpuJobs.clear();
+    TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, &dispDesc) == FFXM_OK);
+
+    const FfxmGpuJobDescription* shadingJobOdd = nullptr;
+    for (const auto& job : s_ScheduledGpuJobs) {
+        if (job.jobType == FFXM_GPU_JOB_COMPUTE &&
+            job.computeJobDescriptor.pipeline.pipeline == priv->pipelineShadingChangePyramid.pipeline) {
+            shadingJobOdd = &job;
+            break;
+        }
+    }
+    TEST_REQUIRE(shadingJobOdd != nullptr);
+    TEST_CHECK(shadingJobOdd->computeJobDescriptor.dimensions[0] == 10);
+    TEST_CHECK(shadingJobOdd->computeJobDescriptor.dimensions[1] == 6);
+    const Fsr3UpscalerSpdConstants* spdDataOdd = reinterpret_cast<const Fsr3UpscalerSpdConstants*>(
+        shadingJobOdd->computeJobDescriptor.cbs[1].data);
+    TEST_CHECK(spdDataOdd != nullptr);
+    TEST_CHECK(spdDataOdd->numWorkGroups == 60);
+    TEST_CHECK(spdDataOdd->renderSize[0] == 640);
+    TEST_CHECK(spdDataOdd->renderSize[1] == 360);
+
+    // 6. Test 1440p resolution: 2560x1440
+    // (2560 + 1) / 2 = 1280, (1440 + 1) / 2 = 720
+    // (1280 + 63) / 64 = 20, (720 + 63) / 64 = 12, numWorkGroups = 240
+    dispDesc.renderSize = { 2560, 1440 };
+    s_ScheduledGpuJobs.clear();
+    TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, &dispDesc) == FFXM_OK);
+
+    const FfxmGpuJobDescription* shadingJob1440 = nullptr;
+    for (const auto& job : s_ScheduledGpuJobs) {
+        if (job.jobType == FFXM_GPU_JOB_COMPUTE &&
+            job.computeJobDescriptor.pipeline.pipeline == priv->pipelineShadingChangePyramid.pipeline) {
+            shadingJob1440 = &job;
+            break;
+        }
+    }
+    TEST_REQUIRE(shadingJob1440 != nullptr);
+    TEST_CHECK(shadingJob1440->computeJobDescriptor.dimensions[0] == 20);
+    TEST_CHECK(shadingJob1440->computeJobDescriptor.dimensions[1] == 12);
+    const Fsr3UpscalerSpdConstants* spdData1440 = reinterpret_cast<const Fsr3UpscalerSpdConstants*>(
+        shadingJob1440->computeJobDescriptor.cbs[1].data);
+    TEST_CHECK(spdData1440 != nullptr);
+    TEST_CHECK(spdData1440->numWorkGroups == 240);
+    TEST_CHECK(spdData1440->renderSize[0] == 1280);
+    TEST_CHECK(spdData1440->renderSize[1] == 720);
+
+    // 7. Clean destroy
+    TEST_CHECK(ffxmFsr3UpscalerContextDestroy(&context) == FFXM_OK);
+    TEST_CHECK(s_DestroyPipelineCallCount >= 3);
+    VerifyOccurrenceAwareResourceBalance();
+
+    std::cout << "PASS: M3 Compute Shading Change Pyramid stage and SPD verification verified." << std::endl;
 }
 
 #if defined(FFXM_HAS_VK_BACKEND) && defined(_WIN32)
@@ -2039,6 +2294,15 @@ static void DestroyRealVkTestImage(
 static void TestM3PrepareInputsRealVulkanExecution()
 {
     std::cout << "--- Test 18: Real Vulkan GPU Hardware Execution of PrepareInputs ---" << std::endl;
+
+#if defined(FFXM_HAS_VK_BACKEND)
+    TEST_CHECK(arm::ExecuteGpuJobsVK(nullptr, nullptr) == FFXM_ERROR_INVALID_POINTER);
+    {
+        FfxmInterface ifaceNull = {};
+        ifaceNull.scratchBuffer = nullptr;
+        TEST_CHECK(arm::ExecuteGpuJobsVK(&ifaceNull, nullptr) == FFXM_ERROR_INVALID_POINTER);
+    }
+#endif
 
 #if !defined(FFXM_HAS_VK_BACKEND) || !defined(_WIN32)
     std::cout << "INFO: Vulkan backend or host platform not enabled for direct loader test; skipping real GPU hardware dispatch." << std::endl;
@@ -2302,6 +2566,86 @@ static void TestM3PrepareInputsRealVulkanExecution()
     VkResult waitRes = pfnQueueWaitIdle(queue);
     TEST_CHECK(waitRes == VK_SUCCESS);
 
+    // --- Task 1: Vulkan GPU Job Execution Error Handling Verification ---
+    // Validate on real Vulkan backend interface and real GPU device context
+    FfxmFsr3UpscalerContext_Private* realPriv = reinterpret_cast<FfxmFsr3UpscalerContext_Private*>(&realContext);
+    FfxmCommandList validCmdList = ffxmGetCommandListVK(cmdBuffer);
+
+    // 1. Null pointer validation on backend interface
+    TEST_CHECK(arm::ExecuteGpuJobsVK(nullptr, validCmdList) == FFXM_ERROR_INVALID_POINTER);
+    {
+        FfxmInterface nullScratchIface = backendInterface;
+        nullScratchIface.scratchBuffer = nullptr;
+        TEST_CHECK(arm::ExecuteGpuJobsVK(&nullScratchIface, validCmdList) == FFXM_ERROR_INVALID_POINTER);
+    }
+    {
+        // When jobs are queued, a null commandList must return INVALID_POINTER and clear the queue
+        FfxmGpuJobDescription dummyJob = {};
+        dummyJob.jobType = (FfxmGpuJobType)999;
+        TEST_CHECK(backendInterface.fpScheduleGpuJob(&backendInterface, &dummyJob) == FFXM_OK);
+        TEST_CHECK(arm::ExecuteGpuJobsVK(&backendInterface, nullptr) == FFXM_ERROR_INVALID_POINTER);
+        // Queue was cleared by the null commandList error; subsequent execution with 0 jobs succeeds
+        TEST_CHECK(arm::ExecuteGpuJobsVK(&backendInterface, nullptr) == FFXM_OK);
+    }
+
+    // Prepare valid and invalid jobs using real resources
+    FfxmGpuJobDescription validClearJob = {};
+    validClearJob.jobType = FFXM_GPU_JOB_CLEAR_FLOAT;
+    validClearJob.clearJobDescriptor.target = realPriv->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_SPD_ATOMIC_COUNT];
+    validClearJob.clearJobDescriptor.color[0] = 0.0f;
+
+    FfxmGpuJobDescription invalidJobType = {};
+    invalidJobType.jobType = (FfxmGpuJobType)999;
+
+    FfxmGpuJobDescription invalidRangeJob = {};
+    invalidRangeJob.jobType = FFXM_GPU_JOB_CLEAR_FLOAT;
+    invalidRangeJob.clearJobDescriptor.target.internalIndex = -1;
+
+    // Begin cmdBuffer for recording test jobs
+    pfnBeginCommandBuffer(cmdBuffer, &beginInfo);
+
+    // 2. First job fails
+    TEST_CHECK(backendInterface.fpScheduleGpuJob(&backendInterface, &invalidJobType) == FFXM_OK);
+    TEST_CHECK(backendInterface.fpScheduleGpuJob(&backendInterface, &validClearJob) == FFXM_OK);
+    TEST_CHECK(backendInterface.fpExecuteGpuJobs(&backendInterface, validCmdList) == FFXM_ERROR_INVALID_ENUM);
+    // Queue should now be empty
+    TEST_CHECK(backendInterface.fpExecuteGpuJobs(&backendInterface, validCmdList) == FFXM_OK);
+
+    // 3. Middle job fails
+    TEST_CHECK(backendInterface.fpScheduleGpuJob(&backendInterface, &validClearJob) == FFXM_OK);
+    TEST_CHECK(backendInterface.fpScheduleGpuJob(&backendInterface, &invalidRangeJob) == FFXM_OK);
+    TEST_CHECK(backendInterface.fpScheduleGpuJob(&backendInterface, &validClearJob) == FFXM_OK);
+    TEST_CHECK(backendInterface.fpExecuteGpuJobs(&backendInterface, validCmdList) == FFXM_ERROR_OUT_OF_RANGE);
+    TEST_CHECK(backendInterface.fpExecuteGpuJobs(&backendInterface, validCmdList) == FFXM_OK);
+
+    // 4. Last job fails
+    TEST_CHECK(backendInterface.fpScheduleGpuJob(&backendInterface, &validClearJob) == FFXM_OK);
+    TEST_CHECK(backendInterface.fpScheduleGpuJob(&backendInterface, &validClearJob) == FFXM_OK);
+    TEST_CHECK(backendInterface.fpScheduleGpuJob(&backendInterface, &invalidJobType) == FFXM_OK);
+    TEST_CHECK(backendInterface.fpExecuteGpuJobs(&backendInterface, validCmdList) == FFXM_ERROR_INVALID_ENUM);
+    TEST_CHECK(backendInterface.fpExecuteGpuJobs(&backendInterface, validCmdList) == FFXM_OK);
+
+    // 5. Error overwrite prevention (earlier fails, later succeeds)
+    TEST_CHECK(backendInterface.fpScheduleGpuJob(&backendInterface, &invalidRangeJob) == FFXM_OK);
+    TEST_CHECK(backendInterface.fpScheduleGpuJob(&backendInterface, &validClearJob) == FFXM_OK);
+    TEST_CHECK(backendInterface.fpExecuteGpuJobs(&backendInterface, validCmdList) == FFXM_ERROR_OUT_OF_RANGE);
+    TEST_CHECK(backendInterface.fpExecuteGpuJobs(&backendInterface, validCmdList) == FFXM_OK);
+
+    // 6. Multiple jobs succeed
+    TEST_CHECK(backendInterface.fpScheduleGpuJob(&backendInterface, &validClearJob) == FFXM_OK);
+    TEST_CHECK(backendInterface.fpScheduleGpuJob(&backendInterface, &validClearJob) == FFXM_OK);
+    TEST_CHECK(backendInterface.fpExecuteGpuJobs(&backendInterface, validCmdList) == FFXM_OK);
+
+    // 7. Recovery after failed queue
+    TEST_CHECK(backendInterface.fpScheduleGpuJob(&backendInterface, &invalidRangeJob) == FFXM_OK);
+    TEST_CHECK(backendInterface.fpExecuteGpuJobs(&backendInterface, validCmdList) == FFXM_ERROR_OUT_OF_RANGE);
+    // Immediately schedule valid jobs without destroying backend/context; must succeed cleanly
+    TEST_CHECK(backendInterface.fpScheduleGpuJob(&backendInterface, &validClearJob) == FFXM_OK);
+    TEST_CHECK(backendInterface.fpScheduleGpuJob(&backendInterface, &validClearJob) == FFXM_OK);
+    TEST_CHECK(backendInterface.fpExecuteGpuJobs(&backendInterface, validCmdList) == FFXM_OK);
+
+    pfnEndCommandBuffer(cmdBuffer);
+
     TEST_CHECK(ffxmFsr3UpscalerContextDestroy(&realContext) == FFXM_OK);
 
     DestroyRealVkTestImage(device, pfnDestroyImage, pfnFreeMemory, &colorImg);
@@ -2322,7 +2666,7 @@ static void TestM3PrepareInputsRealVulkanExecution()
     s_pfnRealGetPhysicalDeviceMemoryProperties = nullptr;
     FreeLibrary(hVk);
 
-    std::cout << "PASS: Real Vulkan GPU hardware execution of PrepareInputs & Compute Luminance Pyramid verified on " << gpuProps.deviceName << "!" << std::endl;
+    std::cout << "PASS: Real Vulkan GPU hardware execution and Task 1 GPU job error handling verified on " << gpuProps.deviceName << "!" << std::endl;
 #endif
 }
 
@@ -2351,6 +2695,7 @@ int main()
     TestM3PrepareInputsPassExecution();
     TestM3DispatchErrorHandling();
     TestM3ComputeLuminancePyramid();
+    TestM3ComputeShadingChangePyramid();
     TestM3PrepareInputsRealVulkanExecution();
 
     std::cout << "============================================================" << std::endl;
