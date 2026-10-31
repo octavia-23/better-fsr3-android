@@ -7,6 +7,7 @@
 #include <vector>
 #include <map>
 #include <set>
+#include <cstdint>
 
 #define FFXM_CPU
 #include "ffxm_core.h"
@@ -16,6 +17,75 @@
 #include "host/ffxm_fsr3upscaler.h"
 #include "src/components/fsr3upscaler/ffxm_fsr3upscaler_private.h"
 #include "host/ffxm_util.h"
+
+#if defined(FFXM_HAS_VK_BACKEND)
+#include "host/backends/vk/ffxm_vk.h"
+
+#if !defined(ANDROID)
+// On host platforms when compiling tests without the full Vulkan SDK loader (using header-only Vulkan-Headers),
+// provide stubs for Vulkan loader functions so test_milestone2 can link Arm_ASR_backend
+// to directly test ffxmGetScratchMemorySizeVK and ffxmGetInterfaceVK.
+extern "C" {
+    VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
+        VkPhysicalDevice physicalDevice, const char* pLayerName, uint32_t* pPropertyCount, VkExtensionProperties* pProperties)
+    {
+        (void)physicalDevice;
+        (void)pLayerName;
+        (void)pProperties;
+        if (pPropertyCount) {
+            *pPropertyCount = 0;
+        }
+        return VK_SUCCESS;
+    }
+
+    VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice device, const char* pName)
+    {
+        (void)device;
+        (void)pName;
+        return nullptr;
+    }
+
+    VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceProperties2(
+        VkPhysicalDevice physicalDevice, VkPhysicalDeviceProperties2* pProperties)
+    {
+        (void)physicalDevice;
+        (void)pProperties;
+    }
+
+    VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceFeatures2(
+        VkPhysicalDevice physicalDevice, VkPhysicalDeviceFeatures2* pFeatures)
+    {
+        (void)physicalDevice;
+        (void)pFeatures;
+    }
+
+    VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceMemoryProperties(
+        VkPhysicalDevice physicalDevice, VkPhysicalDeviceMemoryProperties* pMemoryProperties)
+    {
+        (void)physicalDevice;
+        (void)pMemoryProperties;
+    }
+
+    VKAPI_ATTR void VKAPI_CALL vkCmdSetViewport(
+        VkCommandBuffer commandBuffer, uint32_t firstViewport, uint32_t viewportCount, const VkViewport* pViewports)
+    {
+        (void)commandBuffer;
+        (void)firstViewport;
+        (void)viewportCount;
+        (void)pViewports;
+    }
+
+    VKAPI_ATTR void VKAPI_CALL vkCmdSetScissor(
+        VkCommandBuffer commandBuffer, uint32_t firstScissor, uint32_t scissorCount, const VkRect2D* pScissors)
+    {
+        (void)commandBuffer;
+        (void)firstScissor;
+        (void)scissorCount;
+        (void)pScissors;
+    }
+}
+#endif
+#endif
 
 using namespace arm;
 
@@ -53,6 +123,11 @@ static FfxmUInt32 s_CreatedContextId = 0;
 static FfxmUInt32 s_DestroyedContextId = 0;
 static bool s_Fp16SupportMock = true;
 static FfxmErrorCode s_CreateBackendContextResult = FFXM_OK;
+static bool s_BackendContextActive = false;
+static int s_CallSequenceNumber = 0;
+static int s_CreateBackendContextCallSeq = 0;
+static int s_GetDeviceCapsCallSeq = 0;
+static bool s_EnforceBackendActiveForCaps = true;
 
 // Resource failure injection controls
 static int32_t s_FailAtResourceIndex = -1; // -1 means no failure
@@ -80,6 +155,14 @@ static FfxmErrorCode MockGetDeviceCapabilities(FfxmInterface* backendInterface, 
 {
     (void)backendInterface;
     s_GetDeviceCapsCalled = true;
+    s_GetDeviceCapsCallSeq = ++s_CallSequenceNumber;
+
+    // Strict contract check: In real Vulkan, backendContext extension properties and physical device
+    // are only initialized after CreateBackendContextVK has run!
+    if (s_EnforceBackendActiveForCaps && !s_BackendContextActive) {
+        return FFXM_ERROR_BACKEND_API_ERROR;
+    }
+
     if (deviceCapabilities) {
         deviceCapabilities->fp16Supported = s_Fp16SupportMock;
         deviceCapabilities->raytracingSupported = false;
@@ -91,9 +174,11 @@ static FfxmErrorCode MockCreateBackendContext(FfxmInterface* backendInterface, F
 {
     (void)backendInterface;
     s_CreateBackendContextCalled = true;
+    s_CreateBackendContextCallSeq = ++s_CallSequenceNumber;
     if (s_CreateBackendContextResult != FFXM_OK) {
         return s_CreateBackendContextResult;
     }
+    s_BackendContextActive = true;
     *effectContextId = 100;
     s_CreatedContextId = 100;
     return FFXM_OK;
@@ -103,6 +188,7 @@ static FfxmErrorCode MockDestroyBackendContext(FfxmInterface* backendInterface, 
 {
     (void)backendInterface;
     s_DestroyBackendContextCalled = true;
+    s_BackendContextActive = false;
     s_DestroyedContextId = effectContextId;
     return FFXM_OK;
 }
@@ -236,6 +322,11 @@ static void ResetMockState()
     s_DestroyedContextId = 0;
     s_Fp16SupportMock = true;
     s_CreateBackendContextResult = FFXM_OK;
+    s_BackendContextActive = false;
+    s_CallSequenceNumber = 0;
+    s_CreateBackendContextCallSeq = 0;
+    s_GetDeviceCapsCallSeq = 0;
+    s_EnforceBackendActiveForCaps = true;
     s_FailAtResourceIndex = -1;
     s_FailAtCopyIndex = -1;
     s_CurrentResourceCreateCount = 0;
@@ -296,6 +387,38 @@ static void VerifyOccurrenceAwareResourceBalance()
     TEST_CHECK(s_ResourceCreationCounts == s_ResourceDestructionCounts);
 }
 
+// Checked arithmetic primitives unit test
+static inline bool testCheckAddSize(size_t a, size_t b, size_t* out)
+{
+    if (SIZE_MAX - a < b) return false;
+    *out = a + b;
+    return true;
+}
+
+static inline bool testCheckMulSize(size_t a, size_t b, size_t* out)
+{
+    if (a != 0 && b > SIZE_MAX / a) return false;
+    *out = a * b;
+    return true;
+}
+
+static inline bool testCheckAlignUpSize(size_t val, size_t align, size_t* out)
+{
+    if (align == 0) {
+        *out = val;
+        return true;
+    }
+    size_t remainder = val % align;
+    if (remainder == 0) {
+        *out = val;
+        return true;
+    }
+    size_t addVal = align - remainder;
+    if (SIZE_MAX - val < addVal) return false;
+    *out = val + addVal;
+    return true;
+}
+
 // 0. Verify that TEST_CHECK remains active under NDEBUG
 void TestNDEBUGAssertionActive()
 {
@@ -352,8 +475,11 @@ void TestSuccessfulContextCreation()
 
     FfxmErrorCode res = ffxmFsr3UpscalerContextCreate(&context, &desc);
     TEST_CHECK(res == FFXM_OK);
-    TEST_CHECK(s_GetDeviceCapsCalled == true);
     TEST_CHECK(s_CreateBackendContextCalled == true);
+    TEST_CHECK(s_GetDeviceCapsCalled == true);
+    // Verified call ordering: backend context created before capabilities are queried
+    TEST_CHECK(s_CreateBackendContextCallSeq < s_GetDeviceCapsCallSeq);
+    TEST_CHECK(s_BackendContextActive == true);
 
     FfxmFsr3UpscalerContext_Private* priv = reinterpret_cast<FfxmFsr3UpscalerContext_Private*>(&context);
     TEST_CHECK(priv->backendContextCreated == true);
@@ -379,6 +505,7 @@ void TestSuccessfulContextCreation()
     TEST_CHECK(res == FFXM_OK);
     TEST_CHECK(s_DestroyBackendContextCalled == true);
     TEST_CHECK(s_DestroyedContextId == 100);
+    TEST_CHECK(s_BackendContextActive == false);
 
     // Verify occurrence-aware resource balance (19 surfaces, 4 copy resources, 0 leaks, 0 double-frees)
     VerifyOccurrenceAwareResourceBalance();
@@ -407,9 +534,12 @@ void TestUnsupportedFP16Hardware()
 
     FfxmErrorCode res = ffxmFsr3UpscalerContextCreate(&context, &desc);
     TEST_CHECK(res == FFXM_ERROR_UNSUPPORTED_DEVICE);
+    // Backend context was created first, device capabilities queried second, then rollback destroyed it
+    TEST_CHECK(s_CreateBackendContextCalled == true);
     TEST_CHECK(s_GetDeviceCapsCalled == true);
-    TEST_CHECK(s_CreateBackendContextCalled == false); // Must NOT create backend context
-    TEST_CHECK(s_DestroyBackendContextCalled == false); // Must NOT destroy backend context that was never created
+    TEST_CHECK(s_CreateBackendContextCallSeq < s_GetDeviceCapsCallSeq);
+    TEST_CHECK(s_DestroyBackendContextCalled == true);
+    TEST_CHECK(s_BackendContextActive == false);
     TEST_CHECK(s_ResourceCreationCounts.empty());
     TEST_CHECK(s_ResourceDestructionCounts.empty());
 
@@ -417,7 +547,7 @@ void TestUnsupportedFP16Hardware()
     uint8_t zeros[sizeof(FfxmFsr3UpscalerContext)] = {};
     TEST_CHECK(memcmp(&context, zeros, sizeof(context)) == 0);
 
-    std::cout << "PASS: Unsupported FP16 hardware returns FFXM_ERROR_UNSUPPORTED_DEVICE and touches no backend state." << std::endl;
+    std::cout << "PASS: Unsupported FP16 hardware returns FFXM_ERROR_UNSUPPORTED_DEVICE and cleanly rolls back backend context." << std::endl;
 }
 
 // 4. Backend Context Creation Failure
@@ -437,9 +567,11 @@ void TestBackendContextCreationFailure()
     FfxmErrorCode res = ffxmFsr3UpscalerContextCreate(&context, &desc);
     TEST_CHECK(res == FFXM_ERROR_OUT_OF_MEMORY);
     TEST_CHECK(s_CreateBackendContextCalled == true);
+    TEST_CHECK(s_GetDeviceCapsCalled == false); // Must NOT query caps if backend context creation failed
     TEST_CHECK(s_DestroyBackendContextCalled == false); // Never successfully created, so must NOT destroy
     TEST_CHECK(s_ResourceCreationCounts.empty());
     TEST_CHECK(s_ResourceDestructionCounts.empty());
+    TEST_CHECK(s_BackendContextActive == false);
 
     uint8_t zeros[sizeof(FfxmFsr3UpscalerContext)] = {};
     TEST_CHECK(memcmp(&context, zeros, sizeof(context)) == 0);
@@ -470,6 +602,7 @@ void TestResourceAllocationFailureAtEachStage()
         TEST_CHECK(s_CreateBackendContextCalled == true);
         TEST_CHECK(s_DestroyBackendContextCalled == true);
         TEST_CHECK(s_DestroyedContextId == 100);
+        TEST_CHECK(s_BackendContextActive == false);
 
         // Occurrence-aware check: every resource allocated prior to failure must be destroyed exactly once
         VerifyOccurrenceAwareResourceBalance();
@@ -500,6 +633,7 @@ void TestCorrectResourceDestruction()
     TEST_CHECK(ffxmFsr3UpscalerContextDestroy(&context) == FFXM_OK);
     VerifyOccurrenceAwareResourceBalance();
     TEST_CHECK(s_DestroyBackendContextCalled == true);
+    TEST_CHECK(s_BackendContextActive == false);
 
     // Destroy second time on zeroed context
     s_DestroyBackendContextCalled = false;
@@ -526,9 +660,11 @@ void TestRepeatedCreateDestroyCycles()
     for (int cycle = 0; cycle < 10; ++cycle) {
         FfxmErrorCode res = ffxmFsr3UpscalerContextCreate(&context, &desc);
         TEST_CHECK(res == FFXM_OK);
+        TEST_CHECK(s_BackendContextActive == true);
 
         res = ffxmFsr3UpscalerContextDestroy(&context);
         TEST_CHECK(res == FFXM_OK);
+        TEST_CHECK(s_BackendContextActive == false);
     }
 
     // Verify occurrence-aware tracking across all 10 cycles
@@ -620,7 +756,6 @@ void TestConstantBufferStagingSlots()
     FfxmFsr3UpscalerContext_Private* priv = reinterpret_cast<FfxmFsr3UpscalerContext_Private*>(&context);
 
     // Part A: Independent Staging Adapter Unit Test
-    // Verify stageConstantBuffer directly with canary bytes to ensure no overflow and byte-exact fidelity
     {
         struct TestConstBuffer {
             FfxmConstantBuffer cb;
@@ -1065,6 +1200,134 @@ void TestContextReuseAfterFailure()
     std::cout << "PASS: Context cleanly reused after rolled-back failure." << std::endl;
 }
 
+// 14. Fix A: Device Capabilities Ordering & Rollback Contract
+void TestDeviceCapabilitiesOrderingContract()
+{
+    std::cout << "--- Test 14: Vulkan Device Capabilities Call Ordering & Rollback Contract ---" << std::endl;
+    ResetMockState();
+
+    // Verify that querying device capabilities before backend context creation fails as uninitialized
+    FfxmInterface iface = {};
+    SetupMockInterface(&iface);
+    FfxmDeviceCapabilities caps = {};
+    TEST_CHECK(iface.fpGetDeviceCapabilities(&iface, &caps) == FFXM_ERROR_BACKEND_API_ERROR);
+
+    // Verify that during context creation, backend context is created BEFORE capabilities are queried
+    FfxmFsr3UpscalerContext context;
+    FfxmFsr3UpscalerContextDescription desc = {};
+    desc.maxRenderSize = { 1920, 1080 };
+    desc.maxUpscaleSize = { 3840, 2160 };
+    SetupMockInterface(&desc.backendInterface);
+
+    TEST_CHECK(ffxmFsr3UpscalerContextCreate(&context, &desc) == FFXM_OK);
+    TEST_CHECK(s_CreateBackendContextCalled == true);
+    TEST_CHECK(s_GetDeviceCapsCalled == true);
+    TEST_CHECK(s_CreateBackendContextCallSeq < s_GetDeviceCapsCallSeq);
+    TEST_CHECK(s_BackendContextActive == true);
+
+    TEST_CHECK(ffxmFsr3UpscalerContextDestroy(&context) == FFXM_OK);
+    TEST_CHECK(s_BackendContextActive == false);
+
+    // Verify rollback ordering when FP16 is unsupported
+    ResetMockState();
+    s_Fp16SupportMock = false;
+    TEST_CHECK(ffxmFsr3UpscalerContextCreate(&context, &desc) == FFXM_ERROR_UNSUPPORTED_DEVICE);
+    TEST_CHECK(s_CreateBackendContextCalled == true);
+    TEST_CHECK(s_GetDeviceCapsCalled == true);
+    TEST_CHECK(s_CreateBackendContextCallSeq < s_GetDeviceCapsCallSeq);
+    TEST_CHECK(s_DestroyBackendContextCalled == true);
+    TEST_CHECK(s_BackendContextActive == false);
+
+    std::cout << "PASS: Vulkan device capabilities call ordering and failure rollback verified." << std::endl;
+}
+
+// 15. Fix B: Scratch Memory Sizing Arithmetic & Overflow Prevention
+void TestScratchMemorySizingArithmetic()
+{
+    std::cout << "--- Test 15: Scratch Memory Sizing Arithmetic & Overflow Prevention ---" << std::endl;
+
+    // 1. Direct unit verification of checked arithmetic primitives
+    size_t outSize = 0;
+    TEST_CHECK(testCheckMulSize(100, 200, &outSize) == true);
+    TEST_CHECK(outSize == 20000);
+
+    TEST_CHECK(testCheckMulSize(SIZE_MAX, 2, &outSize) == false);
+    TEST_CHECK(testCheckMulSize(SIZE_MAX / 2 + 1, 2, &outSize) == false);
+    TEST_CHECK(testCheckAddSize(SIZE_MAX - 10, 20, &outSize) == false);
+    TEST_CHECK(testCheckAlignUpSize(SIZE_MAX - 3, 8, &outSize) == false);
+
+    size_t alignedVal = 0;
+    TEST_CHECK(testCheckAlignUpSize(17, 8, &alignedVal) == true);
+    TEST_CHECK(alignedVal == 24);
+
+#if defined(FFXM_HAS_VK_BACKEND)
+    // 2. Direct verification of ffxmGetScratchMemorySizeVK
+    // A. Minimum and zero context counts
+    size_t zeroSize = ffxmGetScratchMemorySizeVK(nullptr, 0);
+    TEST_CHECK(zeroSize == 0);
+
+    // B. Normal supported context counts (1, 2, 4, 8)
+    size_t size1 = ffxmGetScratchMemorySizeVK(nullptr, 1);
+    size_t size2 = ffxmGetScratchMemorySizeVK(nullptr, 2);
+    size_t size4 = ffxmGetScratchMemorySizeVK(nullptr, 4);
+    size_t size8 = ffxmGetScratchMemorySizeVK(nullptr, 8);
+
+    TEST_CHECK(size1 > 0);
+    TEST_CHECK(size2 > size1);
+    TEST_CHECK(size4 > size2);
+    TEST_CHECK(size8 > size4);
+
+    // Alignment consistency (must be aligned to 8 bytes / uint64_t)
+    TEST_CHECK(size1 % sizeof(uint64_t) == 0);
+    TEST_CHECK(size2 % sizeof(uint64_t) == 0);
+    TEST_CHECK(size4 % sizeof(uint64_t) == 0);
+    TEST_CHECK(size8 % sizeof(uint64_t) == 0);
+
+    // C. Overflowing and extreme context counts (must return 0 safely without wrapping or crashing)
+    size_t maxUint32Size = ffxmGetScratchMemorySizeVK(nullptr, static_cast<size_t>(UINT32_MAX));
+    TEST_CHECK(maxUint32Size == 0);
+
+    size_t maxContextSize = ffxmGetScratchMemorySizeVK(nullptr, SIZE_MAX);
+    TEST_CHECK(maxContextSize == 0);
+
+    size_t halfMaxSize = ffxmGetScratchMemorySizeVK(nullptr, SIZE_MAX / 2);
+    TEST_CHECK(halfMaxSize == 0);
+
+    size_t large64BitContextSize = ffxmGetScratchMemorySizeVK(nullptr, (static_cast<size_t>(1) << 33));
+    TEST_CHECK(large64BitContextSize == 0);
+
+    // D. Verification of ffxmGetInterfaceVK scratch buffer sizing enforcement
+    FfxmInterface iface = {};
+    VkDeviceContext dummyVkDevice = {};
+    dummyVkDevice.vkPhysicalDevice = VK_NULL_HANDLE;
+    dummyVkDevice.vkDevice = VK_NULL_HANDLE;
+    FfxmDevice dummyDevice = ffxmGetDeviceVK(&dummyVkDevice);
+
+    std::vector<uint8_t> scratch(size1);
+
+    // Exact scratchBufferSize succeeds
+    FfxmErrorCode ifaceRes = ffxmGetInterfaceVK(&iface, dummyDevice, scratch.data(), size1, 1);
+    TEST_CHECK(ifaceRes == FFXM_OK);
+
+    // Undersized scratchBufferSize by 1 byte fails with FFXM_ERROR_INSUFFICIENT_MEMORY
+    FfxmInterface ifaceFail = {};
+    FfxmErrorCode ifaceFailRes = ffxmGetInterfaceVK(&ifaceFail, dummyDevice, scratch.data(), size1 - 1, 1);
+    TEST_CHECK(ifaceFailRes == FFXM_ERROR_INSUFFICIENT_MEMORY);
+
+    // maxContexts == 0 fails with FFXM_ERROR_INVALID_ARGUMENT
+    FfxmInterface ifaceZero = {};
+    FfxmErrorCode ifaceZeroRes = ffxmGetInterfaceVK(&ifaceZero, dummyDevice, scratch.data(), size1, 0);
+    TEST_CHECK(ifaceZeroRes == FFXM_ERROR_INVALID_ARGUMENT);
+
+    // Overflowing maxContexts fails with FFXM_ERROR_INVALID_ARGUMENT
+    FfxmInterface ifaceOverflow = {};
+    FfxmErrorCode ifaceOverflowRes = ffxmGetInterfaceVK(&ifaceOverflow, dummyDevice, scratch.data(), size1, SIZE_MAX);
+    TEST_CHECK(ifaceOverflowRes == FFXM_ERROR_INVALID_ARGUMENT);
+#endif
+
+    std::cout << "PASS: Scratch memory sizing arithmetic and overflow prevention verified." << std::endl;
+}
+
 int main()
 {
     std::cout << "============================================================" << std::endl;
@@ -1085,6 +1348,8 @@ int main()
     TestInternalResourceDescriptionsRegressionTable();
     TestPublicAPIValidation();
     TestContextReuseAfterFailure();
+    TestDeviceCapabilitiesOrderingContract();
+    TestScratchMemorySizingArithmetic();
 
     std::cout << "============================================================" << std::endl;
     std::cout << "Summary: " << g_TestPasses << " checks PASSED, " << g_TestFailures << " FAILED." << std::endl;

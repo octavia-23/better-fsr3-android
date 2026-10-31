@@ -170,8 +170,14 @@ FfxmErrorCode fsr3UpscalerCreate(
 
     memcpy(&context->contextDescription, contextDescription, sizeof(FfxmFsr3UpscalerContextDescription));
 
-    // Retrieve device capabilities first
-    FfxmErrorCode errorCode = context->contextDescription.backendInterface.fpGetDeviceCapabilities(
+    // Create backend context space first so that backend state (e.g. Vulkan device extensions and physical device) is initialized
+    FfxmErrorCode errorCode = context->contextDescription.backendInterface.fpCreateBackendContext(
+        &context->contextDescription.backendInterface, &context->effectContextId);
+    FFXM_RETURN_ON_ERROR(errorCode == FFXM_OK, errorCode);
+    context->backendContextCreated = true;
+
+    // Retrieve device capabilities from initialized backend context
+    errorCode = context->contextDescription.backendInterface.fpGetDeviceCapabilities(
         &context->contextDescription.backendInterface, &context->deviceCapabilities);
     FFXM_RETURN_ON_ERROR(errorCode == FFXM_OK, errorCode);
 
@@ -179,12 +185,6 @@ FfxmErrorCode fsr3UpscalerCreate(
     if (!context->deviceCapabilities.fp16Supported) {
         return FFXM_ERROR_UNSUPPORTED_DEVICE;
     }
-
-    // Create backend context space
-    errorCode = context->contextDescription.backendInterface.fpCreateBackendContext(
-        &context->contextDescription.backendInterface, &context->effectContextId);
-    FFXM_RETURN_ON_ERROR(errorCode == FFXM_OK, errorCode);
-    context->backendContextCreated = true;
 
     // Setup constant buffer sizes
     context->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_FSR3UPSCALER].num32BitEntries =

@@ -296,9 +296,49 @@ typedef struct BackendContext_VK {
 
 } BackendContext_VK;
 
+static inline bool ffxmCheckAddSize(size_t a, size_t b, size_t* out)
+{
+    if (SIZE_MAX - a < b) {
+        return false;
+    }
+    *out = a + b;
+    return true;
+}
+
+static inline bool ffxmCheckMulSize(size_t a, size_t b, size_t* out)
+{
+    if (a != 0 && b > SIZE_MAX / a) {
+        return false;
+    }
+    *out = a * b;
+    return true;
+}
+
+static inline bool ffxmCheckAlignUpSize(size_t val, size_t align, size_t* out)
+{
+    if (align == 0) {
+        *out = val;
+        return true;
+    }
+    size_t remainder = val % align;
+    if (remainder == 0) {
+        *out = val;
+        return true;
+    }
+    size_t addVal = align - remainder;
+    if (SIZE_MAX - val < addVal) {
+        return false;
+    }
+    *out = val + addVal;
+    return true;
+}
+
 FFXM_API size_t ffxmGetScratchMemorySizeVK(VkPhysicalDevice physicalDevice, size_t maxContexts)
 {
-    if (maxContexts == 0) {
+    // Sane upper bound for simultaneous effect contexts sharing a single backend: 65,536.
+    // Also guards against 32-bit and 64-bit integer overflow.
+    static const size_t FFXM_VK_MAX_CONTEXTS_LIMIT = 65536;
+    if (maxContexts == 0 || maxContexts > FFXM_VK_MAX_CONTEXTS_LIMIT) {
         return 0;
     }
 
@@ -307,16 +347,60 @@ FFXM_API size_t ffxmGetScratchMemorySizeVK(VkPhysicalDevice physicalDevice, size
     if (physicalDevice)
         vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &numExtensions, nullptr);
 
-    FfxmUInt32 extensionPropArraySize = sizeof(VkExtensionProperties) * numExtensions;
-    FfxmUInt32 gpuJobDescArraySize = FFXM_ALIGN_UP(maxContexts * FFXM_MAX_GPU_JOBS * sizeof(FfxmGpuJobDescription), sizeof(FfxmUInt32));
-    FfxmUInt32 resourceViewArraySize = FFXM_ALIGN_UP(maxContexts * FFXM_MAX_QUEUED_FRAMES * FFXM_MAX_RESOURCE_COUNT * 2 * sizeof(BackendContext_VK::VkResourceView), sizeof(FfxmUInt32));
-    FfxmUInt32 ringBufferArraySize = FFXM_ALIGN_UP(maxContexts * FFXM_RING_BUFFER_SIZE * sizeof(BackendContext_VK::UniformBuffer), sizeof(FfxmUInt32));
-    FfxmUInt32 pipelineArraySize = FFXM_ALIGN_UP(maxContexts * FFXM_MAX_PASS_COUNT * sizeof(BackendContext_VK::PipelineLayout), sizeof(FfxmUInt32));
-    FfxmUInt32 resourceArraySize = FFXM_ALIGN_UP(maxContexts * FFXM_MAX_RESOURCE_COUNT * sizeof(BackendContext_VK::Resource), sizeof(FfxmUInt32));
-    FfxmUInt32 contextArraySize = FFXM_ALIGN_UP(maxContexts * sizeof(BackendContext_VK::EffectContext), sizeof(FfxmUInt32));
+    size_t extensionPropArraySize = 0;
+    if (!ffxmCheckMulSize(static_cast<size_t>(sizeof(VkExtensionProperties)), static_cast<size_t>(numExtensions), &extensionPropArraySize)) {
+        return 0;
+    }
 
-    return FFXM_ALIGN_UP(sizeof(BackendContext_VK) + extensionPropArraySize + gpuJobDescArraySize + resourceViewArraySize + ringBufferArraySize +
-        pipelineArraySize + resourceArraySize + contextArraySize, sizeof(uint64_t));
+    size_t gpuJobDescArraySize = 0;
+    if (!ffxmCheckMulSize(maxContexts, FFXM_MAX_GPU_JOBS * sizeof(FfxmGpuJobDescription), &gpuJobDescArraySize) ||
+        !ffxmCheckAlignUpSize(gpuJobDescArraySize, sizeof(FfxmUInt32), &gpuJobDescArraySize)) {
+        return 0;
+    }
+
+    size_t resourceViewArraySize = 0;
+    if (!ffxmCheckMulSize(maxContexts, FFXM_MAX_QUEUED_FRAMES * FFXM_MAX_RESOURCE_COUNT * 2 * sizeof(BackendContext_VK::VkResourceView), &resourceViewArraySize) ||
+        !ffxmCheckAlignUpSize(resourceViewArraySize, sizeof(FfxmUInt32), &resourceViewArraySize)) {
+        return 0;
+    }
+
+    size_t ringBufferArraySize = 0;
+    if (!ffxmCheckMulSize(maxContexts, FFXM_RING_BUFFER_SIZE * sizeof(BackendContext_VK::UniformBuffer), &ringBufferArraySize) ||
+        !ffxmCheckAlignUpSize(ringBufferArraySize, sizeof(FfxmUInt32), &ringBufferArraySize)) {
+        return 0;
+    }
+
+    size_t pipelineArraySize = 0;
+    if (!ffxmCheckMulSize(maxContexts, FFXM_MAX_PASS_COUNT * sizeof(BackendContext_VK::PipelineLayout), &pipelineArraySize) ||
+        !ffxmCheckAlignUpSize(pipelineArraySize, sizeof(FfxmUInt32), &pipelineArraySize)) {
+        return 0;
+    }
+
+    size_t resourceArraySize = 0;
+    if (!ffxmCheckMulSize(maxContexts, FFXM_MAX_RESOURCE_COUNT * sizeof(BackendContext_VK::Resource), &resourceArraySize) ||
+        !ffxmCheckAlignUpSize(resourceArraySize, sizeof(FfxmUInt32), &resourceArraySize)) {
+        return 0;
+    }
+
+    size_t contextArraySize = 0;
+    if (!ffxmCheckMulSize(maxContexts, sizeof(BackendContext_VK::EffectContext), &contextArraySize) ||
+        !ffxmCheckAlignUpSize(contextArraySize, sizeof(FfxmUInt32), &contextArraySize)) {
+        return 0;
+    }
+
+    size_t totalSize = sizeof(BackendContext_VK);
+    if (!ffxmCheckAddSize(totalSize, extensionPropArraySize, &totalSize) ||
+        !ffxmCheckAddSize(totalSize, gpuJobDescArraySize, &totalSize) ||
+        !ffxmCheckAddSize(totalSize, resourceViewArraySize, &totalSize) ||
+        !ffxmCheckAddSize(totalSize, ringBufferArraySize, &totalSize) ||
+        !ffxmCheckAddSize(totalSize, pipelineArraySize, &totalSize) ||
+        !ffxmCheckAddSize(totalSize, resourceArraySize, &totalSize) ||
+        !ffxmCheckAddSize(totalSize, contextArraySize, &totalSize) ||
+        !ffxmCheckAlignUpSize(totalSize, sizeof(uint64_t), &totalSize)) {
+        return 0;
+    }
+
+    return totalSize;
 }
 
 // Create a FfxmDevice from a VkDevice
@@ -342,8 +426,13 @@ FfxmErrorCode ffxmGetInterfaceVK(
     FFXM_RETURN_ON_ERROR(
         scratchBuffer,
         FFXM_ERROR_INVALID_POINTER);
+
+    size_t requiredScratchSize = ffxmGetScratchMemorySizeVK(((VkDeviceContext*)device)->vkPhysicalDevice, maxContexts);
     FFXM_RETURN_ON_ERROR(
-        scratchBufferSize >= ffxmGetScratchMemorySizeVK(((VkDeviceContext*)device)->vkPhysicalDevice, maxContexts),
+        requiredScratchSize > 0,
+        FFXM_ERROR_INVALID_ARGUMENT);
+    FFXM_RETURN_ON_ERROR(
+        scratchBufferSize >= requiredScratchSize,
         FFXM_ERROR_INSUFFICIENT_MEMORY);
 
     backendInterface->fpGetSDKVersion = GetSDKVersionVK;
@@ -941,13 +1030,29 @@ FfxmErrorCode CreateBackendContextVK(FfxmInterface* backendInterface, FfxmUInt32
         // clear out mem prior to initializing
         memset(backendContext, 0, sizeof(BackendContext_VK));
 
-        // Map all of our pointers
-        FfxmUInt32 gpuJobDescArraySize = FFXM_ALIGN_UP(s_MaxEffectContexts * FFXM_MAX_GPU_JOBS * sizeof(FfxmGpuJobDescription), sizeof(FfxmUInt32));
-        FfxmUInt32 resourceViewArraySize = FFXM_ALIGN_UP(s_MaxEffectContexts * FFXM_MAX_QUEUED_FRAMES * FFXM_MAX_RESOURCE_COUNT * 2 * sizeof(BackendContext_VK::VkResourceView), sizeof(FfxmUInt32));
-        FfxmUInt32 ringBufferArraySize = FFXM_ALIGN_UP(s_MaxEffectContexts * FFXM_RING_BUFFER_SIZE * sizeof(BackendContext_VK::UniformBuffer), sizeof(FfxmUInt32));
-        FfxmUInt32 pipelineArraySize = FFXM_ALIGN_UP(s_MaxEffectContexts * FFXM_MAX_PASS_COUNT * sizeof(BackendContext_VK::PipelineLayout), sizeof(FfxmUInt32));
-        FfxmUInt32 resourceArraySize = FFXM_ALIGN_UP(s_MaxEffectContexts * FFXM_MAX_RESOURCE_COUNT * sizeof(BackendContext_VK::Resource), sizeof(FfxmUInt32));
-        FfxmUInt32 contextArraySize = FFXM_ALIGN_UP(s_MaxEffectContexts * sizeof(BackendContext_VK::EffectContext), sizeof(FfxmUInt32));
+        // Map all of our pointers with checked arithmetic
+        size_t gpuJobDescArraySize = 0;
+        size_t resourceViewArraySize = 0;
+        size_t ringBufferArraySize = 0;
+        size_t pipelineArraySize = 0;
+        size_t resourceArraySize = 0;
+        size_t contextArraySize = 0;
+
+        if (!ffxmCheckMulSize(s_MaxEffectContexts, FFXM_MAX_GPU_JOBS * sizeof(FfxmGpuJobDescription), &gpuJobDescArraySize) ||
+            !ffxmCheckAlignUpSize(gpuJobDescArraySize, sizeof(FfxmUInt32), &gpuJobDescArraySize) ||
+            !ffxmCheckMulSize(s_MaxEffectContexts, FFXM_MAX_QUEUED_FRAMES * FFXM_MAX_RESOURCE_COUNT * 2 * sizeof(BackendContext_VK::VkResourceView), &resourceViewArraySize) ||
+            !ffxmCheckAlignUpSize(resourceViewArraySize, sizeof(FfxmUInt32), &resourceViewArraySize) ||
+            !ffxmCheckMulSize(s_MaxEffectContexts, FFXM_RING_BUFFER_SIZE * sizeof(BackendContext_VK::UniformBuffer), &ringBufferArraySize) ||
+            !ffxmCheckAlignUpSize(ringBufferArraySize, sizeof(FfxmUInt32), &ringBufferArraySize) ||
+            !ffxmCheckMulSize(s_MaxEffectContexts, FFXM_MAX_PASS_COUNT * sizeof(BackendContext_VK::PipelineLayout), &pipelineArraySize) ||
+            !ffxmCheckAlignUpSize(pipelineArraySize, sizeof(FfxmUInt32), &pipelineArraySize) ||
+            !ffxmCheckMulSize(s_MaxEffectContexts, FFXM_MAX_RESOURCE_COUNT * sizeof(BackendContext_VK::Resource), &resourceArraySize) ||
+            !ffxmCheckAlignUpSize(resourceArraySize, sizeof(FfxmUInt32), &resourceArraySize) ||
+            !ffxmCheckMulSize(s_MaxEffectContexts, sizeof(BackendContext_VK::EffectContext), &contextArraySize) ||
+            !ffxmCheckAlignUpSize(contextArraySize, sizeof(FfxmUInt32), &contextArraySize)) {
+            return FFXM_ERROR_INVALID_ARGUMENT;
+        }
+
         uint8_t* pMem = (uint8_t*)((BackendContext_VK*)(backendContext + 1));
 
         // Map gpu job array
@@ -991,7 +1096,10 @@ FfxmErrorCode CreateBackendContextVK(FfxmInterface* backendInterface, FfxmUInt32
         if (vkDeviceContext->vkPhysicalDevice) {
             vkEnumerateDeviceExtensionProperties(vkDeviceContext->vkPhysicalDevice, nullptr, &numDeviceExtensions, nullptr);
         }
-        FfxmUInt32 extensionPropArraySize = sizeof(VkExtensionProperties) * numDeviceExtensions;
+        size_t extensionPropArraySize = 0;
+        if (!ffxmCheckMulSize(static_cast<size_t>(sizeof(VkExtensionProperties)), static_cast<size_t>(numDeviceExtensions), &extensionPropArraySize)) {
+            return FFXM_ERROR_INVALID_ARGUMENT;
+        }
         pMem += extensionPropArraySize;
 
         // Bounds check after complete pointer carving
@@ -1244,7 +1352,15 @@ FfxmErrorCode CreateBackendContextVK(FfxmInterface* backendInterface, FfxmUInt32
 
 FfxmErrorCode GetDeviceCapabilitiesVK(FfxmInterface* backendInterface, FfxmDeviceCapabilities* deviceCapabilities)
 {
+    FFXM_RETURN_ON_ERROR(backendInterface != nullptr, FFXM_ERROR_INVALID_POINTER);
+    FFXM_RETURN_ON_ERROR(deviceCapabilities != nullptr, FFXM_ERROR_INVALID_POINTER);
+    FFXM_RETURN_ON_ERROR(backendInterface->scratchBuffer != nullptr, FFXM_ERROR_INVALID_POINTER);
+
+    // Backend context must be created before querying device capabilities
+    FFXM_RETURN_ON_ERROR(s_BackendRefCount > 0, FFXM_ERROR_BACKEND_API_ERROR);
+
     BackendContext_VK* backendContext = (BackendContext_VK*)backendInterface->scratchBuffer;
+    FFXM_RETURN_ON_ERROR(backendContext->physicalDevice != VK_NULL_HANDLE, FFXM_ERROR_BACKEND_API_ERROR);
 
     // no shader model in vulkan so assume the minimum
     deviceCapabilities->minimumSupportedShaderModel = FFXM_SHADER_MODEL_5_1;
@@ -1252,8 +1368,6 @@ FfxmErrorCode GetDeviceCapabilitiesVK(FfxmInterface* backendInterface, FfxmDevic
     deviceCapabilities->waveLaneCountMax = 32;
     deviceCapabilities->fp16Supported = false;
     deviceCapabilities->raytracingSupported = false;
-
-    BackendContext_VK* context = (BackendContext_VK*)backendInterface->scratchBuffer;
 
     // check if extensions are enabled
 
@@ -1268,7 +1382,7 @@ FfxmErrorCode GetDeviceCapabilitiesVK(FfxmInterface* backendInterface, FfxmDevic
             VkPhysicalDeviceProperties2 deviceProperties2 = {};
             deviceProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
             deviceProperties2.pNext = &subgroupSizeControlProperties;
-            vkGetPhysicalDeviceProperties2(context->physicalDevice, &deviceProperties2);
+            vkGetPhysicalDeviceProperties2(backendContext->physicalDevice, &deviceProperties2);
 
             deviceCapabilities->waveLaneCountMin = subgroupSizeControlProperties.minSubgroupSize;
             deviceCapabilities->waveLaneCountMax = subgroupSizeControlProperties.maxSubgroupSize;
@@ -1283,7 +1397,7 @@ FfxmErrorCode GetDeviceCapabilitiesVK(FfxmInterface* backendInterface, FfxmDevic
             physicalDeviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
             physicalDeviceFeatures2.pNext = &shaderFloat18Int8Features;
 
-            vkGetPhysicalDeviceFeatures2(context->physicalDevice, &physicalDeviceFeatures2);
+            vkGetPhysicalDeviceFeatures2(backendContext->physicalDevice, &physicalDeviceFeatures2);
 
             deviceCapabilities->fp16Supported = (bool)shaderFloat18Int8Features.shaderFloat16;
         }
@@ -1297,7 +1411,7 @@ FfxmErrorCode GetDeviceCapabilitiesVK(FfxmInterface* backendInterface, FfxmDevic
             physicalDeviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
             physicalDeviceFeatures2.pNext = &accelerationStructureFeatures;
 
-            vkGetPhysicalDeviceFeatures2(context->physicalDevice, &physicalDeviceFeatures2);
+            vkGetPhysicalDeviceFeatures2(backendContext->physicalDevice, &physicalDeviceFeatures2);
 
             deviceCapabilities->raytracingSupported = (bool)accelerationStructureFeatures.accelerationStructure;
         }
