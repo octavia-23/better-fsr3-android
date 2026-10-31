@@ -15,7 +15,7 @@ file(RELATIVE_PATH FSR3_REL_GPU_PATH "${CMAKE_SOURCE_DIR}" "${FFXM_GPU_PATH}")
 file(RELATIVE_PATH FSR3_REL_OUTPUT "${CMAKE_SOURCE_DIR}" "${FFXM_PASS_SHADER_OUTPUT_PATH}")
 
 set(FSR3_GLSL_BASE_ARGS
-    -compiler=glslang -glslangexe=${FSR3_REL_GLSLANG} -V -S comp -Os -DFFX_GLSL=1 -DFFXM_GLSL=1)
+    -compiler=glslang -glslangexe=${FSR3_REL_GLSLANG} -V -S comp --target-env vulkan1.1 -Os -DFFX_GLSL=1 -DFFXM_GLSL=1)
 
 set(FSR3_PERMUTATION_ARGS
     -DFFX_FSR3UPSCALER_OPTION_REPROJECT_USE_LANCZOS_TYPE={0,1}
@@ -33,7 +33,7 @@ if(NOT EXISTS "${FSR3_PREPARE_INPUTS_SHADER}")
     message(FATAL_ERROR "FSR3 PrepareInputs shader source missing: ${FSR3_PREPARE_INPUTS_SHADER}")
 endif()
 
-file(RELATIVE_PATH FSR3_REL_SHADER "${CMAKE_SOURCE_DIR}" "${FSR3_PREPARE_INPUTS_SHADER}")
+file(RELATIVE_PATH FSR3_REL_SHADER_PREPARE "${CMAKE_SOURCE_DIR}" "${FSR3_PREPARE_INPUTS_SHADER}")
 
 add_custom_command(
     OUTPUT ${FSR3_PREPARE_INPUTS_PERMUTATION_HEADER}
@@ -45,7 +45,7 @@ add_custom_command(
         "-I${FSR3_REL_GPU_PATH}/fsr3upscaler"
         -name=ffxm_fsr3upscaler_prepare_inputs_pass
         -output=${FSR3_REL_OUTPUT}
-        ${FSR3_REL_SHADER}
+        ${FSR3_REL_SHADER_PREPARE}
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     DEPENDS ${FSR3_PREPARE_INPUTS_SHADER}
     COMMENT "Compiling FSR3 PrepareInputs shader permutations with FidelityFX-SC..."
@@ -53,3 +53,31 @@ add_custom_command(
 )
 
 add_shader_output("${FSR3_PREPARE_INPUTS_PERMUTATION_HEADER}")
+
+set(FSR3_LUMA_PYRAMID_SHADER "${CMAKE_CURRENT_SOURCE_DIR}/shaders/fsr3upscaler/ffx_fsr3upscaler_luma_pyramid_pass.glsl")
+set(FSR3_LUMA_PYRAMID_PERMUTATION_HEADER "${FFXM_PASS_SHADER_OUTPUT_PATH}/ffxm_fsr3upscaler_luma_pyramid_pass_permutations.h")
+
+if(NOT EXISTS "${FSR3_LUMA_PYRAMID_SHADER}")
+    message(FATAL_ERROR "FSR3 LumaPyramid shader source missing: ${FSR3_LUMA_PYRAMID_SHADER}")
+endif()
+
+file(RELATIVE_PATH FSR3_REL_SHADER_LUMA "${CMAKE_SOURCE_DIR}" "${FSR3_LUMA_PYRAMID_SHADER}")
+
+add_custom_command(
+    OUTPUT ${FSR3_LUMA_PYRAMID_PERMUTATION_HEADER}
+    COMMAND ${FFXM_SC_EXECUTABLE}
+        ${FSR3_BASE_ARGS}
+        ${FSR3_GLSL_BASE_ARGS}
+        ${FSR3_PERMUTATION_ARGS}
+        "-I${FSR3_REL_GPU_PATH}"
+        "-I${FSR3_REL_GPU_PATH}/fsr3upscaler"
+        -name=ffxm_fsr3upscaler_luma_pyramid_pass
+        -output=${FSR3_REL_OUTPUT}
+        ${FSR3_REL_SHADER_LUMA}
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    DEPENDS ${FSR3_LUMA_PYRAMID_SHADER}
+    COMMENT "Compiling FSR3 Compute Luminance Pyramid shader permutations with FidelityFX-SC..."
+    VERBATIM
+)
+
+add_shader_output("${FSR3_LUMA_PYRAMID_PERMUTATION_HEADER}")

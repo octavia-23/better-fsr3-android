@@ -331,10 +331,14 @@ FfxmErrorCode fsr3UpscalerDestroy(FfxmFsr3UpscalerContext_Private* context)
 
     FfxmInterface* backendInterface = &context->contextDescription.backendInterface;
 
-    // 0. Destroy compute pipeline if created
+    // 0. Destroy compute pipelines if created
     if (context->pipelinePrepareInputs.pipeline != nullptr && backendInterface->fpDestroyPipeline != nullptr) {
         backendInterface->fpDestroyPipeline(backendInterface, &context->pipelinePrepareInputs, context->effectContextId);
         memset(&context->pipelinePrepareInputs, 0, sizeof(context->pipelinePrepareInputs));
+    }
+    if (context->pipelineLumaPyramid.pipeline != nullptr && backendInterface->fpDestroyPipeline != nullptr) {
+        backendInterface->fpDestroyPipeline(backendInterface, &context->pipelineLumaPyramid, context->effectContextId);
+        memset(&context->pipelineLumaPyramid, 0, sizeof(context->pipelineLumaPyramid));
     }
 
     // 1. Release copy staging resources for surfaces created with initial data
@@ -827,6 +831,26 @@ FfxmErrorCode fsr3UpscalerCreate(
         return pipelineErr;
     }
 
+    // Create compute pipeline for Compute Luminance Pyramid pass
+    wcscpy(pipelineDescription.name, L"FSR3-LUMA-PYRAMID");
+    pipelineErr = context->contextDescription.backendInterface.fpCreateComputePipeline(
+        &context->contextDescription.backendInterface,
+        FFXM_EFFECT_FSR3UPSCALER,
+        FFXM_FSR3UPSCALER_PASS_LUMA_PYRAMID,
+        0,
+        getPipelinePermutationFlags(contextDescription->flags, FFXM_FSR3UPSCALER_PASS_LUMA_PYRAMID, supportedFP16, canForceWave64, useLut),
+        &pipelineDescription,
+        context->effectContextId,
+        &context->pipelineLumaPyramid);
+    if (pipelineErr != FFXM_OK) {
+        return pipelineErr;
+    }
+
+    pipelineErr = patchResourceBindings(&context->pipelineLumaPyramid);
+    if (pipelineErr != FFXM_OK) {
+        return pipelineErr;
+    }
+
     return FFXM_OK;
 }
 
@@ -1141,21 +1165,60 @@ FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextDispatch(
             &contextPrivate->constants,
             sizeof(contextPrivate->constants));
 
-        // Clear Reconstructed Previous Nearest Depth surface
-        FfxmGpuJobDescription clearJob = { FFXM_GPU_JOB_CLEAR_FLOAT };
-        const bool bInverted = (contextPrivate->contextDescription.flags & FFXM_FSR3UPSCALER_ENABLE_DEPTH_INVERTED) == FFXM_FSR3UPSCALER_ENABLE_DEPTH_INVERTED;
-        const float clearDepthValue[]{ bInverted ? 0.f : 1.f, bInverted ? 0.f : 1.f, bInverted ? 0.f : 1.f, bInverted ? 0.f : 1.f };
-        memcpy(clearJob.clearJobDescriptor.color, clearDepthValue, 4 * sizeof(float));
-        clearJob.clearJobDescriptor.target = contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_RECONSTRUCTED_PREVIOUS_NEAREST_DEPTH];
-        dispatchResult = contextPrivate->contextDescription.backendInterface.fpScheduleGpuJob(
-            &contextPrivate->contextDescription.backendInterface, &clearJob);
+        // History Reset Clears
+        if (contextPrivate->firstExecution || pDispatchDescription->reset) {
+            // Clear Frame Info to {-1.0f, 1.0f, 0.0f, 0.0f}
+            FfxmGpuJobDescription clearFrameInfoJob = { FFXM_GPU_JOB_CLEAR_FLOAT };
+            const float clearFrameInfoValue[4] = { -1.0f, 1.0f, 0.0f, 0.0f };
+            memcpy(clearFrameInfoJob.clearJobDescriptor.color, clearFrameInfoValue, 4 * sizeof(float));
+            clearFrameInfoJob.clearJobDescriptor.target = contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FRAME_INFO];
+            dispatchResult = contextPrivate->contextDescription.backendInterface.fpScheduleGpuJob(
+                &contextPrivate->contextDescription.backendInterface, &clearFrameInfoJob);
+        }
 
-        // Schedule PrepareInputs compute pass only if clear job scheduled successfully
+        // Per-frame clears
+        // 1. Clear Reconstructed Previous Nearest Depth surface
+        if (dispatchResult == FFXM_OK) {
+            FfxmGpuJobDescription clearJob = { FFXM_GPU_JOB_CLEAR_FLOAT };
+            const bool bInverted = (contextPrivate->contextDescription.flags & FFXM_FSR3UPSCALER_ENABLE_DEPTH_INVERTED) == FFXM_FSR3UPSCALER_ENABLE_DEPTH_INVERTED;
+            const float clearDepthValue[]{ bInverted ? 0.f : 1.f, bInverted ? 0.f : 1.f, bInverted ? 0.f : 1.f, bInverted ? 0.f : 1.f };
+            memcpy(clearJob.clearJobDescriptor.color, clearDepthValue, 4 * sizeof(float));
+            clearJob.clearJobDescriptor.target = contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_RECONSTRUCTED_PREVIOUS_NEAREST_DEPTH];
+            dispatchResult = contextPrivate->contextDescription.backendInterface.fpScheduleGpuJob(
+                &contextPrivate->contextDescription.backendInterface, &clearJob);
+        }
+
+        // 2. Clear SPD Atomic Counter (1x1 uint32_t) to 0
+        if (dispatchResult == FFXM_OK) {
+            FfxmGpuJobDescription clearSpdAtomicJob = { FFXM_GPU_JOB_CLEAR_FLOAT };
+            const float clearZeroValue[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+            memcpy(clearSpdAtomicJob.clearJobDescriptor.color, clearZeroValue, 4 * sizeof(float));
+            clearSpdAtomicJob.clearJobDescriptor.target = contextPrivate->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_SPD_ATOMIC_COUNT];
+            dispatchResult = contextPrivate->contextDescription.backendInterface.fpScheduleGpuJob(
+                &contextPrivate->contextDescription.backendInterface, &clearSpdAtomicJob);
+        }
+
+        // 3. Clear SPD_MIPS UAV to 0.0f
+        if (dispatchResult == FFXM_OK) {
+            FfxmGpuJobDescription clearSpdMipsJob = { FFXM_GPU_JOB_CLEAR_FLOAT };
+            const float clearZeroValue[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+            memcpy(clearSpdMipsJob.clearJobDescriptor.color, clearZeroValue, 4 * sizeof(float));
+            clearSpdMipsJob.clearJobDescriptor.target = contextPrivate->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_SPD_MIPS];
+            dispatchResult = contextPrivate->contextDescription.backendInterface.fpScheduleGpuJob(
+                &contextPrivate->contextDescription.backendInterface, &clearSpdMipsJob);
+        }
+
+        // Schedule PrepareInputs compute pass
         if (dispatchResult == FFXM_OK) {
             const int32_t threadGroupWorkRegionDim = 8;
             const int32_t dispatchSrcX = (contextPrivate->constants.renderSize[0] + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
             const int32_t dispatchSrcY = (contextPrivate->constants.renderSize[1] + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
             dispatchResult = scheduleDispatch(contextPrivate, pDispatchDescription, &contextPrivate->pipelinePrepareInputs, dispatchSrcX, dispatchSrcY);
+        }
+
+        // Schedule Compute Luminance Pyramid compute pass
+        if (dispatchResult == FFXM_OK) {
+            dispatchResult = scheduleDispatch(contextPrivate, pDispatchDescription, &contextPrivate->pipelineLumaPyramid, dispatchThreadGroupCountXY[0], dispatchThreadGroupCountXY[1]);
         }
 
         // Execute scheduled GPU jobs only if all jobs scheduled successfully
