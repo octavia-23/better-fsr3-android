@@ -23,6 +23,7 @@
 #include <cmath>
 #include <cstring>
 #include <cfloat>
+#include <cwchar>
 
 #define FFXM_CPU
 #include "ffxm_core.h"
@@ -37,6 +38,239 @@
 
 namespace arm
 {
+
+#ifndef FFXM_COUNTOF
+#define FFXM_COUNTOF(ARRAY) (sizeof(ARRAY) / sizeof(ARRAY[0]))
+#endif
+
+// Lists to map shader resource bindpoint names to internal resource identifiers
+typedef struct ResourceBinding
+{
+    uint32_t index;
+    wchar_t  name[64];
+} ResourceBinding;
+
+static const ResourceBinding srvTextureBindingTable[] =
+{
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_COLOR,                              L"r_input_color_jittered" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_OPAQUE_ONLY,                        L"r_input_opaque_only" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_MOTION_VECTORS,                     L"r_input_motion_vectors" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_DEPTH,                              L"r_input_depth" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_EXPOSURE,                           L"r_input_exposure" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FRAME_INFO,                               L"r_frame_info" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_REACTIVE_MASK,                      L"r_reactive_mask" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_TRANSPARENCY_AND_COMPOSITION_MASK,  L"r_transparency_and_composition_mask" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_RECONSTRUCTED_PREVIOUS_NEAREST_DEPTH,     L"r_reconstructed_previous_nearest_depth" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_MOTION_VECTORS,                   L"r_dilated_motion_vectors" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_DEPTH,                            L"r_dilated_depth" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_UPSCALED_COLOR,                  L"r_internal_upscaled_color" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_ACCUMULATION,                             L"r_accumulation" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_HISTORY,                             L"r_luma_history" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_RCAS_INPUT,                               L"r_rcas_input" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LANCZOS_LUT,                              L"r_lanczos_lut" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_SPD_MIPS,                                 L"r_spd_mips" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_REACTIVE_MASKS,                   L"r_dilated_reactive_masks" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_NEW_LOCKS,                                L"r_new_locks" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FARTHEST_DEPTH,                           L"r_farthest_depth" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FARTHEST_DEPTH_MIP1,                      L"r_farthest_depth_mip1" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_SHADING_CHANGE,                           L"r_shading_change" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_CURRENT_LUMA,                             L"r_current_luma" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_PREVIOUS_LUMA,                            L"r_previous_luma" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_INSTABILITY,                         L"r_luma_instability" },
+};
+
+static const ResourceBinding uavTextureBindingTable[] =
+{
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_RECONSTRUCTED_PREVIOUS_NEAREST_DEPTH,     L"rw_reconstructed_previous_nearest_depth" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_MOTION_VECTORS,                   L"rw_dilated_motion_vectors" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_DEPTH,                            L"rw_dilated_depth" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_UPSCALED_COLOR,                  L"rw_internal_upscaled_color" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_ACCUMULATION,                             L"rw_accumulation" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_HISTORY,                             L"rw_luma_history" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_UPSCALED_OUTPUT,                          L"rw_upscaled_output" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_REACTIVE_MASKS,                   L"rw_dilated_reactive_masks" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FRAME_INFO,                               L"rw_frame_info" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_SPD_ATOMIC_COUNT,                         L"rw_spd_global_atomic" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_NEW_LOCKS,                                L"rw_new_locks" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_AUTOREACTIVE,                             L"rw_output_autoreactive" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_SHADING_CHANGE,                           L"rw_shading_change" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FARTHEST_DEPTH,                           L"rw_farthest_depth" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FARTHEST_DEPTH_MIP1,                      L"rw_farthest_depth_mip1" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_CURRENT_LUMA,                             L"rw_current_luma" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_INSTABILITY,                         L"rw_luma_instability" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_SPD_MIPS_LEVEL_0,                         L"rw_spd_mip0" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_SPD_MIPS_LEVEL_1,                         L"rw_spd_mip1" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_SPD_MIPS_LEVEL_2,                         L"rw_spd_mip2" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_SPD_MIPS_LEVEL_3,                         L"rw_spd_mip3" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_SPD_MIPS_LEVEL_4,                         L"rw_spd_mip4" },
+    { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_SPD_MIPS_LEVEL_5,                         L"rw_spd_mip5" },
+};
+
+static const ResourceBinding constantBufferBindingTable[] =
+{
+    { FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_FSR3UPSCALER, L"cbFSR3UPSCALER" },
+    { FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_FSR3UPSCALER, L"cbFSR3Upscaler" },
+    { FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_SPD,          L"cbSPD" },
+    { FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_RCAS,         L"cbRCAS" },
+    { FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_GENREACTIVE,  L"cbGenerateReactive" },
+};
+
+static FfxmErrorCode patchResourceBindings(FfxmPipelineState* inoutPipeline)
+{
+    for (uint32_t srvIndex = 0; srvIndex < inoutPipeline->srvTextureCount; ++srvIndex) {
+        int32_t mapIndex = 0;
+        for (mapIndex = 0; mapIndex < static_cast<int32_t>(FFXM_COUNTOF(srvTextureBindingTable)); ++mapIndex) {
+            if (0 == wcscmp(srvTextureBindingTable[mapIndex].name, inoutPipeline->srvTextureBindings[srvIndex].name))
+                break;
+        }
+        if (mapIndex == static_cast<int32_t>(FFXM_COUNTOF(srvTextureBindingTable)))
+            return FFXM_ERROR_INVALID_ARGUMENT;
+
+        inoutPipeline->srvTextureBindings[srvIndex].resourceIdentifier = srvTextureBindingTable[mapIndex].index;
+    }
+
+    for (uint32_t uavIndex = 0; uavIndex < inoutPipeline->uavTextureCount; ++uavIndex) {
+        int32_t mapIndex = 0;
+        for (mapIndex = 0; mapIndex < static_cast<int32_t>(FFXM_COUNTOF(uavTextureBindingTable)); ++mapIndex) {
+            if (0 == wcscmp(uavTextureBindingTable[mapIndex].name, inoutPipeline->uavTextureBindings[uavIndex].name))
+                break;
+        }
+        if (mapIndex == static_cast<int32_t>(FFXM_COUNTOF(uavTextureBindingTable)))
+            return FFXM_ERROR_INVALID_ARGUMENT;
+
+        inoutPipeline->uavTextureBindings[uavIndex].resourceIdentifier = uavTextureBindingTable[mapIndex].index;
+    }
+
+    for (uint32_t cbIndex = 0; cbIndex < inoutPipeline->constCount; ++cbIndex) {
+        int32_t mapIndex = 0;
+        for (mapIndex = 0; mapIndex < static_cast<int32_t>(FFXM_COUNTOF(constantBufferBindingTable)); ++mapIndex) {
+            if (0 == wcscmp(constantBufferBindingTable[mapIndex].name, inoutPipeline->constantBufferBindings[cbIndex].name))
+                break;
+        }
+        if (mapIndex == static_cast<int32_t>(FFXM_COUNTOF(constantBufferBindingTable)))
+            return FFXM_ERROR_INVALID_ARGUMENT;
+
+        inoutPipeline->constantBufferBindings[cbIndex].resourceIdentifier = constantBufferBindingTable[mapIndex].index;
+    }
+
+    return FFXM_OK;
+}
+
+static uint32_t getPipelinePermutationFlags(
+    uint32_t contextFlags,
+    FfxmFsr3UpscalerPass passId,
+    bool fp16,
+    bool force64,
+    bool useLut)
+{
+    uint32_t flags = 0;
+    flags |= (contextFlags & FFXM_FSR3UPSCALER_ENABLE_HIGH_DYNAMIC_RANGE) ? FSR3UPSCALER_SHADER_PERMUTATION_HDR_COLOR_INPUT : 0;
+    flags |= (contextFlags & FFXM_FSR3UPSCALER_ENABLE_DISPLAY_RESOLUTION_MOTION_VECTORS) ? 0 : FSR3UPSCALER_SHADER_PERMUTATION_LOW_RES_MOTION_VECTORS;
+    flags |= (contextFlags & FFXM_FSR3UPSCALER_ENABLE_MOTION_VECTORS_JITTER_CANCELLATION) ? FSR3UPSCALER_SHADER_PERMUTATION_JITTER_MOTION_VECTORS : 0;
+    flags |= (contextFlags & FFXM_FSR3UPSCALER_ENABLE_DEPTH_INVERTED) ? FSR3UPSCALER_SHADER_PERMUTATION_DEPTH_INVERTED : 0;
+    flags |= (passId == FFXM_FSR3UPSCALER_PASS_ACCUMULATE_SHARPEN) ? FSR3UPSCALER_SHADER_PERMUTATION_ENABLE_SHARPENING : 0;
+    flags |= (useLut) ? FSR3UPSCALER_SHADER_PERMUTATION_USE_LANCZOS_TYPE : 0;
+    flags |= (force64) ? FSR3UPSCALER_SHADER_PERMUTATION_FORCE_WAVE64 : 0;
+    flags |= (fp16 && (passId != FFXM_FSR3UPSCALER_PASS_RCAS)) ? FSR3UPSCALER_SHADER_PERMUTATION_ALLOW_FP16 : 0;
+    return flags;
+}
+
+static void setupDeviceDepthToViewSpaceDepthParams(
+    FfxmFsr3UpscalerContext_Private* context,
+    const FfxmFsr3UpscalerDispatchDescription* params)
+{
+    const bool bInverted = (context->contextDescription.flags & FFXM_FSR3UPSCALER_ENABLE_DEPTH_INVERTED) == FFXM_FSR3UPSCALER_ENABLE_DEPTH_INVERTED;
+    const bool bInfinite = (context->contextDescription.flags & FFXM_FSR3UPSCALER_ENABLE_DEPTH_INFINITE) == FFXM_FSR3UPSCALER_ENABLE_DEPTH_INFINITE;
+
+    float fMin = std::min(params->cameraNear, params->cameraFar);
+    float fMax = std::max(params->cameraNear, params->cameraFar);
+
+    if (bInverted) {
+        float tmp = fMin;
+        fMin = fMax;
+        fMax = tmp;
+    }
+
+    const float fQ = (fabsf(fMin - fMax) > 1e-7f) ? (fMax / (fMin - fMax)) : 0.0f;
+    const float d = -1.0f;
+
+    const float matrix_elem_c[2][2] = {
+        { fQ, -1.0f - FLT_EPSILON },
+        { fQ, 0.0f + FLT_EPSILON }
+    };
+
+    const float matrix_elem_e[2][2] = {
+        { fQ * fMin, -fMin - FLT_EPSILON },
+        { fQ * fMin, fMax }
+    };
+
+    context->constants.deviceToViewDepth[0] = d * matrix_elem_c[bInverted ? 1 : 0][bInfinite ? 1 : 0];
+    context->constants.deviceToViewDepth[1] = matrix_elem_e[bInverted ? 1 : 0][bInfinite ? 1 : 0];
+
+    const float aspect = (params->renderSize.height > 0)
+        ? (static_cast<float>(params->renderSize.width) / static_cast<float>(params->renderSize.height))
+        : 1.0f;
+    const float halfFov = 0.5f * params->cameraFovAngleVertical;
+    const float sinHalfFov = sinf(halfFov);
+    const float cotHalfFovY = (fabsf(sinHalfFov) > 1e-7f) ? (cosf(halfFov) / sinHalfFov) : 1.0f;
+    const float a = (aspect > 0.0f) ? (cotHalfFovY / aspect) : cotHalfFovY;
+    const float b = cotHalfFovY;
+
+    context->constants.deviceToViewDepth[2] = (fabsf(a) > 1e-7f) ? (1.0f / a) : 0.0f;
+    context->constants.deviceToViewDepth[3] = (fabsf(b) > 1e-7f) ? (1.0f / b) : 0.0f;
+}
+
+static void scheduleDispatch(
+    FfxmFsr3UpscalerContext_Private* context,
+    const FfxmFsr3UpscalerDispatchDescription* params,
+    const FfxmPipelineState* pipeline,
+    uint32_t dispatchX,
+    uint32_t dispatchY)
+{
+    (void)params;
+    FfxmGpuJobDescription dispatchJob = { FFXM_GPU_JOB_COMPUTE };
+
+    for (uint32_t currentShaderResourceViewIndex = 0; currentShaderResourceViewIndex < pipeline->srvTextureCount; ++currentShaderResourceViewIndex) {
+        const uint32_t currentResourceId = pipeline->srvTextureBindings[currentShaderResourceViewIndex].resourceIdentifier;
+        const FfxmResourceInternal currentResource = context->srvResources[currentResourceId];
+        dispatchJob.computeJobDescriptor.srvTextures[currentShaderResourceViewIndex] = currentResource;
+        wcscpy(dispatchJob.computeJobDescriptor.srvTextureNames[currentShaderResourceViewIndex],
+               pipeline->srvTextureBindings[currentShaderResourceViewIndex].name);
+    }
+
+    for (uint32_t currentUnorderedAccessViewIndex = 0; currentUnorderedAccessViewIndex < pipeline->uavTextureCount; ++currentUnorderedAccessViewIndex) {
+        const uint32_t currentResourceId = pipeline->uavTextureBindings[currentUnorderedAccessViewIndex].resourceIdentifier;
+        wcscpy(dispatchJob.computeJobDescriptor.uavTextureNames[currentUnorderedAccessViewIndex],
+               pipeline->uavTextureBindings[currentUnorderedAccessViewIndex].name);
+
+        if (currentResourceId >= FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_SPD_MIPS_LEVEL_0 &&
+            currentResourceId <= FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_SPD_MIPS_LEVEL_5) {
+            const FfxmResourceInternal currentResource = context->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_SPD_MIPS];
+            dispatchJob.computeJobDescriptor.uavTextures[currentUnorderedAccessViewIndex] = currentResource;
+            dispatchJob.computeJobDescriptor.uavTextureMips[currentUnorderedAccessViewIndex] =
+                currentResourceId - FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_SPD_MIPS_LEVEL_0;
+        } else {
+            const FfxmResourceInternal currentResource = context->uavResources[currentResourceId];
+            dispatchJob.computeJobDescriptor.uavTextures[currentUnorderedAccessViewIndex] = currentResource;
+            dispatchJob.computeJobDescriptor.uavTextureMips[currentUnorderedAccessViewIndex] = 0;
+        }
+    }
+
+    dispatchJob.computeJobDescriptor.dimensions[0] = dispatchX;
+    dispatchJob.computeJobDescriptor.dimensions[1] = dispatchY;
+    dispatchJob.computeJobDescriptor.dimensions[2] = 1;
+    dispatchJob.computeJobDescriptor.pipeline = *pipeline;
+
+    for (uint32_t currentRootConstantIndex = 0; currentRootConstantIndex < pipeline->constCount; ++currentRootConstantIndex) {
+        wcscpy(dispatchJob.computeJobDescriptor.cbNames[currentRootConstantIndex],
+               pipeline->constantBufferBindings[currentRootConstantIndex].name);
+        dispatchJob.computeJobDescriptor.cbs[currentRootConstantIndex] =
+            context->constantBuffers[pipeline->constantBufferBindings[currentRootConstantIndex].resourceIdentifier];
+    }
+
+    context->contextDescription.backendInterface.fpScheduleGpuJob(
+        &context->contextDescription.backendInterface, &dispatchJob);
+}
 
 // Lanczos kernel generator for LUT construction
 static float lanczos2(float value)
@@ -97,6 +331,12 @@ FfxmErrorCode fsr3UpscalerDestroy(FfxmFsr3UpscalerContext_Private* context)
 
     FfxmInterface* backendInterface = &context->contextDescription.backendInterface;
 
+    // 0. Destroy compute pipeline if created
+    if (context->pipelinePrepareInputs.pipeline != nullptr && backendInterface->fpDestroyPipeline != nullptr) {
+        backendInterface->fpDestroyPipeline(backendInterface, &context->pipelinePrepareInputs, context->effectContextId);
+        memset(&context->pipelinePrepareInputs, 0, sizeof(context->pipelinePrepareInputs));
+    }
+
     // 1. Release copy staging resources for surfaces created with initial data
     if (backendInterface->fpDestroyResource != nullptr) {
         const uint32_t copyResourceIds[] = {
@@ -122,18 +362,15 @@ FfxmErrorCode fsr3UpscalerDestroy(FfxmFsr3UpscalerContext_Private* context)
                 context->rtResources[id].internalIndex = -1;
             }
         }
-
-        // Ensure any remaining tracked slots are also cleared
-        for (uint32_t i = 0; i < FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_COUNT; ++i) {
-            if (context->srvResources[i].internalIndex != -1) {
-                backendInterface->fpDestroyResource(backendInterface, context->srvResources[i]);
-                context->srvResources[i].internalIndex = -1;
-                context->uavResources[i].internalIndex = -1;
-                context->rtResources[i].internalIndex = -1;
-            }
-        }
     }
     context->allocatedResourceCount = 0;
+
+    // Reset all resource identifier slots to unallocated sentinel
+    for (uint32_t i = 0; i < FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_COUNT; ++i) {
+        context->srvResources[i].internalIndex = -1;
+        context->uavResources[i].internalIndex = -1;
+        context->rtResources[i].internalIndex = -1;
+    }
 
     // 3. Destroy backend context AFTER destroying all resources
     if (context->backendContextCreated) {
@@ -546,6 +783,50 @@ FfxmErrorCode fsr3UpscalerCreate(
     memcpy(context->uavResources, context->srvResources, sizeof(context->srvResources));
     memcpy(context->rtResources, context->srvResources, sizeof(context->srvResources));
 
+    // Create compute pipeline for PrepareInputs pass
+    FfxmPipelineDescription pipelineDescription = {};
+    pipelineDescription.contextFlags = contextDescription->flags;
+    pipelineDescription.stage = FFXM_BIND_COMPUTE_SHADER_STAGE;
+
+    pipelineDescription.samplerCount = 2;
+    FfxmSamplerDescription samplerDescs[2] = {
+        { 0, FFXM_FILTER_TYPE_MINMAGMIP_POINT, FFXM_ADDRESS_MODE_CLAMP, FFXM_ADDRESS_MODE_CLAMP, FFXM_ADDRESS_MODE_CLAMP, FFXM_BIND_COMPUTE_SHADER_STAGE },
+        { 1, FFXM_FILTER_TYPE_MINMAGMIP_LINEAR, FFXM_ADDRESS_MODE_CLAMP, FFXM_ADDRESS_MODE_CLAMP, FFXM_ADDRESS_MODE_CLAMP, FFXM_BIND_COMPUTE_SHADER_STAGE }
+    };
+    pipelineDescription.samplers = samplerDescs;
+
+    pipelineDescription.rootConstantBufferCount = 1;
+    FfxmRootConstantDescription rootConstantDescs[1] = {
+        { sizeof(Fsr3UpscalerConstants) / sizeof(uint32_t), FFXM_BIND_COMPUTE_SHADER_STAGE }
+    };
+    pipelineDescription.rootConstants = rootConstantDescs;
+
+    bool supportedFP16 = context->deviceCapabilities.fp16Supported;
+    bool canForceWave64 = false;
+    bool useLut = false;
+    if (context->deviceCapabilities.waveLaneCountMin == 32 && context->deviceCapabilities.waveLaneCountMax == 64) {
+        useLut = true;
+    }
+
+    wcscpy(pipelineDescription.name, L"FSR3-PREPARE-INPUTS");
+    FfxmErrorCode pipelineErr = context->contextDescription.backendInterface.fpCreateComputePipeline(
+        &context->contextDescription.backendInterface,
+        FFXM_EFFECT_FSR3UPSCALER,
+        FFXM_FSR3UPSCALER_PASS_PREPARE_INPUTS,
+        0,
+        getPipelinePermutationFlags(contextDescription->flags, FFXM_FSR3UPSCALER_PASS_PREPARE_INPUTS, supportedFP16, canForceWave64, useLut),
+        &pipelineDescription,
+        context->effectContextId,
+        &context->pipelinePrepareInputs);
+    if (pipelineErr != FFXM_OK) {
+        return pipelineErr;
+    }
+
+    pipelineErr = patchResourceBindings(&context->pipelinePrepareInputs);
+    if (pipelineErr != FFXM_OK) {
+        return pipelineErr;
+    }
+
     return FFXM_OK;
 }
 
@@ -760,9 +1041,145 @@ FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextDispatch(
         &rcasConsts,
         sizeof(rcasConsts));
 
-    // Milestone 2 boundary: GPU compute dispatch passes are scheduled in Milestone 3.
-    // Return FFXM_ERROR_INCOMPLETE_INTERFACE to prevent reporting execution before GPU jobs are scheduled.
-    return FFXM_ERROR_INCOMPLETE_INTERFACE;
+    // Register dynamic inputs
+    contextPrivate->contextDescription.backendInterface.fpRegisterResource(
+        &contextPrivate->contextDescription.backendInterface,
+        &pDispatchDescription->color,
+        contextPrivate->effectContextId,
+        &contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_COLOR]);
+
+    contextPrivate->contextDescription.backendInterface.fpRegisterResource(
+        &contextPrivate->contextDescription.backendInterface,
+        &pDispatchDescription->depth,
+        contextPrivate->effectContextId,
+        &contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_DEPTH]);
+
+    contextPrivate->contextDescription.backendInterface.fpRegisterResource(
+        &contextPrivate->contextDescription.backendInterface,
+        &pDispatchDescription->motionVectors,
+        contextPrivate->effectContextId,
+        &contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_MOTION_VECTORS]);
+
+    contextPrivate->contextDescription.backendInterface.fpRegisterResource(
+        &contextPrivate->contextDescription.backendInterface,
+        &pDispatchDescription->dilatedMotionVectors,
+        contextPrivate->effectContextId,
+        &contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_MOTION_VECTORS]);
+    contextPrivate->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_MOTION_VECTORS] =
+        contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_MOTION_VECTORS];
+
+    contextPrivate->contextDescription.backendInterface.fpRegisterResource(
+        &contextPrivate->contextDescription.backendInterface,
+        &pDispatchDescription->dilatedDepth,
+        contextPrivate->effectContextId,
+        &contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_DEPTH]);
+    contextPrivate->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_DEPTH] =
+        contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_DEPTH];
+
+    contextPrivate->contextDescription.backendInterface.fpRegisterResource(
+        &contextPrivate->contextDescription.backendInterface,
+        &pDispatchDescription->reconstructedPrevNearestDepth,
+        contextPrivate->effectContextId,
+        &contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_RECONSTRUCTED_PREVIOUS_NEAREST_DEPTH]);
+    contextPrivate->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_RECONSTRUCTED_PREVIOUS_NEAREST_DEPTH] =
+        contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_RECONSTRUCTED_PREVIOUS_NEAREST_DEPTH];
+
+    // Ping-pong & aliasable resource routing
+    const bool isOddFrame = !!(contextPrivate->resourceFrameIndex & 1);
+    const uint32_t currentLumaResourceIndex = isOddFrame
+        ? FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_2
+        : FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_1;
+    const uint32_t previousLumaResourceIndex = isOddFrame
+        ? FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_1
+        : FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_2;
+
+    contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_CURRENT_LUMA] = contextPrivate->srvResources[currentLumaResourceIndex];
+    contextPrivate->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_CURRENT_LUMA] = contextPrivate->uavResources[currentLumaResourceIndex];
+    contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_PREVIOUS_LUMA] = contextPrivate->srvResources[previousLumaResourceIndex];
+
+    contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FARTHEST_DEPTH] = contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERMEDIATE_FP16x1];
+    contextPrivate->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FARTHEST_DEPTH] = contextPrivate->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERMEDIATE_FP16x1];
+
+    // Compute device depth to view space depth parameters
+    setupDeviceDepthToViewSpaceDepthParams(contextPrivate, pDispatchDescription);
+
+    // Update motion vector scales
+    const int32_t* motionVectorsTargetSize = (contextPrivate->contextDescription.flags & FFXM_FSR3UPSCALER_ENABLE_DISPLAY_RESOLUTION_MOTION_VECTORS)
+        ? contextPrivate->constants.upscaleSize
+        : contextPrivate->constants.renderSize;
+    if (motionVectorsTargetSize[0] > 0 && motionVectorsTargetSize[1] > 0) {
+        contextPrivate->constants.motionVectorScale[0] = (pDispatchDescription->motionVectorScale.x / static_cast<float>(motionVectorsTargetSize[0]));
+        contextPrivate->constants.motionVectorScale[1] = (pDispatchDescription->motionVectorScale.y / static_cast<float>(motionVectorsTargetSize[1]));
+    }
+
+    // Downscale factor
+    if (contextPrivate->constants.upscaleSize[0] > 0 && contextPrivate->constants.upscaleSize[1] > 0) {
+        contextPrivate->constants.downscaleFactor[0] = static_cast<float>(contextPrivate->constants.renderSize[0]) / static_cast<float>(contextPrivate->constants.upscaleSize[0]);
+        contextPrivate->constants.downscaleFactor[1] = static_cast<float>(contextPrivate->constants.renderSize[1]) / static_cast<float>(contextPrivate->constants.upscaleSize[1]);
+    }
+
+    // Pre-exposure factors
+    contextPrivate->constants.deltaPreExposure = 1.0f;
+    contextPrivate->previousFramePreExposure = contextPrivate->preExposure;
+    contextPrivate->preExposure = (pDispatchDescription->preExposure != 0.0f) ? pDispatchDescription->preExposure : 1.0f;
+    if (contextPrivate->previousFramePreExposure > 0.0f) {
+        contextPrivate->constants.deltaPreExposure = contextPrivate->preExposure / contextPrivate->previousFramePreExposure;
+    }
+
+    // Frame index & jitter phase count
+    const int32_t jitterPhaseCount = ffxmFsr3UpscalerGetJitterPhaseCount(pDispatchDescription->renderSize.width, contextPrivate->constants.upscaleSize[0]);
+    if (pDispatchDescription->reset || contextPrivate->firstExecution || contextPrivate->constants.jitterPhaseCount == 0.0f) {
+        contextPrivate->constants.jitterPhaseCount = static_cast<float>(jitterPhaseCount);
+        contextPrivate->constants.frameIndex = 0.0f;
+    } else {
+        const int32_t jitterPhaseCountDelta = static_cast<int32_t>(jitterPhaseCount - contextPrivate->constants.jitterPhaseCount);
+        if (jitterPhaseCountDelta > 0) {
+            contextPrivate->constants.jitterPhaseCount += 1.0f;
+        } else if (jitterPhaseCountDelta < 0) {
+            contextPrivate->constants.jitterPhaseCount -= 1.0f;
+        }
+        contextPrivate->constants.frameIndex += 1.0f;
+    }
+
+    // Re-stage constant buffers with computed parameters
+    stageConstantBuffer(
+        &contextPrivate->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_FSR3UPSCALER],
+        &contextPrivate->constants,
+        sizeof(contextPrivate->constants));
+
+    // Clear Reconstructed Previous Nearest Depth surface
+    {
+        FfxmGpuJobDescription clearJob = { FFXM_GPU_JOB_CLEAR_FLOAT };
+        const bool bInverted = (contextPrivate->contextDescription.flags & FFXM_FSR3UPSCALER_ENABLE_DEPTH_INVERTED) == FFXM_FSR3UPSCALER_ENABLE_DEPTH_INVERTED;
+        const float clearDepthValue[]{ bInverted ? 0.f : 1.f, bInverted ? 0.f : 1.f, bInverted ? 0.f : 1.f, bInverted ? 0.f : 1.f };
+        memcpy(clearJob.clearJobDescriptor.color, clearDepthValue, 4 * sizeof(float));
+        clearJob.clearJobDescriptor.target = contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_RECONSTRUCTED_PREVIOUS_NEAREST_DEPTH];
+        contextPrivate->contextDescription.backendInterface.fpScheduleGpuJob(
+            &contextPrivate->contextDescription.backendInterface, &clearJob);
+    }
+
+    // Schedule PrepareInputs compute pass
+    const int32_t threadGroupWorkRegionDim = 8;
+    const int32_t dispatchSrcX = (contextPrivate->constants.renderSize[0] + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
+    const int32_t dispatchSrcY = (contextPrivate->constants.renderSize[1] + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
+    scheduleDispatch(contextPrivate, pDispatchDescription, &contextPrivate->pipelinePrepareInputs, dispatchSrcX, dispatchSrcY);
+
+    // Execute scheduled GPU jobs
+    contextPrivate->contextDescription.backendInterface.fpExecuteGpuJobs(
+        &contextPrivate->contextDescription.backendInterface,
+        pDispatchDescription->commandList);
+
+    // Unregister transient frame resources
+    contextPrivate->contextDescription.backendInterface.fpUnregisterResources(
+        &contextPrivate->contextDescription.backendInterface,
+        pDispatchDescription->commandList,
+        contextPrivate->effectContextId);
+
+    // Advance resource frame index
+    contextPrivate->resourceFrameIndex = (contextPrivate->resourceFrameIndex + 1) % 16;
+    contextPrivate->firstExecution = false;
+
+    return FFXM_OK;
 }
 
 FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextGenerateReactiveMask(

@@ -138,6 +138,16 @@ if(BUILD_TESTING)
     if(NOT FFXM_REMOVE_ARM_ASR_VK_STANDALONE_BACKEND)
         target_link_libraries(test_milestone2 PRIVATE Arm_ASR_backend)
         target_compile_definitions(test_milestone2 PRIVATE FFXM_HAS_VK_BACKEND=1)
+    else()
+        target_sources(test_milestone2 PRIVATE
+            src/backends/shared/ffxm_shader_blobs.cpp
+            src/backends/shared/blob_accessors/ffxm_fsr3upscaler_shaderblobs.cpp
+            src/backends/shared/blob_accessors/ffxm_fsr2_shaderblobs.cpp)
+        target_include_directories(test_milestone2 PRIVATE
+            src/backends/shared
+            src/backends/shared/blob_accessors/prebuilt_shaders
+            src/components)
+        target_compile_definitions(test_milestone2 PRIVATE FFXM_FSR=1)
     endif()
     target_include_directories(test_milestone2 PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}

@@ -133,7 +133,9 @@ file(GLOB PRIVATE_SOURCE
 
 set(FFXM_FSR_PRIVATE_SOURCE
 	"${FFXM_SRC_BACKENDS_PATH}/shared/blob_accessors/ffxm_fsr2_shaderblobs.h"
-	"${FFXM_SRC_BACKENDS_PATH}/shared/blob_accessors/ffxm_fsr2_shaderblobs.cpp")
+	"${FFXM_SRC_BACKENDS_PATH}/shared/blob_accessors/ffxm_fsr2_shaderblobs.cpp"
+	"${FFXM_SRC_BACKENDS_PATH}/shared/blob_accessors/ffxm_fsr3upscaler_shaderblobs.h"
+	"${FFXM_SRC_BACKENDS_PATH}/shared/blob_accessors/ffxm_fsr3upscaler_shaderblobs.cpp")
 list(APPEND PRIVATE_SOURCE ${FFXM_FSR_PRIVATE_SOURCE})
 
 # Does this need to recurse??

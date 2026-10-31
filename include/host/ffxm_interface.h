@@ -73,7 +73,7 @@ FFXM_FORWARD_DECLARE(FfxmInterface);
 typedef enum FfxmEffect
 {
     FFXM_EFFECT_FSR2 = 0,               ///< FidelityFX Super Resolution v2
-
+    FFXM_EFFECT_FSR3UPSCALER = 1,       ///< FidelityFX Super Resolution v3
 } FfxmEffect;
 
 /// Stand in type for FfxmPass

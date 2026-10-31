@@ -31,7 +31,7 @@ namespace arm
 extern "C" {
 #endif // #if defined(__cplusplus)
 
-struct FfxmShaderBlob;
+
 
 // Get a shader blob for the specified effect, pass, and permutation index.
 FfxmErrorCode ffxmGetPermutationBlobByIndex(FfxmEffect effectId,

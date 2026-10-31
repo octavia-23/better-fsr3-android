@@ -23,6 +23,7 @@
 
 #if defined(FFXM_FSR) || defined(FFXM_ALL)
 #include "blob_accessors/ffxm_fsr2_shaderblobs.h"
+#include "blob_accessors/ffxm_fsr3upscaler_shaderblobs.h"
 #endif // #if defined(FFXM_FSR) || defined(FFXM_ALL)
 
 #include <string.h> // for memset
@@ -43,6 +44,8 @@ FfxmErrorCode ffxmGetPermutationBlobByIndex(
 #if defined(FFXM_FSR) || defined(FFXM_ALL)
     case FFXM_EFFECT_FSR2:
         return fsr2GetPermutationBlobByIndex((FfxmFsr2Pass)passId, permutationOptions, outBlob, outVertBlob);
+    case FFXM_EFFECT_FSR3UPSCALER:
+        return fsr3UpscalerGetPermutationBlobByIndex((FfxmFsr3UpscalerPass)passId, permutationOptions, outBlob);
 #endif // #if defined(FFXM_FSR) || defined(FFXM_ALL)
 
     default:
@@ -62,6 +65,8 @@ switch (effectId)
 #if defined(FFXM_FSR) || defined(FFXM_ALL)
     case FFXM_EFFECT_FSR2:
         return fsr2IsWave64(permutationOptions, isWave64);
+    case FFXM_EFFECT_FSR3UPSCALER:
+        return fsr3UpscalerIsWave64(permutationOptions, isWave64);
 #endif // #if defined(FFXM_FSR) || defined(FFXM_ALL)
 
     default:

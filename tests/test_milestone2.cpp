@@ -17,6 +17,7 @@
 #include "host/ffxm_fsr3upscaler.h"
 #include "src/components/fsr3upscaler/ffxm_fsr3upscaler_private.h"
 #include "host/ffxm_util.h"
+#include "src/backends/shared/ffxm_shader_blobs.h"
 
 #if defined(FFXM_HAS_VK_BACKEND)
 #include "host/backends/vk/ffxm_vk.h"
@@ -267,18 +268,30 @@ static FfxmResource MockGetResource(FfxmInterface* backendInterface, FfxmResourc
     return r;
 }
 
-static FfxmErrorCode MockUnregisterResources(FfxmInterface* backendInterface, FfxmCommandList commandList, FfxmUInt32 effectContextId)
-{
-    (void)backendInterface; (void)commandList; (void)effectContextId;
-    return FFXM_OK;
-}
-
 static FfxmResourceDescription MockGetResourceDescription(FfxmInterface* backendInterface, FfxmResourceInternal res)
 {
     (void)backendInterface; (void)res;
     FfxmResourceDescription d = {};
     return d;
 }
+
+template <size_t N>
+static void ffxmWidenAscii(wchar_t (&dst)[N], const char* src)
+{
+    size_t i = 0;
+    if (src) {
+        for (; i < N - 1 && src[i] != '\0'; ++i)
+            dst[i] = static_cast<wchar_t>(static_cast<unsigned char>(src[i]));
+    }
+    dst[i] = L'\0';
+}
+
+static uint32_t s_CreatePipelineCallCount = 0;
+static uint32_t s_DestroyPipelineCallCount = 0;
+static uint32_t s_ExecuteGpuJobsCallCount = 0;
+static uint32_t s_UnregisterResourcesCallCount = 0;
+static std::vector<FfxmGpuJobDescription> s_ScheduledGpuJobs;
+static FfxmErrorCode s_CreatePipelineResult = FFXM_OK;
 
 static FfxmErrorCode MockCreatePipeline(
     FfxmInterface* backendInterface,
@@ -290,26 +303,78 @@ static FfxmErrorCode MockCreatePipeline(
     FfxmUInt32 effectContextId,
     FfxmPipelineState* outPipeline)
 {
-    (void)backendInterface; (void)effect; (void)pass; (void)qualityPreset;
-    (void)permutationOptions; (void)pipelineDescription; (void)effectContextId; (void)outPipeline;
+    (void)backendInterface; (void)qualityPreset; (void)pipelineDescription; (void)effectContextId;
+    s_CreatePipelineCallCount++;
+    if (s_CreatePipelineResult != FFXM_OK) {
+        return s_CreatePipelineResult;
+    }
+
+    if (outPipeline == nullptr) {
+        return FFXM_ERROR_INVALID_POINTER;
+    }
+
+    FfxmShaderBlob shaderBlob = {};
+    FfxmErrorCode err = arm::ffxmGetPermutationBlobByIndex(effect, pass, permutationOptions, &shaderBlob);
+    if (err == FFXM_OK && shaderBlob.data != nullptr) {
+        outPipeline->pipeline = reinterpret_cast<FfxmPipeline>(static_cast<uintptr_t>(0x1234));
+        outPipeline->srvTextureCount = shaderBlob.srvTextureCount;
+        for (uint32_t i = 0; i < shaderBlob.srvTextureCount; ++i) {
+            outPipeline->srvTextureBindings[i].slotIndex = shaderBlob.boundSRVTextures[i];
+            outPipeline->srvTextureBindings[i].bindCount = shaderBlob.boundSRVTextureCounts[i];
+            outPipeline->srvTextureBindings[i].bindSet = shaderBlob.boundSRVTextureSets[i];
+            ffxmWidenAscii(outPipeline->srvTextureBindings[i].name, shaderBlob.boundSRVTextureNames[i]);
+        }
+        outPipeline->uavTextureCount = shaderBlob.uavTextureCount;
+        for (uint32_t i = 0; i < shaderBlob.uavTextureCount; ++i) {
+            outPipeline->uavTextureBindings[i].slotIndex = shaderBlob.boundUAVTextures[i];
+            outPipeline->uavTextureBindings[i].bindCount = shaderBlob.boundUAVTextureCounts[i];
+            outPipeline->uavTextureBindings[i].bindSet = shaderBlob.boundUAVTextureSets[i];
+            ffxmWidenAscii(outPipeline->uavTextureBindings[i].name, shaderBlob.boundUAVTextureNames[i]);
+        }
+        outPipeline->constCount = shaderBlob.cbvCount;
+        for (uint32_t i = 0; i < shaderBlob.cbvCount; ++i) {
+            outPipeline->constantBufferBindings[i].slotIndex = shaderBlob.boundConstantBuffers[i];
+            outPipeline->constantBufferBindings[i].bindCount = shaderBlob.boundConstantBufferCounts[i];
+            outPipeline->constantBufferBindings[i].bindSet = shaderBlob.boundConstantBufferSets[i];
+            ffxmWidenAscii(outPipeline->constantBufferBindings[i].name, shaderBlob.boundConstantBufferNames[i]);
+        }
+    } else {
+        outPipeline->pipeline = reinterpret_cast<FfxmPipeline>(static_cast<uintptr_t>(0x5678));
+    }
+
     return FFXM_OK;
 }
 
 static FfxmErrorCode MockDestroyPipeline(FfxmInterface* backendInterface, FfxmPipelineState* pipeline, FfxmUInt32 effectContextId)
 {
-    (void)backendInterface; (void)pipeline; (void)effectContextId;
+    (void)backendInterface; (void)effectContextId;
+    s_DestroyPipelineCallCount++;
+    if (pipeline) {
+        pipeline->pipeline = nullptr;
+    }
     return FFXM_OK;
 }
 
 static FfxmErrorCode MockScheduleGpuJob(FfxmInterface* backendInterface, const FfxmGpuJobDescription* job)
 {
-    (void)backendInterface; (void)job;
+    (void)backendInterface;
+    if (job) {
+        s_ScheduledGpuJobs.push_back(*job);
+    }
     return FFXM_OK;
 }
 
 static FfxmErrorCode MockExecuteGpuJobs(FfxmInterface* backendInterface, FfxmCommandList commandList)
 {
     (void)backendInterface; (void)commandList;
+    s_ExecuteGpuJobsCallCount++;
+    return FFXM_OK;
+}
+
+static FfxmErrorCode MockUnregisterResources(FfxmInterface* backendInterface, FfxmCommandList commandList, FfxmUInt32 effectContextId)
+{
+    (void)backendInterface; (void)commandList; (void)effectContextId;
+    s_UnregisterResourcesCallCount++;
     return FFXM_OK;
 }
 
@@ -337,6 +402,12 @@ static void ResetMockState()
     s_DestroyedResourceOrder.clear();
     s_CapturedResourceDescriptions.clear();
     s_CapturedInitialData.clear();
+    s_CreatePipelineCallCount = 0;
+    s_DestroyPipelineCallCount = 0;
+    s_ExecuteGpuJobsCallCount = 0;
+    s_UnregisterResourcesCallCount = 0;
+    s_ScheduledGpuJobs.clear();
+    s_CreatePipelineResult = FFXM_OK;
 }
 
 static void SetupMockInterface(FfxmInterface* iface)
@@ -724,7 +795,7 @@ void TestProtectedUnfinishedAPIs()
     dispDesc.viewSpaceToMetersFactor = 1.0f;
 
     FfxmErrorCode dispRes = ffxmFsr3UpscalerContextDispatch(&context, &dispDesc);
-    TEST_CHECK(dispRes == FFXM_ERROR_INCOMPLETE_INTERFACE);
+    TEST_CHECK(dispRes == FFXM_OK);
 
     // Test GenerateReactive protection
     FfxmFsr3UpscalerGenerateReactiveDescription genDesc = {};
@@ -737,7 +808,7 @@ void TestProtectedUnfinishedAPIs()
     TEST_CHECK(genRes == FFXM_ERROR_INCOMPLETE_INTERFACE);
 
     TEST_CHECK(ffxmFsr3UpscalerContextDestroy(&context) == FFXM_OK);
-    std::cout << "PASS: Unfinished dispatch and reactive APIs explicitly return FFXM_ERROR_INCOMPLETE_INTERFACE." << std::endl;
+    std::cout << "PASS: Dispatch executes PrepareInputs pass successfully (FFXM_OK); unfinished GenerateReactive API explicitly returns FFXM_ERROR_INCOMPLETE_INTERFACE." << std::endl;
 }
 
 // 10. Non-tautological Constant-Buffer Staging & Adapter Verification
@@ -801,7 +872,7 @@ void TestConstantBufferStagingSlots()
     dispDesc.cameraFar = 1000.0f;
 
     FfxmErrorCode dispRes = ffxmFsr3UpscalerContextDispatch(&context, &dispDesc);
-    TEST_CHECK(dispRes == FFXM_ERROR_INCOMPLETE_INTERFACE); // protected until Milestone 3
+    TEST_CHECK(dispRes == FFXM_OK); // executes PrepareInputs pass in Milestone 3
 
     // Verify Slot 0 (FSR3UPSCALER)
     TEST_CHECK(priv->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_FSR3UPSCALER].num32BitEntries ==
@@ -1328,6 +1399,154 @@ void TestScratchMemorySizingArithmetic()
     std::cout << "PASS: Scratch memory sizing arithmetic and overflow prevention verified." << std::endl;
 }
 
+// 16. M3: PrepareInputs Compute Pass Execution, Pipeline Binding Reflection & GPU Dispatch
+void TestM3PrepareInputsPassExecution()
+{
+    std::cout << "--- Test 16: M3 PrepareInputs Compute Pass Execution & GPU Dispatch ---" << std::endl;
+    ResetMockState();
+
+    // 1. Verify SPIR-V permutation shader blob retrieval across configurations
+    FfxmShaderBlob blobDefault = {};
+    TEST_CHECK(arm::ffxmGetPermutationBlobByIndex(FFXM_EFFECT_FSR3UPSCALER, FFXM_FSR3UPSCALER_PASS_PREPARE_INPUTS, 0, &blobDefault) == FFXM_OK);
+    TEST_CHECK(blobDefault.data != nullptr);
+    TEST_CHECK(blobDefault.size > 0);
+    TEST_CHECK(blobDefault.srvTextureCount == 3);
+    TEST_CHECK(blobDefault.uavTextureCount == 5);
+    TEST_CHECK(blobDefault.cbvCount == 1);
+
+    // Test inverted depth permutation
+    FfxmShaderBlob blobInverted = {};
+    TEST_CHECK(arm::ffxmGetPermutationBlobByIndex(FFXM_EFFECT_FSR3UPSCALER, FFXM_FSR3UPSCALER_PASS_PREPARE_INPUTS,
+        FSR3UPSCALER_SHADER_PERMUTATION_DEPTH_INVERTED, &blobInverted) == FFXM_OK);
+    TEST_CHECK(blobInverted.data != nullptr);
+    TEST_CHECK(blobInverted.size > 0);
+
+    // 2. Create context with full mock backend
+    FfxmFsr3UpscalerContext context;
+    FfxmFsr3UpscalerContextDescription desc = {};
+    desc.maxRenderSize = { 1920, 1080 };
+    desc.maxUpscaleSize = { 3840, 2160 };
+    desc.flags = FFXM_FSR3UPSCALER_ENABLE_AUTO_EXPOSURE;
+    SetupMockInterface(&desc.backendInterface);
+
+    TEST_CHECK(ffxmFsr3UpscalerContextCreate(&context, &desc) == FFXM_OK);
+    TEST_CHECK(s_CreatePipelineCallCount == 1);
+
+    FfxmFsr3UpscalerContext_Private* priv = reinterpret_cast<FfxmFsr3UpscalerContext_Private*>(&context);
+    TEST_CHECK(priv->pipelinePrepareInputs.pipeline != nullptr);
+    TEST_CHECK(priv->pipelinePrepareInputs.srvTextureCount == 3);
+    TEST_CHECK(priv->pipelinePrepareInputs.uavTextureCount == 5);
+    TEST_CHECK(priv->pipelinePrepareInputs.constCount == 1);
+
+    // Verify patched bindings for PrepareInputs
+    TEST_CHECK(priv->pipelinePrepareInputs.srvTextureBindings[0].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_MOTION_VECTORS);
+    TEST_CHECK(priv->pipelinePrepareInputs.srvTextureBindings[1].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_DEPTH);
+    TEST_CHECK(priv->pipelinePrepareInputs.srvTextureBindings[2].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_COLOR);
+
+    TEST_CHECK(priv->pipelinePrepareInputs.uavTextureBindings[0].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_MOTION_VECTORS);
+    TEST_CHECK(priv->pipelinePrepareInputs.uavTextureBindings[1].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_DEPTH);
+    TEST_CHECK(priv->pipelinePrepareInputs.uavTextureBindings[2].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_RECONSTRUCTED_PREVIOUS_NEAREST_DEPTH);
+    TEST_CHECK(priv->pipelinePrepareInputs.uavTextureBindings[3].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FARTHEST_DEPTH);
+    TEST_CHECK(priv->pipelinePrepareInputs.uavTextureBindings[4].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_CURRENT_LUMA);
+
+    TEST_CHECK(priv->pipelinePrepareInputs.constantBufferBindings[0].resourceIdentifier == FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_FSR3UPSCALER);
+
+    // 3. Dispatch a real frame
+    FfxmCommandList dummyCmdList = reinterpret_cast<FfxmCommandList>(0xABCD);
+    FfxmFsr3UpscalerDispatchDescription dispDesc = {};
+    dispDesc.commandList = dummyCmdList;
+    dispDesc.renderSize = { 1920, 1080 };
+    dispDesc.upscaleSize = { 3840, 2160 };
+    dispDesc.jitterOffset = { 0.125f, -0.25f };
+    dispDesc.motionVectorScale = { 1.0f, 1.0f };
+    dispDesc.frameTimeDelta = 16.666f;
+    dispDesc.cameraFovAngleVertical = 1.047f;
+    dispDesc.viewSpaceToMetersFactor = 1.0f;
+    dispDesc.cameraNear = 0.1f;
+    dispDesc.cameraFar = 1000.0f;
+
+    static int s_ColorResource = 10;
+    static int s_DepthResource = 20;
+    static int s_MvResource = 30;
+    static int s_DilatedMvResource = 40;
+    static int s_DilatedDepthResource = 50;
+    static int s_ReconstructedDepthResource = 60;
+    dispDesc.color.resource = &s_ColorResource;
+    dispDesc.depth.resource = &s_DepthResource;
+    dispDesc.motionVectors.resource = &s_MvResource;
+    dispDesc.dilatedMotionVectors.resource = &s_DilatedMvResource;
+    dispDesc.dilatedDepth.resource = &s_DilatedDepthResource;
+    dispDesc.reconstructedPrevNearestDepth.resource = &s_ReconstructedDepthResource;
+
+    s_ScheduledGpuJobs.clear();
+    s_ExecuteGpuJobsCallCount = 0;
+    s_UnregisterResourcesCallCount = 0;
+
+    FfxmErrorCode dispRes = ffxmFsr3UpscalerContextDispatch(&context, &dispDesc);
+    TEST_CHECK(dispRes == FFXM_OK);
+
+    // Verify scheduled GPU jobs
+    // Should have scheduled:
+    // 1. Clear Float for RECONSTRUCTED_PREVIOUS_NEAREST_DEPTH
+    // 2. Compute dispatch for PrepareInputs
+    TEST_CHECK(s_ScheduledGpuJobs.size() >= 2);
+
+    // Check clear job
+    const FfxmGpuJobDescription& clearJob = s_ScheduledGpuJobs[0];
+    TEST_CHECK(clearJob.jobType == FFXM_GPU_JOB_CLEAR_FLOAT);
+    TEST_CHECK(clearJob.clearJobDescriptor.target.internalIndex ==
+        priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_RECONSTRUCTED_PREVIOUS_NEAREST_DEPTH].internalIndex);
+
+    // Check compute dispatch job for PrepareInputs
+    const FfxmGpuJobDescription& computeJob = s_ScheduledGpuJobs[1];
+    TEST_CHECK(computeJob.jobType == FFXM_GPU_JOB_COMPUTE);
+    // Dispatch dimensions: ceil(1920 / 8) = 240, ceil(1080 / 8) = 135, 1
+    TEST_CHECK(computeJob.computeJobDescriptor.dimensions[0] == 240);
+    TEST_CHECK(computeJob.computeJobDescriptor.dimensions[1] == 135);
+    TEST_CHECK(computeJob.computeJobDescriptor.dimensions[2] == 1);
+
+    // Verify SRVs in compute job
+    TEST_CHECK(computeJob.computeJobDescriptor.srvTextures[0].internalIndex != -1);
+    TEST_CHECK(computeJob.computeJobDescriptor.srvTextures[1].internalIndex != -1);
+    TEST_CHECK(computeJob.computeJobDescriptor.srvTextures[2].internalIndex != -1);
+
+    // Verify UAVs in compute job
+    TEST_CHECK(computeJob.computeJobDescriptor.uavTextures[0].internalIndex != -1);
+    TEST_CHECK(computeJob.computeJobDescriptor.uavTextures[1].internalIndex != -1);
+    TEST_CHECK(computeJob.computeJobDescriptor.uavTextures[2].internalIndex != -1);
+    TEST_CHECK(computeJob.computeJobDescriptor.uavTextures[3].internalIndex != -1);
+    TEST_CHECK(computeJob.computeJobDescriptor.uavTextures[4].internalIndex != -1);
+
+    // Verify Constant Buffer in compute job
+    TEST_CHECK(computeJob.computeJobDescriptor.cbs[0].num32BitEntries == sizeof(Fsr3UpscalerConstants) / sizeof(uint32_t));
+
+    // Verify execution and cleanup calls
+    TEST_CHECK(s_ExecuteGpuJobsCallCount == 1);
+    TEST_CHECK(s_UnregisterResourcesCallCount == 1);
+
+    // 4. Test frame parity and ping-pong luma routing on frame 2
+    FfxmFsr3UpscalerDispatchDescription dispDesc2 = dispDesc;
+    s_ScheduledGpuJobs.clear();
+    TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, &dispDesc2) == FFXM_OK);
+    TEST_CHECK(s_ScheduledGpuJobs.size() >= 2);
+    TEST_CHECK(priv->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_CURRENT_LUMA].internalIndex ==
+        priv->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_2].internalIndex);
+
+    // 5. Test clean destruction
+    TEST_CHECK(ffxmFsr3UpscalerContextDestroy(&context) == FFXM_OK);
+    TEST_CHECK(s_DestroyPipelineCallCount >= 1);
+    VerifyOccurrenceAwareResourceBalance();
+
+    // 6. Test pipeline creation failure rollback
+    ResetMockState();
+    s_CreatePipelineResult = FFXM_ERROR_BACKEND_API_ERROR;
+    FfxmFsr3UpscalerContext failContext;
+    TEST_CHECK(ffxmFsr3UpscalerContextCreate(&failContext, &desc) == FFXM_ERROR_BACKEND_API_ERROR);
+    VerifyOccurrenceAwareResourceBalance();
+
+    std::cout << "PASS: PrepareInputs compute pipeline created, verified, dispatched, and cleanly destroyed." << std::endl;
+}
+
 int main()
 {
     std::cout << "============================================================" << std::endl;
@@ -1350,6 +1569,7 @@ int main()
     TestContextReuseAfterFailure();
     TestDeviceCapabilitiesOrderingContract();
     TestScratchMemorySizingArithmetic();
+    TestM3PrepareInputsPassExecution();
 
     std::cout << "============================================================" << std::endl;
     std::cout << "Summary: " << g_TestPasses << " checks PASSED, " << g_TestFailures << " FAILED." << std::endl;
