@@ -1,0 +1,55 @@
+# Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2024-2026 Arm Limited. All rights reserved.
+# SPDX-License-Identifier: MIT
+
+set(FSR3_BASE_ARGS
+    -reflection -deps=gcc -DFFX_GPU=1 -DFFXM_GPU=1)
+
+get_filename_component(FFXM_TOOLS_BIN_DIR "${FFXM_SC_EXECUTABLE}" DIRECTORY)
+
+# FidelityFX_SC.exe splits arguments to glslangValidator on spaces without quoting.
+# Computing paths relative to CMAKE_SOURCE_DIR guarantees that paths passed across
+# the toolchain invocation contain no whitespace even if the workspace root directory does.
+file(RELATIVE_PATH FSR3_REL_GLSLANG "${CMAKE_SOURCE_DIR}" "${FFXM_TOOLS_BIN_DIR}/glslangValidator.exe")
+file(RELATIVE_PATH FSR3_REL_GPU_PATH "${CMAKE_SOURCE_DIR}" "${FFXM_GPU_PATH}")
+file(RELATIVE_PATH FSR3_REL_OUTPUT "${CMAKE_SOURCE_DIR}" "${FFXM_PASS_SHADER_OUTPUT_PATH}")
+
+set(FSR3_GLSL_BASE_ARGS
+    -compiler=glslang -glslangexe=${FSR3_REL_GLSLANG} -V -S comp -Os -DFFX_GLSL=1 -DFFXM_GLSL=1)
+
+set(FSR3_PERMUTATION_ARGS
+    -DFFX_FSR3UPSCALER_OPTION_REPROJECT_USE_LANCZOS_TYPE={0,1}
+    -DFFX_FSR3UPSCALER_OPTION_HDR_COLOR_INPUT={0,1}
+    -DFFX_FSR3UPSCALER_OPTION_LOW_RESOLUTION_MOTION_VECTORS={0,1}
+    -DFFX_FSR3UPSCALER_OPTION_JITTERED_MOTION_VECTORS={0,1}
+    -DFFX_FSR3UPSCALER_OPTION_INVERTED_DEPTH={0,1}
+    -DFFX_FSR3UPSCALER_OPTION_APPLY_SHARPENING={0,1})
+
+set(FSR3_PREPARE_INPUTS_SHADER "${CMAKE_CURRENT_SOURCE_DIR}/shaders/fsr3upscaler/ffx_fsr3upscaler_prepare_inputs_pass.glsl")
+set(FSR3_PREPARE_INPUTS_PERMUTATION_HEADER "${FFXM_PASS_SHADER_OUTPUT_PATH}/ffxm_fsr3upscaler_prepare_inputs_pass_permutations.h")
+
+# Verify shader source exists before compiling to fail fast with an informative error
+if(NOT EXISTS "${FSR3_PREPARE_INPUTS_SHADER}")
+    message(FATAL_ERROR "FSR3 PrepareInputs shader source missing: ${FSR3_PREPARE_INPUTS_SHADER}")
+endif()
+
+file(RELATIVE_PATH FSR3_REL_SHADER "${CMAKE_SOURCE_DIR}" "${FSR3_PREPARE_INPUTS_SHADER}")
+
+add_custom_command(
+    OUTPUT ${FSR3_PREPARE_INPUTS_PERMUTATION_HEADER}
+    COMMAND ${FFXM_SC_EXECUTABLE}
+        ${FSR3_BASE_ARGS}
+        ${FSR3_GLSL_BASE_ARGS}
+        ${FSR3_PERMUTATION_ARGS}
+        "-I${FSR3_REL_GPU_PATH}"
+        "-I${FSR3_REL_GPU_PATH}/fsr3upscaler"
+        -name=ffxm_fsr3upscaler_prepare_inputs_pass
+        -output=${FSR3_REL_OUTPUT}
+        ${FSR3_REL_SHADER}
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    DEPENDS ${FSR3_PREPARE_INPUTS_SHADER}
+    COMMENT "Compiling FSR3 PrepareInputs shader permutations with FidelityFX-SC..."
+    VERBATIM
+)
+
+add_shader_output("${FSR3_PREPARE_INPUTS_PERMUTATION_HEADER}")

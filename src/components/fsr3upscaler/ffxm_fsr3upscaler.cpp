@@ -220,7 +220,7 @@ static void setupDeviceDepthToViewSpaceDepthParams(
     context->constants.deviceToViewDepth[3] = (fabsf(b) > 1e-7f) ? (1.0f / b) : 0.0f;
 }
 
-static void scheduleDispatch(
+static FfxmErrorCode scheduleDispatch(
     FfxmFsr3UpscalerContext_Private* context,
     const FfxmFsr3UpscalerDispatchDescription* params,
     const FfxmPipelineState* pipeline,
@@ -268,7 +268,7 @@ static void scheduleDispatch(
             context->constantBuffers[pipeline->constantBufferBindings[currentRootConstantIndex].resourceIdentifier];
     }
 
-    context->contextDescription.backendInterface.fpScheduleGpuJob(
+    return context->contextDescription.backendInterface.fpScheduleGpuJob(
         &context->contextDescription.backendInterface, &dispatchJob);
 }
 
@@ -1041,145 +1041,160 @@ FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextDispatch(
         &rcasConsts,
         sizeof(rcasConsts));
 
-    // Register dynamic inputs
-    contextPrivate->contextDescription.backendInterface.fpRegisterResource(
-        &contextPrivate->contextDescription.backendInterface,
-        &pDispatchDescription->color,
-        contextPrivate->effectContextId,
-        &contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_COLOR]);
+    // Dynamic resource registration table
+    struct DynamicResourceRegistration {
+        const FfxmResource* resource;
+        uint32_t srvIdentifier;
+        uint32_t uavIdentifier;
+    };
 
-    contextPrivate->contextDescription.backendInterface.fpRegisterResource(
-        &contextPrivate->contextDescription.backendInterface,
-        &pDispatchDescription->depth,
-        contextPrivate->effectContextId,
-        &contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_DEPTH]);
+    const DynamicResourceRegistration registrations[] = {
+        { &pDispatchDescription->color, FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_COLOR, 0 },
+        { &pDispatchDescription->depth, FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_DEPTH, 0 },
+        { &pDispatchDescription->motionVectors, FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_MOTION_VECTORS, 0 },
+        { &pDispatchDescription->dilatedMotionVectors, FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_MOTION_VECTORS, FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_MOTION_VECTORS },
+        { &pDispatchDescription->dilatedDepth, FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_DEPTH, FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_DEPTH },
+        { &pDispatchDescription->reconstructedPrevNearestDepth, FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_RECONSTRUCTED_PREVIOUS_NEAREST_DEPTH, FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_RECONSTRUCTED_PREVIOUS_NEAREST_DEPTH },
+    };
 
-    contextPrivate->contextDescription.backendInterface.fpRegisterResource(
-        &contextPrivate->contextDescription.backendInterface,
-        &pDispatchDescription->motionVectors,
-        contextPrivate->effectContextId,
-        &contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_MOTION_VECTORS]);
+    uint32_t registeredCount = 0;
+    FfxmErrorCode dispatchResult = FFXM_OK;
 
-    contextPrivate->contextDescription.backendInterface.fpRegisterResource(
-        &contextPrivate->contextDescription.backendInterface,
-        &pDispatchDescription->dilatedMotionVectors,
-        contextPrivate->effectContextId,
-        &contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_MOTION_VECTORS]);
-    contextPrivate->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_MOTION_VECTORS] =
-        contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_MOTION_VECTORS];
-
-    contextPrivate->contextDescription.backendInterface.fpRegisterResource(
-        &contextPrivate->contextDescription.backendInterface,
-        &pDispatchDescription->dilatedDepth,
-        contextPrivate->effectContextId,
-        &contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_DEPTH]);
-    contextPrivate->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_DEPTH] =
-        contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_DEPTH];
-
-    contextPrivate->contextDescription.backendInterface.fpRegisterResource(
-        &contextPrivate->contextDescription.backendInterface,
-        &pDispatchDescription->reconstructedPrevNearestDepth,
-        contextPrivate->effectContextId,
-        &contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_RECONSTRUCTED_PREVIOUS_NEAREST_DEPTH]);
-    contextPrivate->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_RECONSTRUCTED_PREVIOUS_NEAREST_DEPTH] =
-        contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_RECONSTRUCTED_PREVIOUS_NEAREST_DEPTH];
-
-    // Ping-pong & aliasable resource routing
-    const bool isOddFrame = !!(contextPrivate->resourceFrameIndex & 1);
-    const uint32_t currentLumaResourceIndex = isOddFrame
-        ? FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_2
-        : FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_1;
-    const uint32_t previousLumaResourceIndex = isOddFrame
-        ? FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_1
-        : FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_2;
-
-    contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_CURRENT_LUMA] = contextPrivate->srvResources[currentLumaResourceIndex];
-    contextPrivate->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_CURRENT_LUMA] = contextPrivate->uavResources[currentLumaResourceIndex];
-    contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_PREVIOUS_LUMA] = contextPrivate->srvResources[previousLumaResourceIndex];
-
-    contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FARTHEST_DEPTH] = contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERMEDIATE_FP16x1];
-    contextPrivate->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FARTHEST_DEPTH] = contextPrivate->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERMEDIATE_FP16x1];
-
-    // Compute device depth to view space depth parameters
-    setupDeviceDepthToViewSpaceDepthParams(contextPrivate, pDispatchDescription);
-
-    // Update motion vector scales
-    const int32_t* motionVectorsTargetSize = (contextPrivate->contextDescription.flags & FFXM_FSR3UPSCALER_ENABLE_DISPLAY_RESOLUTION_MOTION_VECTORS)
-        ? contextPrivate->constants.upscaleSize
-        : contextPrivate->constants.renderSize;
-    if (motionVectorsTargetSize[0] > 0 && motionVectorsTargetSize[1] > 0) {
-        contextPrivate->constants.motionVectorScale[0] = (pDispatchDescription->motionVectorScale.x / static_cast<float>(motionVectorsTargetSize[0]));
-        contextPrivate->constants.motionVectorScale[1] = (pDispatchDescription->motionVectorScale.y / static_cast<float>(motionVectorsTargetSize[1]));
-    }
-
-    // Downscale factor
-    if (contextPrivate->constants.upscaleSize[0] > 0 && contextPrivate->constants.upscaleSize[1] > 0) {
-        contextPrivate->constants.downscaleFactor[0] = static_cast<float>(contextPrivate->constants.renderSize[0]) / static_cast<float>(contextPrivate->constants.upscaleSize[0]);
-        contextPrivate->constants.downscaleFactor[1] = static_cast<float>(contextPrivate->constants.renderSize[1]) / static_cast<float>(contextPrivate->constants.upscaleSize[1]);
-    }
-
-    // Pre-exposure factors
-    contextPrivate->constants.deltaPreExposure = 1.0f;
-    contextPrivate->previousFramePreExposure = contextPrivate->preExposure;
-    contextPrivate->preExposure = (pDispatchDescription->preExposure != 0.0f) ? pDispatchDescription->preExposure : 1.0f;
-    if (contextPrivate->previousFramePreExposure > 0.0f) {
-        contextPrivate->constants.deltaPreExposure = contextPrivate->preExposure / contextPrivate->previousFramePreExposure;
-    }
-
-    // Frame index & jitter phase count
-    const int32_t jitterPhaseCount = ffxmFsr3UpscalerGetJitterPhaseCount(pDispatchDescription->renderSize.width, contextPrivate->constants.upscaleSize[0]);
-    if (pDispatchDescription->reset || contextPrivate->firstExecution || contextPrivate->constants.jitterPhaseCount == 0.0f) {
-        contextPrivate->constants.jitterPhaseCount = static_cast<float>(jitterPhaseCount);
-        contextPrivate->constants.frameIndex = 0.0f;
-    } else {
-        const int32_t jitterPhaseCountDelta = static_cast<int32_t>(jitterPhaseCount - contextPrivate->constants.jitterPhaseCount);
-        if (jitterPhaseCountDelta > 0) {
-            contextPrivate->constants.jitterPhaseCount += 1.0f;
-        } else if (jitterPhaseCountDelta < 0) {
-            contextPrivate->constants.jitterPhaseCount -= 1.0f;
+    for (uint32_t i = 0; i < FFXM_COUNTOF(registrations); ++i) {
+        FfxmErrorCode regRes = contextPrivate->contextDescription.backendInterface.fpRegisterResource(
+            &contextPrivate->contextDescription.backendInterface,
+            registrations[i].resource,
+            contextPrivate->effectContextId,
+            &contextPrivate->srvResources[registrations[i].srvIdentifier]);
+        if (regRes != FFXM_OK) {
+            dispatchResult = regRes;
+            break;
         }
-        contextPrivate->constants.frameIndex += 1.0f;
+        if (registrations[i].uavIdentifier != 0) {
+            contextPrivate->uavResources[registrations[i].uavIdentifier] =
+                contextPrivate->srvResources[registrations[i].srvIdentifier];
+        }
+        registeredCount++;
     }
 
-    // Re-stage constant buffers with computed parameters
-    stageConstantBuffer(
-        &contextPrivate->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_FSR3UPSCALER],
-        &contextPrivate->constants,
-        sizeof(contextPrivate->constants));
+    if (dispatchResult == FFXM_OK) {
+        // Ping-pong & aliasable resource routing
+        const bool isOddFrame = !!(contextPrivate->resourceFrameIndex & 1);
+        const uint32_t currentLumaResourceIndex = isOddFrame
+            ? FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_2
+            : FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_1;
+        const uint32_t previousLumaResourceIndex = isOddFrame
+            ? FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_1
+            : FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_2;
 
-    // Clear Reconstructed Previous Nearest Depth surface
-    {
+        contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_CURRENT_LUMA] = contextPrivate->srvResources[currentLumaResourceIndex];
+        contextPrivate->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_CURRENT_LUMA] = contextPrivate->uavResources[currentLumaResourceIndex];
+        contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_PREVIOUS_LUMA] = contextPrivate->srvResources[previousLumaResourceIndex];
+
+        contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FARTHEST_DEPTH] = contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERMEDIATE_FP16x1];
+        contextPrivate->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FARTHEST_DEPTH] = contextPrivate->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERMEDIATE_FP16x1];
+
+        // Compute device depth to view space depth parameters
+        setupDeviceDepthToViewSpaceDepthParams(contextPrivate, pDispatchDescription);
+
+        // Update motion vector scales
+        const int32_t* motionVectorsTargetSize = (contextPrivate->contextDescription.flags & FFXM_FSR3UPSCALER_ENABLE_DISPLAY_RESOLUTION_MOTION_VECTORS)
+            ? contextPrivate->constants.upscaleSize
+            : contextPrivate->constants.renderSize;
+        if (motionVectorsTargetSize[0] > 0 && motionVectorsTargetSize[1] > 0) {
+            contextPrivate->constants.motionVectorScale[0] = (pDispatchDescription->motionVectorScale.x / static_cast<float>(motionVectorsTargetSize[0]));
+            contextPrivate->constants.motionVectorScale[1] = (pDispatchDescription->motionVectorScale.y / static_cast<float>(motionVectorsTargetSize[1]));
+        }
+
+        // Downscale factor
+        if (contextPrivate->constants.upscaleSize[0] > 0 && contextPrivate->constants.upscaleSize[1] > 0) {
+            contextPrivate->constants.downscaleFactor[0] = static_cast<float>(contextPrivate->constants.renderSize[0]) / static_cast<float>(contextPrivate->constants.upscaleSize[0]);
+            contextPrivate->constants.downscaleFactor[1] = static_cast<float>(contextPrivate->constants.renderSize[1]) / static_cast<float>(contextPrivate->constants.upscaleSize[1]);
+        }
+
+        // Pre-exposure factors
+        contextPrivate->constants.deltaPreExposure = 1.0f;
+        contextPrivate->previousFramePreExposure = contextPrivate->preExposure;
+        contextPrivate->preExposure = (pDispatchDescription->preExposure != 0.0f) ? pDispatchDescription->preExposure : 1.0f;
+        if (contextPrivate->previousFramePreExposure > 0.0f) {
+            contextPrivate->constants.deltaPreExposure = contextPrivate->preExposure / contextPrivate->previousFramePreExposure;
+        }
+
+        // Frame index & jitter phase count
+        const int32_t jitterPhaseCount = ffxmFsr3UpscalerGetJitterPhaseCount(pDispatchDescription->renderSize.width, contextPrivate->constants.upscaleSize[0]);
+        if (pDispatchDescription->reset || contextPrivate->firstExecution || contextPrivate->constants.jitterPhaseCount == 0.0f) {
+            contextPrivate->constants.jitterPhaseCount = static_cast<float>(jitterPhaseCount);
+            contextPrivate->constants.frameIndex = 0.0f;
+        } else {
+            const int32_t jitterPhaseCountDelta = static_cast<int32_t>(jitterPhaseCount - contextPrivate->constants.jitterPhaseCount);
+            if (jitterPhaseCountDelta > 0) {
+                contextPrivate->constants.jitterPhaseCount += 1.0f;
+            } else if (jitterPhaseCountDelta < 0) {
+                contextPrivate->constants.jitterPhaseCount -= 1.0f;
+            }
+            contextPrivate->constants.frameIndex += 1.0f;
+        }
+
+        // Re-stage constant buffers with computed parameters
+        stageConstantBuffer(
+            &contextPrivate->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_FSR3UPSCALER],
+            &contextPrivate->constants,
+            sizeof(contextPrivate->constants));
+
+        // Clear Reconstructed Previous Nearest Depth surface
         FfxmGpuJobDescription clearJob = { FFXM_GPU_JOB_CLEAR_FLOAT };
         const bool bInverted = (contextPrivate->contextDescription.flags & FFXM_FSR3UPSCALER_ENABLE_DEPTH_INVERTED) == FFXM_FSR3UPSCALER_ENABLE_DEPTH_INVERTED;
         const float clearDepthValue[]{ bInverted ? 0.f : 1.f, bInverted ? 0.f : 1.f, bInverted ? 0.f : 1.f, bInverted ? 0.f : 1.f };
         memcpy(clearJob.clearJobDescriptor.color, clearDepthValue, 4 * sizeof(float));
         clearJob.clearJobDescriptor.target = contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_RECONSTRUCTED_PREVIOUS_NEAREST_DEPTH];
-        contextPrivate->contextDescription.backendInterface.fpScheduleGpuJob(
+        dispatchResult = contextPrivate->contextDescription.backendInterface.fpScheduleGpuJob(
             &contextPrivate->contextDescription.backendInterface, &clearJob);
+
+        // Schedule PrepareInputs compute pass only if clear job scheduled successfully
+        if (dispatchResult == FFXM_OK) {
+            const int32_t threadGroupWorkRegionDim = 8;
+            const int32_t dispatchSrcX = (contextPrivate->constants.renderSize[0] + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
+            const int32_t dispatchSrcY = (contextPrivate->constants.renderSize[1] + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
+            dispatchResult = scheduleDispatch(contextPrivate, pDispatchDescription, &contextPrivate->pipelinePrepareInputs, dispatchSrcX, dispatchSrcY);
+        }
+
+        // Execute scheduled GPU jobs only if all jobs scheduled successfully
+        if (dispatchResult == FFXM_OK) {
+            dispatchResult = contextPrivate->contextDescription.backendInterface.fpExecuteGpuJobs(
+                &contextPrivate->contextDescription.backendInterface,
+                pDispatchDescription->commandList);
+        }
     }
 
-    // Schedule PrepareInputs compute pass
-    const int32_t threadGroupWorkRegionDim = 8;
-    const int32_t dispatchSrcX = (contextPrivate->constants.renderSize[0] + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
-    const int32_t dispatchSrcY = (contextPrivate->constants.renderSize[1] + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
-    scheduleDispatch(contextPrivate, pDispatchDescription, &contextPrivate->pipelinePrepareInputs, dispatchSrcX, dispatchSrcY);
+    // Resource unregistration & dynamic slot cleanup
+    if (registeredCount > 0) {
+        FfxmErrorCode unregRes = contextPrivate->contextDescription.backendInterface.fpUnregisterResources(
+            &contextPrivate->contextDescription.backendInterface,
+            pDispatchDescription->commandList,
+            contextPrivate->effectContextId);
 
-    // Execute scheduled GPU jobs
-    contextPrivate->contextDescription.backendInterface.fpExecuteGpuJobs(
-        &contextPrivate->contextDescription.backendInterface,
-        pDispatchDescription->commandList);
+        // If dispatch pipeline succeeded, propagate cleanup errors;
+        // if dispatch already encountered an earlier failure, preserve that original error.
+        if (dispatchResult == FFXM_OK && unregRes != FFXM_OK) {
+            dispatchResult = unregRes;
+        }
 
-    // Unregister transient frame resources
-    contextPrivate->contextDescription.backendInterface.fpUnregisterResources(
-        &contextPrivate->contextDescription.backendInterface,
-        pDispatchDescription->commandList,
-        contextPrivate->effectContextId);
+        // Reset dynamic resource tracking slots back to unallocated sentinel (-1)
+        for (uint32_t i = 0; i < FFXM_COUNTOF(registrations); ++i) {
+            contextPrivate->srvResources[registrations[i].srvIdentifier].internalIndex = -1;
+            if (registrations[i].uavIdentifier != 0) {
+                contextPrivate->uavResources[registrations[i].uavIdentifier].internalIndex = -1;
+            }
+        }
+    }
 
-    // Advance resource frame index
-    contextPrivate->resourceFrameIndex = (contextPrivate->resourceFrameIndex + 1) % 16;
-    contextPrivate->firstExecution = false;
+    // Only advance frame state and clear firstExecution on completely successful execution
+    if (dispatchResult == FFXM_OK) {
+        contextPrivate->resourceFrameIndex = (contextPrivate->resourceFrameIndex + 1) % 16;
+        contextPrivate->firstExecution = false;
+    }
 
-    return FFXM_OK;
+    return dispatchResult;
 }
 
 FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextGenerateReactiveMask(

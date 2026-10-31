@@ -22,14 +22,29 @@
 #if defined(FFXM_HAS_VK_BACKEND)
 #include "host/backends/vk/ffxm_vk.h"
 
+#if defined(_WIN32)
+#include <windows.h>
+static PFN_vkEnumerateDeviceExtensionProperties s_pfnRealEnumerateDeviceExtensionProperties = nullptr;
+static PFN_vkGetDeviceProcAddr s_pfnRealGetDeviceProcAddr = nullptr;
+static PFN_vkGetPhysicalDeviceProperties2 s_pfnRealGetPhysicalDeviceProperties2 = nullptr;
+static PFN_vkGetPhysicalDeviceFeatures2 s_pfnRealGetPhysicalDeviceFeatures2 = nullptr;
+static PFN_vkGetPhysicalDeviceMemoryProperties s_pfnRealGetPhysicalDeviceMemoryProperties = nullptr;
+#endif
+
 #if !defined(ANDROID)
 // On host platforms when compiling tests without the full Vulkan SDK loader (using header-only Vulkan-Headers),
 // provide stubs for Vulkan loader functions so test_milestone2 can link Arm_ASR_backend
 // to directly test ffxmGetScratchMemorySizeVK and ffxmGetInterfaceVK.
+// When running real hardware tests, these stubs forward dynamically to vulkan-1.dll.
 extern "C" {
     VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
         VkPhysicalDevice physicalDevice, const char* pLayerName, uint32_t* pPropertyCount, VkExtensionProperties* pProperties)
     {
+#if defined(_WIN32)
+        if (s_pfnRealEnumerateDeviceExtensionProperties) {
+            return s_pfnRealEnumerateDeviceExtensionProperties(physicalDevice, pLayerName, pPropertyCount, pProperties);
+        }
+#endif
         (void)physicalDevice;
         (void)pLayerName;
         (void)pProperties;
@@ -41,6 +56,11 @@ extern "C" {
 
     VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice device, const char* pName)
     {
+#if defined(_WIN32)
+        if (s_pfnRealGetDeviceProcAddr) {
+            return s_pfnRealGetDeviceProcAddr(device, pName);
+        }
+#endif
         (void)device;
         (void)pName;
         return nullptr;
@@ -49,6 +69,12 @@ extern "C" {
     VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceProperties2(
         VkPhysicalDevice physicalDevice, VkPhysicalDeviceProperties2* pProperties)
     {
+#if defined(_WIN32)
+        if (s_pfnRealGetPhysicalDeviceProperties2) {
+            s_pfnRealGetPhysicalDeviceProperties2(physicalDevice, pProperties);
+            return;
+        }
+#endif
         (void)physicalDevice;
         (void)pProperties;
     }
@@ -56,6 +82,12 @@ extern "C" {
     VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceFeatures2(
         VkPhysicalDevice physicalDevice, VkPhysicalDeviceFeatures2* pFeatures)
     {
+#if defined(_WIN32)
+        if (s_pfnRealGetPhysicalDeviceFeatures2) {
+            s_pfnRealGetPhysicalDeviceFeatures2(physicalDevice, pFeatures);
+            return;
+        }
+#endif
         (void)physicalDevice;
         (void)pFeatures;
     }
@@ -63,6 +95,12 @@ extern "C" {
     VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceMemoryProperties(
         VkPhysicalDevice physicalDevice, VkPhysicalDeviceMemoryProperties* pMemoryProperties)
     {
+#if defined(_WIN32)
+        if (s_pfnRealGetPhysicalDeviceMemoryProperties) {
+            s_pfnRealGetPhysicalDeviceMemoryProperties(physicalDevice, pMemoryProperties);
+            return;
+        }
+#endif
         (void)physicalDevice;
         (void)pMemoryProperties;
     }
@@ -135,6 +173,15 @@ static int32_t s_FailAtResourceIndex = -1; // -1 means no failure
 static int32_t s_FailAtCopyIndex = -1;     // -1 means no failure
 static int32_t s_CurrentResourceCreateCount = 0;
 static int32_t s_NextResourceIndex = 0;
+
+// Dynamic registration & dispatch failure injection controls
+static int32_t s_FailAtRegisterResourceIndex = -1;
+static uint32_t s_RegisterResourceCallCount = 0;
+static FfxmErrorCode s_ScheduleGpuJobResult = FFXM_OK;
+static uint32_t s_ScheduleGpuJobCallCount = 0;
+static int32_t s_FailAtScheduleGpuJobIndex = -1;
+static FfxmErrorCode s_ExecuteGpuJobsResult = FFXM_OK;
+static FfxmErrorCode s_UnregisterResourcesResult = FFXM_OK;
 
 // Occurrence-aware resource creation & destruction tracking
 static std::map<int32_t, int> s_ResourceCreationCounts;
@@ -255,9 +302,14 @@ static FfxmErrorCode MockRegisterResource(
     FfxmResourceInternal* outResource)
 {
     (void)backendInterface; (void)inResource; (void)effectContextId;
-    if (outResource) {
-        outResource->internalIndex = 999;
+    if (s_FailAtRegisterResourceIndex >= 0 && static_cast<int32_t>(s_RegisterResourceCallCount) == s_FailAtRegisterResourceIndex) {
+        s_RegisterResourceCallCount++;
+        return FFXM_ERROR_OUT_OF_MEMORY;
     }
+    if (outResource) {
+        outResource->internalIndex = 900 + static_cast<int32_t>(s_RegisterResourceCallCount);
+    }
+    s_RegisterResourceCallCount++;
     return FFXM_OK;
 }
 
@@ -358,6 +410,14 @@ static FfxmErrorCode MockDestroyPipeline(FfxmInterface* backendInterface, FfxmPi
 static FfxmErrorCode MockScheduleGpuJob(FfxmInterface* backendInterface, const FfxmGpuJobDescription* job)
 {
     (void)backendInterface;
+    if (s_FailAtScheduleGpuJobIndex >= 0 && static_cast<int32_t>(s_ScheduleGpuJobCallCount) == s_FailAtScheduleGpuJobIndex) {
+        s_ScheduleGpuJobCallCount++;
+        return FFXM_ERROR_BACKEND_API_ERROR;
+    }
+    s_ScheduleGpuJobCallCount++;
+    if (s_ScheduleGpuJobResult != FFXM_OK) {
+        return s_ScheduleGpuJobResult;
+    }
     if (job) {
         s_ScheduledGpuJobs.push_back(*job);
     }
@@ -368,14 +428,14 @@ static FfxmErrorCode MockExecuteGpuJobs(FfxmInterface* backendInterface, FfxmCom
 {
     (void)backendInterface; (void)commandList;
     s_ExecuteGpuJobsCallCount++;
-    return FFXM_OK;
+    return s_ExecuteGpuJobsResult;
 }
 
 static FfxmErrorCode MockUnregisterResources(FfxmInterface* backendInterface, FfxmCommandList commandList, FfxmUInt32 effectContextId)
 {
     (void)backendInterface; (void)commandList; (void)effectContextId;
     s_UnregisterResourcesCallCount++;
-    return FFXM_OK;
+    return s_UnregisterResourcesResult;
 }
 
 static void ResetMockState()
@@ -408,6 +468,13 @@ static void ResetMockState()
     s_UnregisterResourcesCallCount = 0;
     s_ScheduledGpuJobs.clear();
     s_CreatePipelineResult = FFXM_OK;
+    s_FailAtRegisterResourceIndex = -1;
+    s_RegisterResourceCallCount = 0;
+    s_ScheduleGpuJobResult = FFXM_OK;
+    s_ScheduleGpuJobCallCount = 0;
+    s_FailAtScheduleGpuJobIndex = -1;
+    s_ExecuteGpuJobsResult = FFXM_OK;
+    s_UnregisterResourcesResult = FFXM_OK;
 }
 
 static void SetupMockInterface(FfxmInterface* iface)
@@ -1494,8 +1561,8 @@ void TestM3PrepareInputsPassExecution()
     // Check clear job
     const FfxmGpuJobDescription& clearJob = s_ScheduledGpuJobs[0];
     TEST_CHECK(clearJob.jobType == FFXM_GPU_JOB_CLEAR_FLOAT);
-    TEST_CHECK(clearJob.clearJobDescriptor.target.internalIndex ==
-        priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_RECONSTRUCTED_PREVIOUS_NEAREST_DEPTH].internalIndex);
+    TEST_CHECK(clearJob.clearJobDescriptor.target.internalIndex != -1);
+    TEST_CHECK(priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_RECONSTRUCTED_PREVIOUS_NEAREST_DEPTH].internalIndex == -1);
 
     // Check compute dispatch job for PrepareInputs
     const FfxmGpuJobDescription& computeJob = s_ScheduledGpuJobs[1];
@@ -1547,6 +1614,575 @@ void TestM3PrepareInputsPassExecution()
     std::cout << "PASS: PrepareInputs compute pipeline created, verified, dispatched, and cleanly destroyed." << std::endl;
 }
 
+static void TestM3DispatchErrorHandling()
+{
+    std::cout << "--- Test 17: M3 PrepareInputs Dispatch Error Handling & Cleanup Contract ---" << std::endl;
+
+    ResetMockState();
+
+    FfxmInterface iface = {};
+    SetupMockInterface(&iface);
+
+    FfxmFsr3UpscalerContextDescription desc = {};
+    desc.flags = FFXM_FSR3UPSCALER_ENABLE_DEPTH_INVERTED | FFXM_FSR3UPSCALER_ENABLE_HIGH_DYNAMIC_RANGE;
+    desc.maxRenderSize = { 1920, 1080 };
+    desc.maxUpscaleSize = { 3840, 2160 };
+    desc.backendInterface = iface;
+
+    FfxmFsr3UpscalerContext context;
+    TEST_REQUIRE(ffxmFsr3UpscalerContextCreate(&context, &desc) == FFXM_OK);
+    FfxmFsr3UpscalerContext_Private* priv = reinterpret_cast<FfxmFsr3UpscalerContext_Private*>(&context);
+
+    static int s_ColorResource = 10;
+    static int s_DepthResource = 20;
+    static int s_MvResource = 30;
+    static int s_DilatedMvResource = 40;
+    static int s_DilatedDepthResource = 50;
+    static int s_ReconstructedDepthResource = 60;
+
+    FfxmFsr3UpscalerDispatchDescription dispDesc = {};
+    dispDesc.commandList = reinterpret_cast<FfxmCommandList>(static_cast<uintptr_t>(0xCAFE));
+    dispDesc.renderSize = { 1920, 1080 };
+    dispDesc.upscaleSize = { 3840, 2160 };
+    dispDesc.jitterOffset = { 0.0f, 0.0f };
+    dispDesc.motionVectorScale = { 1.0f, 1.0f };
+    dispDesc.cameraNear = 0.1f;
+    dispDesc.cameraFar = 1000.0f;
+    dispDesc.cameraFovAngleVertical = 1.0f;
+    dispDesc.frameTimeDelta = 16.666f;
+    dispDesc.viewSpaceToMetersFactor = 1.0f;
+    dispDesc.color.resource = &s_ColorResource;
+    dispDesc.depth.resource = &s_DepthResource;
+    dispDesc.motionVectors.resource = &s_MvResource;
+    dispDesc.dilatedMotionVectors.resource = &s_DilatedMvResource;
+    dispDesc.dilatedDepth.resource = &s_DilatedDepthResource;
+    dispDesc.reconstructedPrevNearestDepth.resource = &s_ReconstructedDepthResource;
+
+    auto resetDispatchTrackers = []() {
+        s_ScheduledGpuJobs.clear();
+        s_RegisterResourceCallCount = 0;
+        s_ScheduleGpuJobCallCount = 0;
+        s_ExecuteGpuJobsCallCount = 0;
+        s_UnregisterResourcesCallCount = 0;
+        s_FailAtRegisterResourceIndex = -1;
+        s_ScheduleGpuJobResult = FFXM_OK;
+        s_FailAtScheduleGpuJobIndex = -1;
+        s_ExecuteGpuJobsResult = FFXM_OK;
+        s_UnregisterResourcesResult = FFXM_OK;
+    };
+
+    auto verifyDynamicSlotsReset = [&]() {
+        TEST_CHECK(priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_COLOR].internalIndex == -1);
+        TEST_CHECK(priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_DEPTH].internalIndex == -1);
+        TEST_CHECK(priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_MOTION_VECTORS].internalIndex == -1);
+        TEST_CHECK(priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_MOTION_VECTORS].internalIndex == -1);
+        TEST_CHECK(priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_DEPTH].internalIndex == -1);
+        TEST_CHECK(priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_RECONSTRUCTED_PREVIOUS_NEAREST_DEPTH].internalIndex == -1);
+        TEST_CHECK(priv->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_MOTION_VECTORS].internalIndex == -1);
+        TEST_CHECK(priv->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_DEPTH].internalIndex == -1);
+        TEST_CHECK(priv->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_RECONSTRUCTED_PREVIOUS_NEAREST_DEPTH].internalIndex == -1);
+    };
+
+    // Scenario 1: First dynamic resource registration fails (index 0)
+    {
+        resetDispatchTrackers();
+        s_FailAtRegisterResourceIndex = 0;
+
+        FfxmErrorCode err = ffxmFsr3UpscalerContextDispatch(&context, &dispDesc);
+        TEST_CHECK(err == FFXM_ERROR_OUT_OF_MEMORY);
+        TEST_CHECK(s_RegisterResourceCallCount == 1);
+        TEST_CHECK(s_UnregisterResourcesCallCount == 0); // Never unregister when 0 acquired
+        TEST_CHECK(s_ScheduleGpuJobCallCount == 0);
+        TEST_CHECK(s_ExecuteGpuJobsCallCount == 0);
+        TEST_CHECK(priv->resourceFrameIndex == 0);
+        TEST_CHECK(priv->firstExecution == true);
+        verifyDynamicSlotsReset();
+    }
+
+    // Scenario 2: Later dynamic resource registration fails (index 3)
+    {
+        resetDispatchTrackers();
+        s_FailAtRegisterResourceIndex = 3;
+
+        FfxmErrorCode err = ffxmFsr3UpscalerContextDispatch(&context, &dispDesc);
+        TEST_CHECK(err == FFXM_ERROR_OUT_OF_MEMORY);
+        TEST_CHECK(s_RegisterResourceCallCount == 4);
+        TEST_CHECK(s_UnregisterResourcesCallCount == 1); // Clean up acquired resources
+        TEST_CHECK(s_ScheduleGpuJobCallCount == 0);
+        TEST_CHECK(s_ExecuteGpuJobsCallCount == 0);
+        TEST_CHECK(priv->resourceFrameIndex == 0);
+        TEST_CHECK(priv->firstExecution == true);
+        verifyDynamicSlotsReset();
+    }
+
+    // Scenario 3a: Clear job scheduling fails
+    {
+        resetDispatchTrackers();
+        s_FailAtScheduleGpuJobIndex = 0;
+
+        FfxmErrorCode err = ffxmFsr3UpscalerContextDispatch(&context, &dispDesc);
+        TEST_CHECK(err == FFXM_ERROR_BACKEND_API_ERROR);
+        TEST_CHECK(s_RegisterResourceCallCount == 6);
+        TEST_CHECK(s_ScheduleGpuJobCallCount == 1);
+        TEST_CHECK(s_ExecuteGpuJobsCallCount == 0); // Execution skipped on schedule failure
+        TEST_CHECK(s_UnregisterResourcesCallCount == 1);
+        TEST_CHECK(priv->resourceFrameIndex == 0);
+        TEST_CHECK(priv->firstExecution == true);
+        verifyDynamicSlotsReset();
+    }
+
+    // Scenario 3b: Compute dispatch job scheduling fails
+    {
+        resetDispatchTrackers();
+        s_FailAtScheduleGpuJobIndex = 1;
+
+        FfxmErrorCode err = ffxmFsr3UpscalerContextDispatch(&context, &dispDesc);
+        TEST_CHECK(err == FFXM_ERROR_BACKEND_API_ERROR);
+        TEST_CHECK(s_RegisterResourceCallCount == 6);
+        TEST_CHECK(s_ScheduleGpuJobCallCount == 2);
+        TEST_CHECK(s_ScheduledGpuJobs.size() == 1);
+        TEST_CHECK(s_ExecuteGpuJobsCallCount == 0);
+        TEST_CHECK(s_UnregisterResourcesCallCount == 1);
+        TEST_CHECK(priv->resourceFrameIndex == 0);
+        TEST_CHECK(priv->firstExecution == true);
+        verifyDynamicSlotsReset();
+    }
+
+    // Scenario 4: GPU job execution fails
+    {
+        resetDispatchTrackers();
+        s_ExecuteGpuJobsResult = FFXM_ERROR_BACKEND_API_ERROR;
+
+        FfxmErrorCode err = ffxmFsr3UpscalerContextDispatch(&context, &dispDesc);
+        TEST_CHECK(err == FFXM_ERROR_BACKEND_API_ERROR);
+        TEST_CHECK(s_RegisterResourceCallCount == 6);
+        TEST_CHECK(s_ScheduleGpuJobCallCount == 2);
+        TEST_CHECK(s_ExecuteGpuJobsCallCount == 1);
+        TEST_CHECK(s_UnregisterResourcesCallCount == 1);
+        TEST_CHECK(priv->resourceFrameIndex == 0);
+        TEST_CHECK(priv->firstExecution == true);
+        verifyDynamicSlotsReset();
+    }
+
+    // Scenario 5: Resource unregistration fails after successful execution
+    {
+        resetDispatchTrackers();
+        s_UnregisterResourcesResult = FFXM_ERROR_BACKEND_API_ERROR;
+
+        FfxmErrorCode err = ffxmFsr3UpscalerContextDispatch(&context, &dispDesc);
+        TEST_CHECK(err == FFXM_ERROR_BACKEND_API_ERROR);
+        TEST_CHECK(s_ExecuteGpuJobsCallCount == 1);
+        TEST_CHECK(s_UnregisterResourcesCallCount == 1);
+        TEST_CHECK(priv->resourceFrameIndex == 0);
+        TEST_CHECK(priv->firstExecution == true);
+        verifyDynamicSlotsReset();
+    }
+
+    // Scenario 6: Execution and Unregistration BOTH fail
+    {
+        resetDispatchTrackers();
+        s_ExecuteGpuJobsResult = FFXM_ERROR_INVALID_ARGUMENT;
+        s_UnregisterResourcesResult = FFXM_ERROR_BACKEND_API_ERROR;
+
+        FfxmErrorCode err = ffxmFsr3UpscalerContextDispatch(&context, &dispDesc);
+        TEST_CHECK(err == FFXM_ERROR_INVALID_ARGUMENT); // Original error preserved
+        TEST_CHECK(s_ExecuteGpuJobsCallCount == 1);
+        TEST_CHECK(s_UnregisterResourcesCallCount == 1);
+        TEST_CHECK(priv->resourceFrameIndex == 0);
+        TEST_CHECK(priv->firstExecution == true);
+        verifyDynamicSlotsReset();
+    }
+
+    // Scenario 7: Successful dispatch after recoverable failure
+    {
+        resetDispatchTrackers();
+
+        FfxmErrorCode err = ffxmFsr3UpscalerContextDispatch(&context, &dispDesc);
+        TEST_CHECK(err == FFXM_OK);
+        TEST_CHECK(s_RegisterResourceCallCount == 6);
+        TEST_CHECK(s_ScheduleGpuJobCallCount == 2);
+        TEST_CHECK(s_ExecuteGpuJobsCallCount == 1);
+        TEST_CHECK(s_UnregisterResourcesCallCount == 1);
+        TEST_CHECK(priv->resourceFrameIndex == 1);
+        TEST_CHECK(priv->firstExecution == false);
+        verifyDynamicSlotsReset();
+    }
+
+    TEST_CHECK(ffxmFsr3UpscalerContextDestroy(&context) == FFXM_OK);
+    VerifyOccurrenceAwareResourceBalance();
+
+    std::cout << "PASS: All 7 M3 PrepareInputs dispatch error handling and cleanup scenarios verified." << std::endl;
+}
+
+#if defined(FFXM_HAS_VK_BACKEND) && defined(_WIN32)
+static uint32_t FindVkMemoryType(const VkPhysicalDeviceMemoryProperties& memProps, uint32_t typeFilter, VkMemoryPropertyFlags properties)
+{
+    for (uint32_t i = 0; i < memProps.memoryTypeCount; i++) {
+        if ((typeFilter & (1 << i)) && (memProps.memoryTypes[i].propertyFlags & properties) == properties) {
+            return i;
+        }
+    }
+    return UINT32_MAX;
+}
+
+struct RealVkTestImage {
+    VkImage image = VK_NULL_HANDLE;
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+};
+
+static bool CreateRealVkTestImage(
+    VkDevice device,
+    const VkPhysicalDeviceMemoryProperties& memProps,
+    PFN_vkCreateImage pfnCreateImage,
+    PFN_vkGetImageMemoryRequirements pfnGetImageMemoryRequirements,
+    PFN_vkAllocateMemory pfnAllocateMemory,
+    PFN_vkBindImageMemory pfnBindImageMemory,
+    uint32_t width,
+    uint32_t height,
+    VkFormat format,
+    VkImageUsageFlags usage,
+    RealVkTestImage* outImage)
+{
+    VkImageCreateInfo imgInfo = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+    imgInfo.imageType = VK_IMAGE_TYPE_2D;
+    imgInfo.format = format;
+    imgInfo.extent = { width, height, 1 };
+    imgInfo.mipLevels = 1;
+    imgInfo.arrayLayers = 1;
+    imgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imgInfo.usage = usage;
+    imgInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    imgInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    if (pfnCreateImage(device, &imgInfo, nullptr, &outImage->image) != VK_SUCCESS) {
+        return false;
+    }
+
+    VkMemoryRequirements memReq;
+    pfnGetImageMemoryRequirements(device, outImage->image, &memReq);
+
+    VkMemoryAllocateInfo allocInfo = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+    allocInfo.allocationSize = memReq.size;
+    allocInfo.memoryTypeIndex = FindVkMemoryType(memProps, memReq.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (allocInfo.memoryTypeIndex == UINT32_MAX) {
+        allocInfo.memoryTypeIndex = FindVkMemoryType(memProps, memReq.memoryTypeBits, 0);
+    }
+
+    if (pfnAllocateMemory(device, &allocInfo, nullptr, &outImage->memory) != VK_SUCCESS) {
+        return false;
+    }
+
+    if (pfnBindImageMemory(device, outImage->image, outImage->memory, 0) != VK_SUCCESS) {
+        return false;
+    }
+
+    return true;
+}
+
+static void DestroyRealVkTestImage(
+    VkDevice device,
+    PFN_vkDestroyImage pfnDestroyImage,
+    PFN_vkFreeMemory pfnFreeMemory,
+    RealVkTestImage* img)
+{
+    if (img->image) pfnDestroyImage(device, img->image, nullptr);
+    if (img->memory) pfnFreeMemory(device, img->memory, nullptr);
+    img->image = VK_NULL_HANDLE;
+    img->memory = VK_NULL_HANDLE;
+}
+#endif
+
+static void TestM3PrepareInputsRealVulkanExecution()
+{
+    std::cout << "--- Test 18: Real Vulkan GPU Hardware Execution of PrepareInputs ---" << std::endl;
+
+#if !defined(FFXM_HAS_VK_BACKEND) || !defined(_WIN32)
+    std::cout << "INFO: Vulkan backend or host platform not enabled for direct loader test; skipping real GPU hardware dispatch." << std::endl;
+    std::cout << "PASS: Real Vulkan GPU hardware execution skipped cleanly." << std::endl;
+#else
+    HMODULE hVk = LoadLibraryA("vulkan-1.dll");
+    if (!hVk) {
+        std::cout << "INFO: vulkan-1.dll not present in this environment (e.g. headless CI container); skipping hardware dispatch." << std::endl;
+        std::cout << "PASS: Real Vulkan GPU hardware execution safely skipped (headless host)." << std::endl;
+        return;
+    }
+
+    auto pfnCreateInstance = (PFN_vkCreateInstance)GetProcAddress(hVk, "vkCreateInstance");
+    auto pfnDestroyInstance = (PFN_vkDestroyInstance)GetProcAddress(hVk, "vkDestroyInstance");
+    auto pfnEnumeratePhysicalDevices = (PFN_vkEnumeratePhysicalDevices)GetProcAddress(hVk, "vkEnumeratePhysicalDevices");
+    auto pfnGetPhysicalDeviceProperties = (PFN_vkGetPhysicalDeviceProperties)GetProcAddress(hVk, "vkGetPhysicalDeviceProperties");
+    auto pfnGetPhysicalDeviceQueueFamilyProperties = (PFN_vkGetPhysicalDeviceQueueFamilyProperties)GetProcAddress(hVk, "vkGetPhysicalDeviceQueueFamilyProperties");
+    auto pfnCreateDevice = (PFN_vkCreateDevice)GetProcAddress(hVk, "vkCreateDevice");
+    auto pfnDestroyDevice = (PFN_vkDestroyDevice)GetProcAddress(hVk, "vkDestroyDevice");
+
+    s_pfnRealGetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)GetProcAddress(hVk, "vkGetDeviceProcAddr");
+    s_pfnRealEnumerateDeviceExtensionProperties = (PFN_vkEnumerateDeviceExtensionProperties)GetProcAddress(hVk, "vkEnumerateDeviceExtensionProperties");
+    s_pfnRealGetPhysicalDeviceProperties2 = (PFN_vkGetPhysicalDeviceProperties2)GetProcAddress(hVk, "vkGetPhysicalDeviceProperties2");
+    s_pfnRealGetPhysicalDeviceFeatures2 = (PFN_vkGetPhysicalDeviceFeatures2)GetProcAddress(hVk, "vkGetPhysicalDeviceFeatures2");
+    s_pfnRealGetPhysicalDeviceMemoryProperties = (PFN_vkGetPhysicalDeviceMemoryProperties)GetProcAddress(hVk, "vkGetPhysicalDeviceMemoryProperties");
+
+    if (!pfnCreateInstance || !pfnDestroyInstance || !pfnEnumeratePhysicalDevices || !pfnCreateDevice || !s_pfnRealGetDeviceProcAddr) {
+        std::cout << "INFO: Incomplete Vulkan entry points in vulkan-1.dll; skipping hardware dispatch." << std::endl;
+        s_pfnRealGetDeviceProcAddr = nullptr;
+        s_pfnRealEnumerateDeviceExtensionProperties = nullptr;
+        s_pfnRealGetPhysicalDeviceProperties2 = nullptr;
+        s_pfnRealGetPhysicalDeviceFeatures2 = nullptr;
+        s_pfnRealGetPhysicalDeviceMemoryProperties = nullptr;
+        FreeLibrary(hVk);
+        return;
+    }
+
+    VkApplicationInfo appInfo = { VK_STRUCTURE_TYPE_APPLICATION_INFO };
+    appInfo.pApplicationName = "FSR3 Real VK Integration Test";
+    appInfo.apiVersion = VK_API_VERSION_1_2;
+
+    VkInstanceCreateInfo instInfo = { VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
+    instInfo.pApplicationInfo = &appInfo;
+
+    VkInstance instance = VK_NULL_HANDLE;
+    VkResult res = pfnCreateInstance(&instInfo, nullptr, &instance);
+    if (res != VK_SUCCESS) {
+        std::cout << "INFO: vkCreateInstance returned " << res << " (no supported GPU driver); skipping hardware dispatch." << std::endl;
+        s_pfnRealGetDeviceProcAddr = nullptr;
+        s_pfnRealEnumerateDeviceExtensionProperties = nullptr;
+        s_pfnRealGetPhysicalDeviceProperties2 = nullptr;
+        s_pfnRealGetPhysicalDeviceFeatures2 = nullptr;
+        s_pfnRealGetPhysicalDeviceMemoryProperties = nullptr;
+        FreeLibrary(hVk);
+        return;
+    }
+
+    uint32_t gpuCount = 0;
+    pfnEnumeratePhysicalDevices(instance, &gpuCount, nullptr);
+    if (gpuCount == 0) {
+        std::cout << "INFO: No Vulkan physical devices enumerated; skipping hardware dispatch." << std::endl;
+        pfnDestroyInstance(instance, nullptr);
+        s_pfnRealGetDeviceProcAddr = nullptr;
+        s_pfnRealEnumerateDeviceExtensionProperties = nullptr;
+        s_pfnRealGetPhysicalDeviceProperties2 = nullptr;
+        s_pfnRealGetPhysicalDeviceFeatures2 = nullptr;
+        s_pfnRealGetPhysicalDeviceMemoryProperties = nullptr;
+        FreeLibrary(hVk);
+        return;
+    }
+
+    std::vector<VkPhysicalDevice> gpus(gpuCount);
+    pfnEnumeratePhysicalDevices(instance, &gpuCount, gpus.data());
+
+    VkPhysicalDevice selectedGpu = VK_NULL_HANDLE;
+    uint32_t computeFamily = UINT32_MAX;
+
+    for (int preferDiscrete = 1; preferDiscrete >= 0; --preferDiscrete) {
+        for (uint32_t i = 0; i < gpuCount; ++i) {
+            VkPhysicalDeviceProperties props;
+            pfnGetPhysicalDeviceProperties(gpus[i], &props);
+            if (preferDiscrete && props.deviceType != VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) continue;
+
+            VkPhysicalDeviceFloat16Int8FeaturesKHR f16 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT16_INT8_FEATURES_KHR };
+            VkPhysicalDeviceFeatures2 feat2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+            feat2.pNext = &f16;
+            s_pfnRealGetPhysicalDeviceFeatures2(gpus[i], &feat2);
+
+            if (!f16.shaderFloat16) continue;
+
+            uint32_t queueFamilyCount = 0;
+            pfnGetPhysicalDeviceQueueFamilyProperties(gpus[i], &queueFamilyCount, nullptr);
+            std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+            pfnGetPhysicalDeviceQueueFamilyProperties(gpus[i], &queueFamilyCount, queueFamilies.data());
+
+            for (uint32_t q = 0; q < queueFamilyCount; ++q) {
+                if (queueFamilies[q].queueFlags & VK_QUEUE_COMPUTE_BIT) {
+                    selectedGpu = gpus[i];
+                    computeFamily = q;
+                    break;
+                }
+            }
+            if (selectedGpu != VK_NULL_HANDLE) break;
+        }
+        if (selectedGpu != VK_NULL_HANDLE) break;
+    }
+
+    if (selectedGpu == VK_NULL_HANDLE) {
+        std::cout << "INFO: No physical device with FP16 and compute queue found; skipping hardware dispatch." << std::endl;
+        pfnDestroyInstance(instance, nullptr);
+        s_pfnRealGetDeviceProcAddr = nullptr;
+        s_pfnRealEnumerateDeviceExtensionProperties = nullptr;
+        s_pfnRealGetPhysicalDeviceProperties2 = nullptr;
+        s_pfnRealGetPhysicalDeviceFeatures2 = nullptr;
+        s_pfnRealGetPhysicalDeviceMemoryProperties = nullptr;
+        FreeLibrary(hVk);
+        return;
+    }
+
+    VkPhysicalDeviceProperties gpuProps;
+    pfnGetPhysicalDeviceProperties(selectedGpu, &gpuProps);
+    std::cout << "INFO: Real Vulkan GPU hardware detected: " << gpuProps.deviceName << std::endl;
+
+    float priority = 1.0f;
+    VkDeviceQueueCreateInfo queueInfo = { VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO };
+    queueInfo.queueFamilyIndex = computeFamily;
+    queueInfo.queueCount = 1;
+    queueInfo.pQueuePriorities = &priority;
+
+    VkPhysicalDeviceFloat16Int8FeaturesKHR f16Features = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT16_INT8_FEATURES_KHR };
+    f16Features.shaderFloat16 = VK_TRUE;
+
+    VkPhysicalDevice16BitStorageFeatures storage16 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES };
+    storage16.pNext = &f16Features;
+    storage16.storageBuffer16BitAccess = VK_TRUE;
+    storage16.uniformAndStorageBuffer16BitAccess = VK_TRUE;
+
+    VkPhysicalDeviceFeatures2 deviceFeatures2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+    deviceFeatures2.pNext = &storage16;
+
+    VkDeviceCreateInfo devInfo = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
+    devInfo.pNext = &deviceFeatures2;
+    devInfo.queueCreateInfoCount = 1;
+    devInfo.pQueueCreateInfos = &queueInfo;
+
+    VkDevice device = VK_NULL_HANDLE;
+    res = pfnCreateDevice(selectedGpu, &devInfo, nullptr, &device);
+    TEST_REQUIRE(res == VK_SUCCESS);
+
+    auto pfnGetDeviceQueue = (PFN_vkGetDeviceQueue)s_pfnRealGetDeviceProcAddr(device, "vkGetDeviceQueue");
+    auto pfnCreateCommandPool = (PFN_vkCreateCommandPool)s_pfnRealGetDeviceProcAddr(device, "vkCreateCommandPool");
+    auto pfnDestroyCommandPool = (PFN_vkDestroyCommandPool)s_pfnRealGetDeviceProcAddr(device, "vkDestroyCommandPool");
+    auto pfnAllocateCommandBuffers = (PFN_vkAllocateCommandBuffers)s_pfnRealGetDeviceProcAddr(device, "vkAllocateCommandBuffers");
+    auto pfnBeginCommandBuffer = (PFN_vkBeginCommandBuffer)s_pfnRealGetDeviceProcAddr(device, "vkBeginCommandBuffer");
+    auto pfnEndCommandBuffer = (PFN_vkEndCommandBuffer)s_pfnRealGetDeviceProcAddr(device, "vkEndCommandBuffer");
+    auto pfnQueueSubmit = (PFN_vkQueueSubmit)s_pfnRealGetDeviceProcAddr(device, "vkQueueSubmit");
+    auto pfnQueueWaitIdle = (PFN_vkQueueWaitIdle)s_pfnRealGetDeviceProcAddr(device, "vkQueueWaitIdle");
+    auto pfnCreateImage = (PFN_vkCreateImage)s_pfnRealGetDeviceProcAddr(device, "vkCreateImage");
+    auto pfnDestroyImage = (PFN_vkDestroyImage)s_pfnRealGetDeviceProcAddr(device, "vkDestroyImage");
+    auto pfnGetImageMemoryRequirements = (PFN_vkGetImageMemoryRequirements)s_pfnRealGetDeviceProcAddr(device, "vkGetImageMemoryRequirements");
+    auto pfnAllocateMemory = (PFN_vkAllocateMemory)s_pfnRealGetDeviceProcAddr(device, "vkAllocateMemory");
+    auto pfnFreeMemory = (PFN_vkFreeMemory)s_pfnRealGetDeviceProcAddr(device, "vkFreeMemory");
+    auto pfnBindImageMemory = (PFN_vkBindImageMemory)s_pfnRealGetDeviceProcAddr(device, "vkBindImageMemory");
+
+    VkQueue queue = VK_NULL_HANDLE;
+    pfnGetDeviceQueue(device, computeFamily, 0, &queue);
+
+    VkCommandPoolCreateInfo poolInfo = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
+    poolInfo.queueFamilyIndex = computeFamily;
+    poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    VkCommandPool cmdPool = VK_NULL_HANDLE;
+    pfnCreateCommandPool(device, &poolInfo, nullptr, &cmdPool);
+
+    VkCommandBufferAllocateInfo cmdAlloc = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+    cmdAlloc.commandPool = cmdPool;
+    cmdAlloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cmdAlloc.commandBufferCount = 1;
+    VkCommandBuffer cmdBuffer = VK_NULL_HANDLE;
+    pfnAllocateCommandBuffers(device, &cmdAlloc, &cmdBuffer);
+
+    VkPhysicalDeviceMemoryProperties memProperties;
+    s_pfnRealGetPhysicalDeviceMemoryProperties(selectedGpu, &memProperties);
+
+    const uint32_t renderW = 1920;
+    const uint32_t renderH = 1080;
+    VkImageUsageFlags uavUsage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    VkImageUsageFlags srvUsage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+
+    RealVkTestImage colorImg, depthImg, mvImg, dilMvImg, dilDepthImg, reconDepthImg;
+    TEST_CHECK(CreateRealVkTestImage(device, memProperties, pfnCreateImage, pfnGetImageMemoryRequirements, pfnAllocateMemory, pfnBindImageMemory, renderW, renderH, VK_FORMAT_R8G8B8A8_UNORM, srvUsage, &colorImg));
+    TEST_CHECK(CreateRealVkTestImage(device, memProperties, pfnCreateImage, pfnGetImageMemoryRequirements, pfnAllocateMemory, pfnBindImageMemory, renderW, renderH, VK_FORMAT_R32_SFLOAT, srvUsage, &depthImg));
+    TEST_CHECK(CreateRealVkTestImage(device, memProperties, pfnCreateImage, pfnGetImageMemoryRequirements, pfnAllocateMemory, pfnBindImageMemory, renderW, renderH, VK_FORMAT_R16G16_SFLOAT, srvUsage, &mvImg));
+    TEST_CHECK(CreateRealVkTestImage(device, memProperties, pfnCreateImage, pfnGetImageMemoryRequirements, pfnAllocateMemory, pfnBindImageMemory, renderW, renderH, VK_FORMAT_R16G16_SFLOAT, uavUsage, &dilMvImg));
+    TEST_CHECK(CreateRealVkTestImage(device, memProperties, pfnCreateImage, pfnGetImageMemoryRequirements, pfnAllocateMemory, pfnBindImageMemory, renderW, renderH, VK_FORMAT_R32_SFLOAT, uavUsage, &dilDepthImg));
+    TEST_CHECK(CreateRealVkTestImage(device, memProperties, pfnCreateImage, pfnGetImageMemoryRequirements, pfnAllocateMemory, pfnBindImageMemory, renderW, renderH, VK_FORMAT_R32_SFLOAT, uavUsage, &reconDepthImg));
+
+    VkDeviceContext devContext = {};
+    devContext.vkDevice = device;
+    devContext.vkPhysicalDevice = selectedGpu;
+    devContext.vkDeviceProcAddr = s_pfnRealGetDeviceProcAddr;
+
+    size_t scratchSize = ffxmGetScratchMemorySizeVK(selectedGpu, 1);
+    TEST_CHECK(scratchSize > 0);
+    std::vector<uint8_t> scratchBuffer(scratchSize);
+
+    FfxmInterface backendInterface = {};
+    FfxmErrorCode ifaceErr = ffxmGetInterfaceVK(&backendInterface, ffxmGetDeviceVK(&devContext), scratchBuffer.data(), scratchSize, 1);
+    TEST_CHECK(ifaceErr == FFXM_OK);
+
+    FfxmFsr3UpscalerContextDescription contextDesc = {};
+    contextDesc.flags = FFXM_FSR3UPSCALER_ENABLE_DEPTH_INVERTED | FFXM_FSR3UPSCALER_ENABLE_HIGH_DYNAMIC_RANGE;
+    contextDesc.maxRenderSize = { renderW, renderH };
+    contextDesc.maxUpscaleSize = { 3840, 2160 };
+    contextDesc.backendInterface = backendInterface;
+
+    FfxmFsr3UpscalerContext realContext = {};
+    FfxmErrorCode createErr = ffxmFsr3UpscalerContextCreate(&realContext, &contextDesc);
+    TEST_CHECK(createErr == FFXM_OK);
+
+    VkCommandBufferBeginInfo beginInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    pfnBeginCommandBuffer(cmdBuffer, &beginInfo);
+
+    FfxmFsr3UpscalerDispatchDescription dispDesc = {};
+    dispDesc.commandList = ffxmGetCommandListVK(cmdBuffer);
+    dispDesc.renderSize = { renderW, renderH };
+    dispDesc.upscaleSize = { 3840, 2160 };
+    dispDesc.jitterOffset = { 0.0f, 0.0f };
+    dispDesc.motionVectorScale = { 1.0f, 1.0f };
+    dispDesc.cameraNear = 0.1f;
+    dispDesc.cameraFar = 1000.0f;
+    dispDesc.cameraFovAngleVertical = 1.0f;
+    dispDesc.frameTimeDelta = 16.666f;
+    dispDesc.viewSpaceToMetersFactor = 1.0f;
+
+    FfxmResourceDescription rR8G8B8A8 = { FFXM_RESOURCE_TYPE_TEXTURE2D, FFXM_SURFACE_FORMAT_R8G8B8A8_UNORM, renderW, renderH, 1, 1, FFXM_RESOURCE_FLAGS_NONE, FFXM_RESOURCE_USAGE_READ_ONLY };
+    FfxmResourceDescription rR32F = { FFXM_RESOURCE_TYPE_TEXTURE2D, FFXM_SURFACE_FORMAT_R32_FLOAT, renderW, renderH, 1, 1, FFXM_RESOURCE_FLAGS_NONE, FFXM_RESOURCE_USAGE_READ_ONLY };
+    FfxmResourceDescription rRG16F = { FFXM_RESOURCE_TYPE_TEXTURE2D, FFXM_SURFACE_FORMAT_R16G16_FLOAT, renderW, renderH, 1, 1, FFXM_RESOURCE_FLAGS_NONE, FFXM_RESOURCE_USAGE_READ_ONLY };
+    FfxmResourceDescription rUavR32F = { FFXM_RESOURCE_TYPE_TEXTURE2D, FFXM_SURFACE_FORMAT_R32_FLOAT, renderW, renderH, 1, 1, FFXM_RESOURCE_FLAGS_NONE, FFXM_RESOURCE_USAGE_UAV };
+    FfxmResourceDescription rUavRG16F = { FFXM_RESOURCE_TYPE_TEXTURE2D, FFXM_SURFACE_FORMAT_R16G16_FLOAT, renderW, renderH, 1, 1, FFXM_RESOURCE_FLAGS_NONE, FFXM_RESOURCE_USAGE_UAV };
+
+    dispDesc.color = ffxmGetResourceVK(colorImg.image, rR8G8B8A8, nullptr, FFXM_RESOURCE_STATE_COMPUTE_READ);
+    dispDesc.depth = ffxmGetResourceVK(depthImg.image, rR32F, nullptr, FFXM_RESOURCE_STATE_COMPUTE_READ);
+    dispDesc.motionVectors = ffxmGetResourceVK(mvImg.image, rRG16F, nullptr, FFXM_RESOURCE_STATE_COMPUTE_READ);
+    dispDesc.dilatedMotionVectors = ffxmGetResourceVK(dilMvImg.image, rUavRG16F, nullptr, FFXM_RESOURCE_STATE_UNORDERED_ACCESS);
+    dispDesc.dilatedDepth = ffxmGetResourceVK(dilDepthImg.image, rUavR32F, nullptr, FFXM_RESOURCE_STATE_UNORDERED_ACCESS);
+    dispDesc.reconstructedPrevNearestDepth = ffxmGetResourceVK(reconDepthImg.image, rUavR32F, nullptr, FFXM_RESOURCE_STATE_UNORDERED_ACCESS);
+
+    FfxmErrorCode dispErr = ffxmFsr3UpscalerContextDispatch(&realContext, &dispDesc);
+    TEST_CHECK(dispErr == FFXM_OK);
+
+    pfnEndCommandBuffer(cmdBuffer);
+
+    VkSubmitInfo submitInfo = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &cmdBuffer;
+
+    VkResult submitRes = pfnQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+    TEST_CHECK(submitRes == VK_SUCCESS);
+
+    VkResult waitRes = pfnQueueWaitIdle(queue);
+    TEST_CHECK(waitRes == VK_SUCCESS);
+
+    TEST_CHECK(ffxmFsr3UpscalerContextDestroy(&realContext) == FFXM_OK);
+
+    DestroyRealVkTestImage(device, pfnDestroyImage, pfnFreeMemory, &colorImg);
+    DestroyRealVkTestImage(device, pfnDestroyImage, pfnFreeMemory, &depthImg);
+    DestroyRealVkTestImage(device, pfnDestroyImage, pfnFreeMemory, &mvImg);
+    DestroyRealVkTestImage(device, pfnDestroyImage, pfnFreeMemory, &dilMvImg);
+    DestroyRealVkTestImage(device, pfnDestroyImage, pfnFreeMemory, &dilDepthImg);
+    DestroyRealVkTestImage(device, pfnDestroyImage, pfnFreeMemory, &reconDepthImg);
+
+    pfnDestroyCommandPool(device, cmdPool, nullptr);
+    pfnDestroyDevice(device, nullptr);
+    pfnDestroyInstance(instance, nullptr);
+
+    s_pfnRealGetDeviceProcAddr = nullptr;
+    s_pfnRealEnumerateDeviceExtensionProperties = nullptr;
+    s_pfnRealGetPhysicalDeviceProperties2 = nullptr;
+    s_pfnRealGetPhysicalDeviceFeatures2 = nullptr;
+    s_pfnRealGetPhysicalDeviceMemoryProperties = nullptr;
+    FreeLibrary(hVk);
+
+    std::cout << "PASS: Real Vulkan GPU hardware execution of PrepareInputs verified on " << gpuProps.deviceName << "!" << std::endl;
+#endif
+}
+
 int main()
 {
     std::cout << "============================================================" << std::endl;
@@ -1570,6 +2206,8 @@ int main()
     TestDeviceCapabilitiesOrderingContract();
     TestScratchMemorySizingArithmetic();
     TestM3PrepareInputsPassExecution();
+    TestM3DispatchErrorHandling();
+    TestM3PrepareInputsRealVulkanExecution();
 
     std::cout << "============================================================" << std::endl;
     std::cout << "Summary: " << g_TestPasses << " checks PASSED, " << g_TestFailures << " FAILED." << std::endl;

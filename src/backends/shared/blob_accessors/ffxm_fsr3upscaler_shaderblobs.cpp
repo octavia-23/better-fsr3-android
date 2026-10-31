@@ -4,7 +4,7 @@
 #include "ffxm_fsr3upscaler_shaderblobs.h"
 #include "host/ffxm_util.h"
 #include "fsr3upscaler/ffxm_fsr3upscaler_private.h"
-#include "prebuilt_shaders/ffxm_fsr3upscaler_prepare_inputs_pass_permutations.h"
+#include <ffxm_fsr3upscaler_prepare_inputs_pass_permutations.h>
 #include <string.h>
 
 namespace arm

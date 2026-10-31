@@ -2064,6 +2064,7 @@ FfxmErrorCode UnregisterResourcesVK(FfxmInterface* backendInterface, FfxmCommand
     // Just reset the dynamic resource index, but leave the images views.
     // They will be deleted in the first pipeline destroy call as they need to live until then
     effectContext.nextDynamicResource = dynamicResourceIndexStart;
+    backendContext->gpuJobCount = 0;
 
     // destroy the views of the next frame
     if (effectContext.isEndOfUpscaler)
@@ -3789,12 +3790,12 @@ FfxmErrorCode ExecuteGpuJobsVK(FfxmInterface* backendInterface, FfxmCommandList 
         }
     }
 
+    backendContext->gpuJobCount = 0;
+
     // check the execute function returned cleanly.
     FFXM_RETURN_ON_ERROR(
         errorCode == FFXM_OK,
         FFXM_ERROR_BACKEND_API_ERROR);
-
-    backendContext->gpuJobCount = 0;
 
     return FFXM_OK;
 }
