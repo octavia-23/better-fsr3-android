@@ -1648,12 +1648,14 @@ void TestM3PrepareInputsPassExecution()
     static int s_DilatedMvResource = 40;
     static int s_DilatedDepthResource = 50;
     static int s_ReconstructedDepthResource = 60;
+    static int s_OutputResource = 70;
     dispDesc.color.resource = &s_ColorResource;
     dispDesc.depth.resource = &s_DepthResource;
     dispDesc.motionVectors.resource = &s_MvResource;
     dispDesc.dilatedMotionVectors.resource = &s_DilatedMvResource;
     dispDesc.dilatedDepth.resource = &s_DilatedDepthResource;
     dispDesc.reconstructedPrevNearestDepth.resource = &s_ReconstructedDepthResource;
+    dispDesc.output.resource = &s_OutputResource;
 
     s_ScheduledGpuJobs.clear();
     s_ExecuteGpuJobsCallCount = 0;
@@ -1666,29 +1668,31 @@ void TestM3PrepareInputsPassExecution()
     // 0: Clear Float for FRAME_INFO
     // 1: Clear Float for ACCUMULATION_1
     // 2: Clear Float for ACCUMULATION_2
-    // 3: Clear Float for NEW_LOCKS
-    // 4: Clear Float for RECONSTRUCTED_PREVIOUS_NEAREST_DEPTH
-    // 5: Clear Float for SPD_ATOMIC_COUNT
-    // 6: Clear Float for SPD_MIPS
-    // 7: Compute dispatch for PrepareInputs
-    // 8: Compute dispatch for LumaPyramid
-    // 9: Clear Float for SPD_ATOMIC_COUNT (reset before Shading Change SPD)
-    // 10: Compute dispatch for ShadingChangePyramid
-    // 11: Compute dispatch for ShadingChange
-    // 12: Compute dispatch for PrepareReactivity
-    TEST_CHECK(s_ScheduledGpuJobs.size() == 13);
+    // 3: Clear Float for LUMA_HISTORY_1
+    // 4: Clear Float for LUMA_HISTORY_2
+    // 5: Clear Float for INTERNAL_UPSCALED_COLOR_1
+    // 6: Clear Float for INTERNAL_UPSCALED_COLOR_2
+    // 7: Clear Float for NEW_LOCKS
+    // 8: Clear Float for RECONSTRUCTED_PREVIOUS_NEAREST_DEPTH
+    // 9: Clear Float for SPD_ATOMIC_COUNT
+    // 10: Clear Float for SPD_MIPS
+    // 11: Compute dispatch for PrepareInputs
+    // 12: Compute dispatch for LumaPyramid
+    // 13: Clear Float for SPD_ATOMIC_COUNT (reset before Shading Change SPD)
+    // 14: Compute dispatch for ShadingChangePyramid
+    // 15: Compute dispatch for ShadingChange
+    // 16: Compute dispatch for PrepareReactivity
+    // 17: Compute dispatch for LumaInstability
+    // 18: Compute dispatch for Accumulate
+    TEST_CHECK(s_ScheduledGpuJobs.size() == 19);
 
-    // Check clear jobs
-    TEST_CHECK(s_ScheduledGpuJobs[0].jobType == FFXM_GPU_JOB_CLEAR_FLOAT);
-    TEST_CHECK(s_ScheduledGpuJobs[1].jobType == FFXM_GPU_JOB_CLEAR_FLOAT);
-    TEST_CHECK(s_ScheduledGpuJobs[2].jobType == FFXM_GPU_JOB_CLEAR_FLOAT);
-    TEST_CHECK(s_ScheduledGpuJobs[3].jobType == FFXM_GPU_JOB_CLEAR_FLOAT);
-    TEST_CHECK(s_ScheduledGpuJobs[4].jobType == FFXM_GPU_JOB_CLEAR_FLOAT);
-    TEST_CHECK(s_ScheduledGpuJobs[5].jobType == FFXM_GPU_JOB_CLEAR_FLOAT);
-    TEST_CHECK(s_ScheduledGpuJobs[6].jobType == FFXM_GPU_JOB_CLEAR_FLOAT);
+    // Check clear jobs (8 reset clears + 3 per-frame clears = 11 clears)
+    for (uint32_t c = 0; c < 11; ++c) {
+        TEST_CHECK(s_ScheduledGpuJobs[c].jobType == FFXM_GPU_JOB_CLEAR_FLOAT);
+    }
 
     // Check compute dispatch job for PrepareInputs
-    const FfxmGpuJobDescription& computeJob = s_ScheduledGpuJobs[7];
+    const FfxmGpuJobDescription& computeJob = s_ScheduledGpuJobs[11];
     TEST_CHECK(computeJob.jobType == FFXM_GPU_JOB_COMPUTE);
     // Dispatch dimensions: ceil(1920 / 8) = 240, ceil(1080 / 8) = 135, 1
     TEST_CHECK(computeJob.computeJobDescriptor.dimensions[0] == 240);
@@ -1711,7 +1715,7 @@ void TestM3PrepareInputsPassExecution()
     TEST_CHECK(computeJob.computeJobDescriptor.cbs[0].num32BitEntries == sizeof(Fsr3UpscalerConstants) / sizeof(uint32_t));
 
     // Check compute dispatch job for LumaPyramid
-    const FfxmGpuJobDescription& lumaJob = s_ScheduledGpuJobs[8];
+    const FfxmGpuJobDescription& lumaJob = s_ScheduledGpuJobs[12];
     TEST_CHECK(lumaJob.jobType == FFXM_GPU_JOB_COMPUTE);
     // SPD dispatch dimensions: (1920 + 63) / 64 = 30, (1080 + 63) / 64 = 17, 1
     TEST_CHECK(lumaJob.computeJobDescriptor.dimensions[0] == 30);
@@ -1733,10 +1737,10 @@ void TestM3PrepareInputsPassExecution()
     TEST_CHECK(lumaJob.computeJobDescriptor.cbs[1].num32BitEntries == sizeof(Fsr3UpscalerSpdConstants) / sizeof(uint32_t));
 
     // Check atomic counter clear job between SPD passes
-    TEST_CHECK(s_ScheduledGpuJobs[9].jobType == FFXM_GPU_JOB_CLEAR_FLOAT);
+    TEST_CHECK(s_ScheduledGpuJobs[13].jobType == FFXM_GPU_JOB_CLEAR_FLOAT);
 
     // Check compute dispatch job for ShadingChangePyramid
-    const FfxmGpuJobDescription& shadingJob = s_ScheduledGpuJobs[10];
+    const FfxmGpuJobDescription& shadingJob = s_ScheduledGpuJobs[14];
     TEST_CHECK(shadingJob.jobType == FFXM_GPU_JOB_COMPUTE);
     // Half-res SPD dispatch dimensions: (960 + 63) / 64 = 15, (540 + 63) / 64 = 9, 1
     TEST_CHECK(shadingJob.computeJobDescriptor.dimensions[0] == 15);
@@ -1763,7 +1767,7 @@ void TestM3PrepareInputsPassExecution()
     TEST_CHECK(shadingSpd->renderSize[1] == 540);
 
     // Check compute dispatch job for ShadingChange
-    const FfxmGpuJobDescription& scJob = s_ScheduledGpuJobs[11];
+    const FfxmGpuJobDescription& scJob = s_ScheduledGpuJobs[15];
     TEST_CHECK(scJob.jobType == FFXM_GPU_JOB_COMPUTE);
     TEST_CHECK(scJob.computeJobDescriptor.dimensions[0] == 120); // (960 + 7) / 8
     TEST_CHECK(scJob.computeJobDescriptor.dimensions[1] == 68);  // (540 + 7) / 8
@@ -1774,7 +1778,7 @@ void TestM3PrepareInputsPassExecution()
     TEST_CHECK(scJob.computeJobDescriptor.pipeline.pipeline == priv->pipelineShadingChange.pipeline);
 
     // Check compute dispatch job for PrepareReactivity
-    const FfxmGpuJobDescription& prJob = s_ScheduledGpuJobs[12];
+    const FfxmGpuJobDescription& prJob = s_ScheduledGpuJobs[16];
     TEST_CHECK(prJob.jobType == FFXM_GPU_JOB_COMPUTE);
     TEST_CHECK(prJob.computeJobDescriptor.dimensions[0] == 240); // (1920 + 7) / 8
     TEST_CHECK(prJob.computeJobDescriptor.dimensions[1] == 135); // (1080 + 7) / 8
@@ -1786,6 +1790,22 @@ void TestM3PrepareInputsPassExecution()
     TEST_CHECK(prJob.computeJobDescriptor.cbs[0].num32BitEntries == sizeof(Fsr3UpscalerConstants) / sizeof(uint32_t));
     TEST_CHECK(prJob.computeJobDescriptor.pipeline.pipeline == priv->pipelinePrepareReactivity.pipeline);
 
+    // Check compute dispatch job for LumaInstability
+    const FfxmGpuJobDescription& liJob = s_ScheduledGpuJobs[17];
+    TEST_CHECK(liJob.jobType == FFXM_GPU_JOB_COMPUTE);
+    TEST_CHECK(liJob.computeJobDescriptor.dimensions[0] == 240); // (1920 + 7) / 8
+    TEST_CHECK(liJob.computeJobDescriptor.dimensions[1] == 135); // (1080 + 7) / 8
+    TEST_CHECK(liJob.computeJobDescriptor.dimensions[2] == 1);
+    TEST_CHECK(liJob.computeJobDescriptor.pipeline.pipeline == priv->pipelineLumaInstability.pipeline);
+
+    // Check compute dispatch job for Accumulate
+    const FfxmGpuJobDescription& accJob = s_ScheduledGpuJobs[18];
+    TEST_CHECK(accJob.jobType == FFXM_GPU_JOB_COMPUTE);
+    TEST_CHECK(accJob.computeJobDescriptor.dimensions[0] == 480); // (3840 + 7) / 8
+    TEST_CHECK(accJob.computeJobDescriptor.dimensions[1] == 270); // (2160 + 7) / 8
+    TEST_CHECK(accJob.computeJobDescriptor.dimensions[2] == 1);
+    TEST_CHECK(accJob.computeJobDescriptor.pipeline.pipeline == priv->pipelineAccumulate.pipeline);
+
     // Verify execution and cleanup calls
     TEST_CHECK(s_ExecuteGpuJobsCallCount == 1);
     TEST_CHECK(s_UnregisterResourcesCallCount == 1);
@@ -1794,8 +1814,8 @@ void TestM3PrepareInputsPassExecution()
     FfxmFsr3UpscalerDispatchDescription dispDesc2 = dispDesc;
     s_ScheduledGpuJobs.clear();
     TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, &dispDesc2) == FFXM_OK);
-    // Frame 2 has no history reset, so 9 jobs scheduled (3 clears + 1 prepare inputs + 1 luma pyramid + 1 atomic clear + 1 shading change pyramid + 1 shading change + 1 prepare reactivity)
-    TEST_CHECK(s_ScheduledGpuJobs.size() == 9);
+    // Frame 2 has no history reset, so 11 jobs scheduled (3 clears + 1 prepare inputs + 1 luma pyramid + 1 atomic clear + 1 shading change pyramid + 1 shading change + 1 prepare reactivity + 1 luma instability + 1 accumulate)
+    TEST_CHECK(s_ScheduledGpuJobs.size() == 11);
     TEST_CHECK(priv->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_CURRENT_LUMA].internalIndex ==
         priv->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_2].internalIndex);
     TEST_CHECK(priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_ACCUMULATION].internalIndex ==
@@ -1843,6 +1863,7 @@ static void TestM3DispatchErrorHandling()
     static int s_DilatedMvResource = 40;
     static int s_DilatedDepthResource = 50;
     static int s_ReconstructedDepthResource = 60;
+    static int s_OutputResource = 70;
 
     FfxmFsr3UpscalerDispatchDescription dispDesc = {};
     dispDesc.commandList = reinterpret_cast<FfxmCommandList>(static_cast<uintptr_t>(0xCAFE));
@@ -1861,6 +1882,7 @@ static void TestM3DispatchErrorHandling()
     dispDesc.dilatedMotionVectors.resource = &s_DilatedMvResource;
     dispDesc.dilatedDepth.resource = &s_DilatedDepthResource;
     dispDesc.reconstructedPrevNearestDepth.resource = &s_ReconstructedDepthResource;
+    dispDesc.output.resource = &s_OutputResource;
 
     auto resetDispatchTrackers = []() {
         s_ScheduledGpuJobs.clear();
@@ -1882,9 +1904,11 @@ static void TestM3DispatchErrorHandling()
         TEST_CHECK(priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_MOTION_VECTORS].internalIndex == -1);
         TEST_CHECK(priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_DEPTH].internalIndex == -1);
         TEST_CHECK(priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_RECONSTRUCTED_PREVIOUS_NEAREST_DEPTH].internalIndex == -1);
+        TEST_CHECK(priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_UPSCALED_OUTPUT].internalIndex == -1);
         TEST_CHECK(priv->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_MOTION_VECTORS].internalIndex == -1);
         TEST_CHECK(priv->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_DEPTH].internalIndex == -1);
         TEST_CHECK(priv->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_RECONSTRUCTED_PREVIOUS_NEAREST_DEPTH].internalIndex == -1);
+        TEST_CHECK(priv->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_UPSCALED_OUTPUT].internalIndex == -1);
     };
 
     // Scenario 1: First dynamic resource registration fails (index 0)
@@ -1932,7 +1956,7 @@ static void TestM3DispatchErrorHandling()
 
         FfxmErrorCode err = ffxmFsr3UpscalerContextDispatch(&context, &dispDesc);
         TEST_CHECK(err == FFXM_ERROR_BACKEND_API_ERROR);
-        TEST_CHECK(s_RegisterResourceCallCount == 6);
+        TEST_CHECK(s_RegisterResourceCallCount == 7);
         TEST_CHECK(s_ScheduleGpuJobCallCount == 1);
         TEST_CHECK(s_ExecuteGpuJobsCallCount == 0); // Execution skipped on schedule failure
         TEST_CHECK(s_UnregisterResourcesCallCount == 1);
@@ -1951,7 +1975,7 @@ static void TestM3DispatchErrorHandling()
 
         FfxmErrorCode err = ffxmFsr3UpscalerContextDispatch(&context, &dispDesc);
         TEST_CHECK(err == FFXM_ERROR_BACKEND_API_ERROR);
-        TEST_CHECK(s_RegisterResourceCallCount == 6);
+        TEST_CHECK(s_RegisterResourceCallCount == 7);
         TEST_CHECK(s_ScheduleGpuJobCallCount == 5);
         TEST_CHECK(s_ScheduledGpuJobs.size() == 4);
         TEST_CHECK(s_ExecuteGpuJobsCallCount == 0);
@@ -1971,8 +1995,8 @@ static void TestM3DispatchErrorHandling()
 
         FfxmErrorCode err = ffxmFsr3UpscalerContextDispatch(&context, &dispDesc);
         TEST_CHECK(err == FFXM_ERROR_BACKEND_API_ERROR);
-        TEST_CHECK(s_RegisterResourceCallCount == 6);
-        TEST_CHECK(s_ScheduleGpuJobCallCount == 13);
+        TEST_CHECK(s_RegisterResourceCallCount == 7);
+        TEST_CHECK(s_ScheduleGpuJobCallCount == 19);
         TEST_CHECK(s_ExecuteGpuJobsCallCount == 1);
         TEST_CHECK(s_UnregisterResourcesCallCount == 1);
         TEST_CHECK(priv->resourceFrameIndex == 0);
@@ -1990,7 +2014,7 @@ static void TestM3DispatchErrorHandling()
 
         FfxmErrorCode err = ffxmFsr3UpscalerContextDispatch(&context, &dispDesc);
         TEST_CHECK(err == FFXM_ERROR_BACKEND_API_ERROR);
-        TEST_CHECK(s_ScheduleGpuJobCallCount == 13);
+        TEST_CHECK(s_ScheduleGpuJobCallCount == 19);
         TEST_CHECK(s_ExecuteGpuJobsCallCount == 1);
         TEST_CHECK(s_UnregisterResourcesCallCount == 1);
         TEST_CHECK(priv->resourceFrameIndex == 0);
@@ -2009,7 +2033,7 @@ static void TestM3DispatchErrorHandling()
 
         FfxmErrorCode err = ffxmFsr3UpscalerContextDispatch(&context, &dispDesc);
         TEST_CHECK(err == FFXM_ERROR_INVALID_ARGUMENT); // Original error preserved
-        TEST_CHECK(s_ScheduleGpuJobCallCount == 13);
+        TEST_CHECK(s_ScheduleGpuJobCallCount == 19);
         TEST_CHECK(s_ExecuteGpuJobsCallCount == 1);
         TEST_CHECK(s_UnregisterResourcesCallCount == 1);
         TEST_CHECK(priv->resourceFrameIndex == 0);
@@ -2026,8 +2050,8 @@ static void TestM3DispatchErrorHandling()
 
         FfxmErrorCode err = ffxmFsr3UpscalerContextDispatch(&context, &dispDesc);
         TEST_CHECK(err == FFXM_OK);
-        TEST_CHECK(s_RegisterResourceCallCount == 6);
-        TEST_CHECK(s_ScheduleGpuJobCallCount == 13);
+        TEST_CHECK(s_RegisterResourceCallCount == 7);
+        TEST_CHECK(s_ScheduleGpuJobCallCount == 19);
         TEST_CHECK(s_ExecuteGpuJobsCallCount == 1);
         TEST_CHECK(s_UnregisterResourcesCallCount == 1);
         TEST_CHECK(priv->resourceFrameIndex == 1);
@@ -2046,7 +2070,7 @@ static void TestM3DispatchErrorHandling()
         dispDescFrame2.preExposure = 1.0f;
         FfxmErrorCode err2 = ffxmFsr3UpscalerContextDispatch(&context, &dispDescFrame2);
         TEST_CHECK(err2 == FFXM_OK);
-        TEST_CHECK(s_ScheduleGpuJobCallCount == 9);
+        TEST_CHECK(s_ScheduleGpuJobCallCount == 11);
         TEST_CHECK(priv->resourceFrameIndex == 2);
         TEST_CHECK(priv->constants.frameIndex == 1.0f);
         TEST_CHECK(priv->preExposure == 1.0f);
@@ -2065,13 +2089,13 @@ static void TestM3DispatchErrorHandling()
         TEST_CHECK(priv->preExposure == 1.0f); // 2.0f NOT committed
         TEST_CHECK(priv->previousFramePreExposure == 1.0f);
 
-        // Frame 3 fails at Prepare Reactivity schedule stage
+        // Frame 3 fails at Accumulate schedule stage
         resetDispatchTrackers();
-        s_FailAtScheduleGpuJobIndex = 8; // Fail at PrepareReactivity schedule
+        s_FailAtScheduleGpuJobIndex = 10; // Fail at Accumulate schedule
         FfxmErrorCode err3ScheduleFail = ffxmFsr3UpscalerContextDispatch(&context, &dispDescFrame3);
         TEST_CHECK(err3ScheduleFail == FFXM_ERROR_BACKEND_API_ERROR);
-        TEST_CHECK(s_ScheduleGpuJobCallCount == 9);
-        TEST_CHECK(s_ScheduledGpuJobs.size() == 8);
+        TEST_CHECK(s_ScheduleGpuJobCallCount == 11);
+        TEST_CHECK(s_ScheduledGpuJobs.size() == 10);
         TEST_CHECK(priv->resourceFrameIndex == 2);
         TEST_CHECK(priv->constants.frameIndex == 1.0f);
         TEST_CHECK(priv->preExposure == 1.0f);
@@ -2910,44 +2934,44 @@ static void TestM3PrepareReactivity()
     dispDesc.transparencyAndComposition.resource = nullptr;
     dispDesc.renderSize = { 1920, 1080 };
 
-    // Frame 1: firstExecution -> reset clears: FRAME_INFO, ACCUMULATION_1, ACCUMULATION_2, NEW_LOCKS (4 clears)
-    // plus per-frame clears: DILATED_REACTIVE_MASKS, SPD_ATOMIC_COUNT, SHADING_CHANGE (3 clears)
+    // Frame 1: firstExecution -> reset clears: FRAME_INFO, ACCUMULATION_1, ACCUMULATION_2, LUMA_HISTORY_1, LUMA_HISTORY_2, INTERNAL_UPSCALED_COLOR_1, INTERNAL_UPSCALED_COLOR_2, NEW_LOCKS (8 clears)
+    // plus per-frame clears: RECONSTRUCTED_PREVIOUS_NEAREST_DEPTH, SPD_ATOMIC_COUNT, SPD_MIPS (3 clears)
     // resourceFrameIndex = 0 (even) -> SRV reads ACCUMULATION_2, UAV writes ACCUMULATION_1
     s_ScheduledGpuJobs.clear();
     dispDesc.reset = false;
     TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, &dispDesc) == FFXM_OK);
-    TEST_CHECK(s_ScheduledGpuJobs.size() == 13);
+    TEST_CHECK(s_ScheduledGpuJobs.size() == 19);
     const FfxmGpuJobDescription* seqJob1 = findPrepareReactivityJob();
     TEST_REQUIRE(seqJob1 != nullptr);
     TEST_CHECK(seqJob1->computeJobDescriptor.srvTextures[5].internalIndex == priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_ACCUMULATION_2].internalIndex);
     TEST_CHECK(seqJob1->computeJobDescriptor.uavTextures[2].internalIndex == priv->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_ACCUMULATION_1].internalIndex);
 
-    // Frame 2: no reset -> 9 jobs scheduled (3 per-frame clears, no reset clears, NEW_LOCKS NOT cleared)
+    // Frame 2: no reset -> 11 jobs scheduled (3 per-frame clears, no reset clears, NEW_LOCKS NOT cleared)
     // resourceFrameIndex = 1 (odd) -> SRV reads ACCUMULATION_1, UAV writes ACCUMULATION_2
     s_ScheduledGpuJobs.clear();
     TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, &dispDesc) == FFXM_OK);
-    TEST_CHECK(s_ScheduledGpuJobs.size() == 9);
+    TEST_CHECK(s_ScheduledGpuJobs.size() == 11);
     const FfxmGpuJobDescription* seqJob2 = findPrepareReactivityJob();
     TEST_REQUIRE(seqJob2 != nullptr);
     TEST_CHECK(seqJob2->computeJobDescriptor.srvTextures[5].internalIndex == priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_ACCUMULATION_1].internalIndex);
     TEST_CHECK(seqJob2->computeJobDescriptor.uavTextures[2].internalIndex == priv->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_ACCUMULATION_2].internalIndex);
 
-    // Frame 3: no reset -> 9 jobs scheduled
+    // Frame 3: no reset -> 11 jobs scheduled
     // resourceFrameIndex = 2 (even) -> SRV reads ACCUMULATION_2, UAV writes ACCUMULATION_1
     s_ScheduledGpuJobs.clear();
     TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, &dispDesc) == FFXM_OK);
-    TEST_CHECK(s_ScheduledGpuJobs.size() == 9);
+    TEST_CHECK(s_ScheduledGpuJobs.size() == 11);
     const FfxmGpuJobDescription* seqJob3 = findPrepareReactivityJob();
     TEST_REQUIRE(seqJob3 != nullptr);
     TEST_CHECK(seqJob3->computeJobDescriptor.srvTextures[5].internalIndex == priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_ACCUMULATION_2].internalIndex);
     TEST_CHECK(seqJob3->computeJobDescriptor.uavTextures[2].internalIndex == priv->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_ACCUMULATION_1].internalIndex);
 
-    // Frame 4: reset = true -> 13 jobs scheduled (reset clears executed again)
+    // Frame 4: reset = true -> 19 jobs scheduled (reset clears executed again)
     // resourceFrameIndex = 3 (odd) -> SRV reads ACCUMULATION_1, UAV writes ACCUMULATION_2
     s_ScheduledGpuJobs.clear();
     dispDesc.reset = true;
     TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, &dispDesc) == FFXM_OK);
-    TEST_CHECK(s_ScheduledGpuJobs.size() == 13);
+    TEST_CHECK(s_ScheduledGpuJobs.size() == 19);
     const FfxmGpuJobDescription* seqJob4 = findPrepareReactivityJob();
     TEST_REQUIRE(seqJob4 != nullptr);
     TEST_CHECK(seqJob4->computeJobDescriptor.srvTextures[5].internalIndex == priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_ACCUMULATION_1].internalIndex);
@@ -3162,6 +3186,357 @@ static void TestM3LumaInstabilityAndAccumulatePipelines()
     std::cout << "PASS: All 7 compute passes, permutations, and pipeline rollback behaviors verified." << std::endl;
 }
 
+static void TestM3ComputeLumaInstabilityAndAccumulate()
+{
+    std::cout << "--- Test 24: M3 LumaInstability and Accumulate Compute Dispatch & Ping-Pong Verification ---" << std::endl;
+
+    ResetMockState();
+
+    FfxmInterface iface = {};
+    SetupMockInterface(&iface);
+
+    FfxmFsr3UpscalerContextDescription desc = {};
+    desc.flags = FFXM_FSR3UPSCALER_ENABLE_DEPTH_INVERTED | FFXM_FSR3UPSCALER_ENABLE_HIGH_DYNAMIC_RANGE;
+    desc.maxRenderSize = { 2560, 1440 };
+    desc.maxUpscaleSize = { 3840, 2160 };
+    desc.backendInterface = iface;
+
+    FfxmFsr3UpscalerContext context;
+    TEST_REQUIRE(ffxmFsr3UpscalerContextCreate(&context, &desc) == FFXM_OK);
+    FfxmFsr3UpscalerContext_Private* priv = reinterpret_cast<FfxmFsr3UpscalerContext_Private*>(&context);
+
+    // Helpers to find specific jobs in s_ScheduledGpuJobs
+    auto findJobByPipeline = [&](FfxmPipeline pipeline) -> const FfxmGpuJobDescription* {
+        for (const auto& job : s_ScheduledGpuJobs) {
+            if (job.jobType == FFXM_GPU_JOB_COMPUTE && job.computeJobDescriptor.pipeline.pipeline == pipeline) {
+                return &job;
+            }
+        }
+        return nullptr;
+    };
+
+    static int s_ColorRes = 101;
+    static int s_DepthRes = 102;
+    static int s_MvRes = 103;
+    static int s_DilMvRes = 104;
+    static int s_DilDepthRes = 105;
+    static int s_ReconDepthRes = 106;
+    static int s_OutputRes = 107;
+
+    FfxmFsr3UpscalerDispatchDescription dispDesc = {};
+    dispDesc.commandList = reinterpret_cast<FfxmCommandList>(static_cast<uintptr_t>(0xBEEF));
+    dispDesc.renderSize = { 1920, 1080 };
+    dispDesc.upscaleSize = { 3840, 2160 };
+    dispDesc.jitterOffset = { 0.125f, -0.25f };
+    dispDesc.motionVectorScale = { 1.0f, 1.0f };
+    dispDesc.cameraNear = 0.1f;
+    dispDesc.cameraFar = 1000.0f;
+    dispDesc.cameraFovAngleVertical = 1.047f;
+    dispDesc.frameTimeDelta = 16.666f;
+    dispDesc.viewSpaceToMetersFactor = 1.0f;
+    dispDesc.color.resource = &s_ColorRes;
+    dispDesc.depth.resource = &s_DepthRes;
+    dispDesc.motionVectors.resource = &s_MvRes;
+    dispDesc.dilatedMotionVectors.resource = &s_DilMvRes;
+    dispDesc.dilatedDepth.resource = &s_DilDepthRes;
+    dispDesc.reconstructedPrevNearestDepth.resource = &s_ReconDepthRes;
+    dispDesc.output.resource = &s_OutputRes;
+
+    // 1. Frame 1 (First execution / Reset): verify 19 jobs, pass sequence, and initial ping-pong
+    s_ScheduledGpuJobs.clear();
+    dispDesc.reset = false;
+    TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, &dispDesc) == FFXM_OK);
+    TEST_CHECK(s_ScheduledGpuJobs.size() == 19);
+
+    // Verify reset clear jobs (jobs 0-7)
+    // 0: FRAME_INFO (color {-1.0f, 1.0f, 0.0f, 0.0f})
+    TEST_CHECK(s_ScheduledGpuJobs[0].jobType == FFXM_GPU_JOB_CLEAR_FLOAT);
+    TEST_CHECK(s_ScheduledGpuJobs[0].clearJobDescriptor.target.internalIndex == priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FRAME_INFO].internalIndex);
+    TEST_CHECK(s_ScheduledGpuJobs[0].clearJobDescriptor.color[0] == -1.0f);
+    TEST_CHECK(s_ScheduledGpuJobs[0].clearJobDescriptor.color[1] == 1.0f);
+
+    // 1: ACCUMULATION_1 (color {0, 0, 0, 0})
+    TEST_CHECK(s_ScheduledGpuJobs[1].jobType == FFXM_GPU_JOB_CLEAR_FLOAT);
+    TEST_CHECK(s_ScheduledGpuJobs[1].clearJobDescriptor.target.internalIndex == priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_ACCUMULATION_1].internalIndex);
+
+    // 2: ACCUMULATION_2 (color {0, 0, 0, 0})
+    TEST_CHECK(s_ScheduledGpuJobs[2].jobType == FFXM_GPU_JOB_CLEAR_FLOAT);
+    TEST_CHECK(s_ScheduledGpuJobs[2].clearJobDescriptor.target.internalIndex == priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_ACCUMULATION_2].internalIndex);
+
+    // 3: LUMA_HISTORY_1 (color {0, 0, 0, 0})
+    TEST_CHECK(s_ScheduledGpuJobs[3].jobType == FFXM_GPU_JOB_CLEAR_FLOAT);
+    TEST_CHECK(s_ScheduledGpuJobs[3].clearJobDescriptor.target.internalIndex == priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_HISTORY_1].internalIndex);
+
+    // 4: LUMA_HISTORY_2 (color {0, 0, 0, 0})
+    TEST_CHECK(s_ScheduledGpuJobs[4].jobType == FFXM_GPU_JOB_CLEAR_FLOAT);
+    TEST_CHECK(s_ScheduledGpuJobs[4].clearJobDescriptor.target.internalIndex == priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_HISTORY_2].internalIndex);
+
+    // 5: INTERNAL_UPSCALED_COLOR_1 (color {0, 0, 0, 0})
+    TEST_CHECK(s_ScheduledGpuJobs[5].jobType == FFXM_GPU_JOB_CLEAR_FLOAT);
+    TEST_CHECK(s_ScheduledGpuJobs[5].clearJobDescriptor.target.internalIndex == priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_UPSCALED_COLOR_1].internalIndex);
+
+    // 6: INTERNAL_UPSCALED_COLOR_2 (color {0, 0, 0, 0})
+    TEST_CHECK(s_ScheduledGpuJobs[6].jobType == FFXM_GPU_JOB_CLEAR_FLOAT);
+    TEST_CHECK(s_ScheduledGpuJobs[6].clearJobDescriptor.target.internalIndex == priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_UPSCALED_COLOR_2].internalIndex);
+
+    // 7: NEW_LOCKS (color {0, 0, 0, 0})
+    TEST_CHECK(s_ScheduledGpuJobs[7].jobType == FFXM_GPU_JOB_CLEAR_FLOAT);
+    TEST_CHECK(s_ScheduledGpuJobs[7].clearJobDescriptor.target.internalIndex == priv->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_NEW_LOCKS].internalIndex);
+
+    // Verify 3 per-frame clears (jobs 8-10)
+    // 8: RECONSTRUCTED_PREVIOUS_NEAREST_DEPTH
+    TEST_CHECK(s_ScheduledGpuJobs[8].jobType == FFXM_GPU_JOB_CLEAR_FLOAT);
+    TEST_CHECK(s_ScheduledGpuJobs[8].clearJobDescriptor.target.internalIndex != -1);
+    // inverted depth is enabled in flags -> clear value is 0.0f
+    TEST_CHECK(s_ScheduledGpuJobs[8].clearJobDescriptor.color[0] == 0.0f);
+
+    // 9: SPD_ATOMIC_COUNT
+    TEST_CHECK(s_ScheduledGpuJobs[9].jobType == FFXM_GPU_JOB_CLEAR_FLOAT);
+    TEST_CHECK(s_ScheduledGpuJobs[9].clearJobDescriptor.target.internalIndex == priv->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_SPD_ATOMIC_COUNT].internalIndex);
+
+    // 10: SPD_MIPS
+    TEST_CHECK(s_ScheduledGpuJobs[10].jobType == FFXM_GPU_JOB_CLEAR_FLOAT);
+    TEST_CHECK(s_ScheduledGpuJobs[10].clearJobDescriptor.target.internalIndex == priv->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_SPD_MIPS].internalIndex);
+
+    // Verify 7 compute dispatches and intermediate SPD clear in exact sequence:
+    // Job 11: PrepareInputs
+    TEST_CHECK(s_ScheduledGpuJobs[11].jobType == FFXM_GPU_JOB_COMPUTE);
+    TEST_CHECK(s_ScheduledGpuJobs[11].computeJobDescriptor.pipeline.pipeline == priv->pipelinePrepareInputs.pipeline);
+
+    // Job 12: LumaPyramid
+    TEST_CHECK(s_ScheduledGpuJobs[12].jobType == FFXM_GPU_JOB_COMPUTE);
+    TEST_CHECK(s_ScheduledGpuJobs[12].computeJobDescriptor.pipeline.pipeline == priv->pipelineLumaPyramid.pipeline);
+
+    // Job 13: SPD atomic clear
+    TEST_CHECK(s_ScheduledGpuJobs[13].jobType == FFXM_GPU_JOB_CLEAR_FLOAT);
+    TEST_CHECK(s_ScheduledGpuJobs[13].clearJobDescriptor.target.internalIndex == priv->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_SPD_ATOMIC_COUNT].internalIndex);
+
+    // Job 14: ShadingChangePyramid
+    TEST_CHECK(s_ScheduledGpuJobs[14].jobType == FFXM_GPU_JOB_COMPUTE);
+    TEST_CHECK(s_ScheduledGpuJobs[14].computeJobDescriptor.pipeline.pipeline == priv->pipelineShadingChangePyramid.pipeline);
+
+    // Job 15: ShadingChange
+    TEST_CHECK(s_ScheduledGpuJobs[15].jobType == FFXM_GPU_JOB_COMPUTE);
+    TEST_CHECK(s_ScheduledGpuJobs[15].computeJobDescriptor.pipeline.pipeline == priv->pipelineShadingChange.pipeline);
+
+    // Job 16: PrepareReactivity
+    TEST_CHECK(s_ScheduledGpuJobs[16].jobType == FFXM_GPU_JOB_COMPUTE);
+    TEST_CHECK(s_ScheduledGpuJobs[16].computeJobDescriptor.pipeline.pipeline == priv->pipelinePrepareReactivity.pipeline);
+
+    // Job 17: LumaInstability
+    const FfxmGpuJobDescription& liJobFrame1 = s_ScheduledGpuJobs[17];
+    TEST_CHECK(liJobFrame1.jobType == FFXM_GPU_JOB_COMPUTE);
+    TEST_CHECK(liJobFrame1.computeJobDescriptor.pipeline.pipeline == priv->pipelineLumaInstability.pipeline);
+    TEST_CHECK(liJobFrame1.computeJobDescriptor.dimensions[0] == 240); // (1920 + 7) / 8
+    TEST_CHECK(liJobFrame1.computeJobDescriptor.dimensions[1] == 135); // (1080 + 7) / 8
+    TEST_CHECK(liJobFrame1.computeJobDescriptor.dimensions[2] == 1);
+    TEST_CHECK(liJobFrame1.computeJobDescriptor.cbs[0].num32BitEntries == sizeof(Fsr3UpscalerConstants) / sizeof(uint32_t));
+
+    // LumaInstability SRVs in Frame 1 (resourceFrameIndex 0 -> previous is LUMA_HISTORY_2)
+    TEST_CHECK(liJobFrame1.computeJobDescriptor.srvTextures[0].internalIndex != -1); // r_input_exposure (dynamic)
+    TEST_CHECK(liJobFrame1.computeJobDescriptor.srvTextures[1].internalIndex == priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_REACTIVE_MASKS].internalIndex);
+    TEST_CHECK(liJobFrame1.computeJobDescriptor.srvTextures[2].internalIndex != -1); // r_dilated_motion_vectors (dynamic)
+    TEST_CHECK(liJobFrame1.computeJobDescriptor.srvTextures[3].internalIndex == priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_HISTORY_2].internalIndex);
+    TEST_CHECK(liJobFrame1.computeJobDescriptor.srvTextures[4].internalIndex == priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_1].internalIndex);
+
+    // LumaInstability UAVs in Frame 1 (current is LUMA_HISTORY_1, output is LUMA_INSTABILITY = INTERMEDIATE_FP16x1)
+    TEST_CHECK(liJobFrame1.computeJobDescriptor.uavTextures[0].internalIndex == priv->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_HISTORY_1].internalIndex);
+    TEST_CHECK(liJobFrame1.computeJobDescriptor.uavTextures[1].internalIndex == priv->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERMEDIATE_FP16x1].internalIndex);
+
+    // Job 18: Accumulate
+    const FfxmGpuJobDescription& accJobFrame1 = s_ScheduledGpuJobs[18];
+    TEST_CHECK(accJobFrame1.jobType == FFXM_GPU_JOB_COMPUTE);
+    TEST_CHECK(accJobFrame1.computeJobDescriptor.pipeline.pipeline == priv->pipelineAccumulate.pipeline);
+    TEST_CHECK(accJobFrame1.computeJobDescriptor.dimensions[0] == 480); // (3840 + 7) / 8
+    TEST_CHECK(accJobFrame1.computeJobDescriptor.dimensions[1] == 270); // (2160 + 7) / 8
+    TEST_CHECK(accJobFrame1.computeJobDescriptor.dimensions[2] == 1);
+    TEST_CHECK(accJobFrame1.computeJobDescriptor.cbs[0].num32BitEntries == sizeof(Fsr3UpscalerConstants) / sizeof(uint32_t));
+
+    // Accumulate SRVs in Frame 1 (resourceFrameIndex 0 -> previous is INTERNAL_UPSCALED_COLOR_2)
+    TEST_CHECK(accJobFrame1.computeJobDescriptor.srvTextures[0].internalIndex != -1); // r_input_exposure (dynamic)
+    TEST_CHECK(accJobFrame1.computeJobDescriptor.srvTextures[1].internalIndex == priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_REACTIVE_MASKS].internalIndex);
+    TEST_CHECK(accJobFrame1.computeJobDescriptor.srvTextures[2].internalIndex != -1); // r_dilated_motion_vectors (dynamic)
+    TEST_CHECK(accJobFrame1.computeJobDescriptor.srvTextures[3].internalIndex == priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_UPSCALED_COLOR_2].internalIndex);
+    TEST_CHECK(accJobFrame1.computeJobDescriptor.srvTextures[4].internalIndex == priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FARTHEST_DEPTH_MIP1].internalIndex);
+    TEST_CHECK(accJobFrame1.computeJobDescriptor.srvTextures[5].internalIndex == priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERMEDIATE_FP16x1].internalIndex); // LumaInstability
+    TEST_CHECK(accJobFrame1.computeJobDescriptor.srvTextures[6].internalIndex != -1); // r_input_color_jittered (dynamic)
+
+    // Accumulate UAVs in Frame 1 (current is INTERNAL_UPSCALED_COLOR_1, output is UPSCALED_OUTPUT, new_locks is NEW_LOCKS)
+    TEST_CHECK(accJobFrame1.computeJobDescriptor.uavTextures[0].internalIndex == priv->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_UPSCALED_COLOR_1].internalIndex);
+    TEST_CHECK(accJobFrame1.computeJobDescriptor.uavTextures[1].internalIndex != -1); // rw_upscaled_output (dynamic)
+    TEST_CHECK(accJobFrame1.computeJobDescriptor.uavTextures[2].internalIndex == priv->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_NEW_LOCKS].internalIndex);
+
+    // 2. Frame 2: Ping-pong alternation (resourceFrameIndex = 1, odd, no reset -> 11 jobs)
+    s_ScheduledGpuJobs.clear();
+    TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, &dispDesc) == FFXM_OK);
+    TEST_CHECK(s_ScheduledGpuJobs.size() == 11);
+
+    const FfxmGpuJobDescription* liJobFrame2 = findJobByPipeline(priv->pipelineLumaInstability.pipeline);
+    TEST_REQUIRE(liJobFrame2 != nullptr);
+    // In Frame 2 (odd): SRV reads LUMA_HISTORY_1, UAV writes LUMA_HISTORY_2
+    TEST_CHECK(liJobFrame2->computeJobDescriptor.srvTextures[3].internalIndex == priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_HISTORY_1].internalIndex);
+    TEST_CHECK(liJobFrame2->computeJobDescriptor.srvTextures[4].internalIndex == priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_2].internalIndex);
+    TEST_CHECK(liJobFrame2->computeJobDescriptor.uavTextures[0].internalIndex == priv->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_HISTORY_2].internalIndex);
+
+    const FfxmGpuJobDescription* accJobFrame2 = findJobByPipeline(priv->pipelineAccumulate.pipeline);
+    TEST_REQUIRE(accJobFrame2 != nullptr);
+    // In Frame 2 (odd): SRV reads INTERNAL_UPSCALED_COLOR_1, UAV writes INTERNAL_UPSCALED_COLOR_2
+    TEST_CHECK(accJobFrame2->computeJobDescriptor.srvTextures[3].internalIndex == priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_UPSCALED_COLOR_1].internalIndex);
+    TEST_CHECK(accJobFrame2->computeJobDescriptor.uavTextures[0].internalIndex == priv->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_UPSCALED_COLOR_2].internalIndex);
+
+    // 3. Frame 3: Ping-pong alternation back (resourceFrameIndex = 2, even, no reset -> 11 jobs)
+    s_ScheduledGpuJobs.clear();
+    TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, &dispDesc) == FFXM_OK);
+    TEST_CHECK(s_ScheduledGpuJobs.size() == 11);
+
+    const FfxmGpuJobDescription* liJobFrame3 = findJobByPipeline(priv->pipelineLumaInstability.pipeline);
+    TEST_REQUIRE(liJobFrame3 != nullptr);
+    TEST_CHECK(liJobFrame3->computeJobDescriptor.srvTextures[3].internalIndex == priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_HISTORY_2].internalIndex);
+    TEST_CHECK(liJobFrame3->computeJobDescriptor.srvTextures[4].internalIndex == priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_1].internalIndex);
+    TEST_CHECK(liJobFrame3->computeJobDescriptor.uavTextures[0].internalIndex == priv->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_HISTORY_1].internalIndex);
+
+    const FfxmGpuJobDescription* accJobFrame3 = findJobByPipeline(priv->pipelineAccumulate.pipeline);
+    TEST_REQUIRE(accJobFrame3 != nullptr);
+    TEST_CHECK(accJobFrame3->computeJobDescriptor.srvTextures[3].internalIndex == priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_UPSCALED_COLOR_2].internalIndex);
+    TEST_CHECK(accJobFrame3->computeJobDescriptor.uavTextures[0].internalIndex == priv->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_UPSCALED_COLOR_1].internalIndex);
+
+    // 4. Frame 4: Discontinuous camera movement (reset = true -> 19 jobs, reset clears re-executed)
+    s_ScheduledGpuJobs.clear();
+    dispDesc.reset = true;
+    TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, &dispDesc) == FFXM_OK);
+    TEST_CHECK(s_ScheduledGpuJobs.size() == 19);
+
+    // In Frame 4 (odd index = 3): SRV reads 1, UAV writes 2
+    const FfxmGpuJobDescription* liJobFrame4 = findJobByPipeline(priv->pipelineLumaInstability.pipeline);
+    TEST_REQUIRE(liJobFrame4 != nullptr);
+    TEST_CHECK(liJobFrame4->computeJobDescriptor.srvTextures[3].internalIndex == priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_HISTORY_1].internalIndex);
+    TEST_CHECK(liJobFrame4->computeJobDescriptor.uavTextures[0].internalIndex == priv->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_HISTORY_2].internalIndex);
+
+    const FfxmGpuJobDescription* accJobFrame4 = findJobByPipeline(priv->pipelineAccumulate.pipeline);
+    TEST_REQUIRE(accJobFrame4 != nullptr);
+    TEST_CHECK(accJobFrame4->computeJobDescriptor.srvTextures[3].internalIndex == priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_UPSCALED_COLOR_1].internalIndex);
+    TEST_CHECK(accJobFrame4->computeJobDescriptor.uavTextures[0].internalIndex == priv->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_UPSCALED_COLOR_2].internalIndex);
+
+    // 5. Resolution variations (720p, odd boundary 1279x719, 1440p)
+    dispDesc.reset = false;
+
+    // 720p: render 1280x720 -> upscale 2560x1440
+    dispDesc.renderSize = { 1280, 720 };
+    dispDesc.upscaleSize = { 2560, 1440 };
+    s_ScheduledGpuJobs.clear();
+    TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, &dispDesc) == FFXM_OK);
+    const FfxmGpuJobDescription* liJob720 = findJobByPipeline(priv->pipelineLumaInstability.pipeline);
+    TEST_REQUIRE(liJob720 != nullptr);
+    TEST_CHECK(liJob720->computeJobDescriptor.dimensions[0] == 160); // (1280+7)/8
+    TEST_CHECK(liJob720->computeJobDescriptor.dimensions[1] == 90);  // (720+7)/8
+    const FfxmGpuJobDescription* accJob720 = findJobByPipeline(priv->pipelineAccumulate.pipeline);
+    TEST_REQUIRE(accJob720 != nullptr);
+    TEST_CHECK(accJob720->computeJobDescriptor.dimensions[0] == 320); // (2560+7)/8
+    TEST_CHECK(accJob720->computeJobDescriptor.dimensions[1] == 180); // (1440+7)/8
+
+    // Odd boundary: render 1279x719 -> upscale 2559x1439
+    dispDesc.renderSize = { 1279, 719 };
+    dispDesc.upscaleSize = { 2559, 1439 };
+    s_ScheduledGpuJobs.clear();
+    TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, &dispDesc) == FFXM_OK);
+    const FfxmGpuJobDescription* liJobOdd = findJobByPipeline(priv->pipelineLumaInstability.pipeline);
+    TEST_REQUIRE(liJobOdd != nullptr);
+    TEST_CHECK(liJobOdd->computeJobDescriptor.dimensions[0] == 160); // (1279+7)/8
+    TEST_CHECK(liJobOdd->computeJobDescriptor.dimensions[1] == 90);  // (719+7)/8
+    const FfxmGpuJobDescription* accJobOdd = findJobByPipeline(priv->pipelineAccumulate.pipeline);
+    TEST_REQUIRE(accJobOdd != nullptr);
+    TEST_CHECK(accJobOdd->computeJobDescriptor.dimensions[0] == 320); // (2559+7)/8
+    TEST_CHECK(accJobOdd->computeJobDescriptor.dimensions[1] == 180); // (1439+7)/8
+
+    // 1440p: render 2560x1440 -> upscale 3840x2160
+    dispDesc.renderSize = { 2560, 1440 };
+    dispDesc.upscaleSize = { 3840, 2160 };
+    s_ScheduledGpuJobs.clear();
+    TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, &dispDesc) == FFXM_OK);
+    const FfxmGpuJobDescription* liJob1440 = findJobByPipeline(priv->pipelineLumaInstability.pipeline);
+    TEST_REQUIRE(liJob1440 != nullptr);
+    TEST_CHECK(liJob1440->computeJobDescriptor.dimensions[0] == 320); // (2560+7)/8
+    TEST_CHECK(liJob1440->computeJobDescriptor.dimensions[1] == 180); // (1440+7)/8
+    const FfxmGpuJobDescription* accJob1440 = findJobByPipeline(priv->pipelineAccumulate.pipeline);
+    TEST_REQUIRE(accJob1440 != nullptr);
+    TEST_CHECK(accJob1440->computeJobDescriptor.dimensions[0] == 480); // (3840+7)/8
+    TEST_CHECK(accJob1440->computeJobDescriptor.dimensions[1] == 270); // (2160+7)/8
+
+    // 6. Transactional rollback verification for LumaInstability and Accumulate schedule failures
+    // Stage A: Schedule failure at LumaInstability (job index 9 on non-reset frame)
+    {
+        uint32_t savedFrameIndex = priv->resourceFrameIndex;
+        float savedConstFrame = priv->constants.frameIndex;
+        s_ScheduledGpuJobs.clear();
+        s_ScheduleGpuJobCallCount = 0;
+        s_FailAtScheduleGpuJobIndex = 9; // LumaInstability schedule attempt
+        s_ExecuteGpuJobsCallCount = 0;
+        s_UnregisterResourcesCallCount = 0;
+
+        FfxmErrorCode err = ffxmFsr3UpscalerContextDispatch(&context, &dispDesc);
+        TEST_CHECK(err == FFXM_ERROR_BACKEND_API_ERROR);
+        TEST_CHECK(s_ScheduledGpuJobs.size() == 9); // Jobs 0..8 scheduled, 9th fails
+        TEST_CHECK(s_ExecuteGpuJobsCallCount == 0); // Must NOT execute GPU jobs
+        TEST_CHECK(s_UnregisterResourcesCallCount == 1); // Clean up dynamic bindings
+        TEST_CHECK(priv->resourceFrameIndex == savedFrameIndex); // Must NOT advance frame index
+        TEST_CHECK(priv->constants.frameIndex == savedConstFrame);
+
+        // Verify dynamic slots unallocated (-1)
+        TEST_CHECK(priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_COLOR].internalIndex == -1);
+        TEST_CHECK(priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_UPSCALED_OUTPUT].internalIndex == -1);
+        TEST_CHECK(priv->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_UPSCALED_OUTPUT].internalIndex == -1);
+    }
+
+    // Stage B: Schedule failure at Accumulate (job index 10 on non-reset frame)
+    {
+        uint32_t savedFrameIndex = priv->resourceFrameIndex;
+        float savedConstFrame = priv->constants.frameIndex;
+        s_ScheduledGpuJobs.clear();
+        s_ScheduleGpuJobCallCount = 0;
+        s_FailAtScheduleGpuJobIndex = 10; // Accumulate schedule attempt
+        s_ExecuteGpuJobsCallCount = 0;
+        s_UnregisterResourcesCallCount = 0;
+
+        FfxmErrorCode err = ffxmFsr3UpscalerContextDispatch(&context, &dispDesc);
+        TEST_CHECK(err == FFXM_ERROR_BACKEND_API_ERROR);
+        TEST_CHECK(s_ScheduledGpuJobs.size() == 10); // Jobs 0..9 scheduled, 10th fails
+        TEST_CHECK(s_ExecuteGpuJobsCallCount == 0);
+        TEST_CHECK(s_UnregisterResourcesCallCount == 1);
+        TEST_CHECK(priv->resourceFrameIndex == savedFrameIndex);
+        TEST_CHECK(priv->constants.frameIndex == savedConstFrame);
+
+        TEST_CHECK(priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_COLOR].internalIndex == -1);
+        TEST_CHECK(priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_UPSCALED_OUTPUT].internalIndex == -1);
+        TEST_CHECK(priv->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_UPSCALED_OUTPUT].internalIndex == -1);
+    }
+
+    // Stage C: Clean dispatch retry after failures must succeed and advance state exactly once
+    {
+        uint32_t savedFrameIndex = priv->resourceFrameIndex;
+        float savedConstFrame = priv->constants.frameIndex;
+        s_ScheduledGpuJobs.clear();
+        s_ScheduleGpuJobCallCount = 0;
+        s_FailAtScheduleGpuJobIndex = -1;
+        s_ExecuteGpuJobsCallCount = 0;
+        s_UnregisterResourcesCallCount = 0;
+
+        FfxmErrorCode err = ffxmFsr3UpscalerContextDispatch(&context, &dispDesc);
+        TEST_CHECK(err == FFXM_OK);
+        TEST_CHECK(s_ScheduledGpuJobs.size() == 11);
+        TEST_CHECK(s_ExecuteGpuJobsCallCount == 1);
+        TEST_CHECK(s_UnregisterResourcesCallCount == 1);
+        TEST_CHECK(priv->resourceFrameIndex == (savedFrameIndex + 1) % 16);
+        TEST_CHECK(priv->constants.frameIndex == savedConstFrame + 1.0f);
+    }
+
+    // 7. Clean context destruction
+    TEST_CHECK(ffxmFsr3UpscalerContextDestroy(&context) == FFXM_OK);
+    TEST_CHECK(s_DestroyPipelineCallCount >= 7);
+    VerifyOccurrenceAwareResourceBalance();
+
+    std::cout << "PASS: All 7 compute passes, LumaInstability/Accumulate dispatch, ping-pong, and transactional rollback verified." << std::endl;
+}
+
 static void TestM3PrepareInputsRealVulkanExecution()
 {
     std::cout << "--- Test 18: Real Vulkan GPU Hardware Execution of PrepareInputs ---" << std::endl;
@@ -3362,13 +3737,14 @@ static void TestM3PrepareInputsRealVulkanExecution()
     VkImageUsageFlags uavUsage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     VkImageUsageFlags srvUsage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 
-    RealVkTestImage colorImg, depthImg, mvImg, dilMvImg, dilDepthImg, reconDepthImg;
+    RealVkTestImage colorImg, depthImg, mvImg, dilMvImg, dilDepthImg, reconDepthImg, outputImg;
     TEST_CHECK(CreateRealVkTestImage(device, memProperties, pfnCreateImage, pfnGetImageMemoryRequirements, pfnAllocateMemory, pfnBindImageMemory, renderW, renderH, VK_FORMAT_R8G8B8A8_UNORM, srvUsage, &colorImg));
     TEST_CHECK(CreateRealVkTestImage(device, memProperties, pfnCreateImage, pfnGetImageMemoryRequirements, pfnAllocateMemory, pfnBindImageMemory, renderW, renderH, VK_FORMAT_R32_SFLOAT, srvUsage, &depthImg));
     TEST_CHECK(CreateRealVkTestImage(device, memProperties, pfnCreateImage, pfnGetImageMemoryRequirements, pfnAllocateMemory, pfnBindImageMemory, renderW, renderH, VK_FORMAT_R16G16_SFLOAT, srvUsage, &mvImg));
     TEST_CHECK(CreateRealVkTestImage(device, memProperties, pfnCreateImage, pfnGetImageMemoryRequirements, pfnAllocateMemory, pfnBindImageMemory, renderW, renderH, VK_FORMAT_R16G16_SFLOAT, uavUsage, &dilMvImg));
     TEST_CHECK(CreateRealVkTestImage(device, memProperties, pfnCreateImage, pfnGetImageMemoryRequirements, pfnAllocateMemory, pfnBindImageMemory, renderW, renderH, VK_FORMAT_R32_SFLOAT, uavUsage, &dilDepthImg));
     TEST_CHECK(CreateRealVkTestImage(device, memProperties, pfnCreateImage, pfnGetImageMemoryRequirements, pfnAllocateMemory, pfnBindImageMemory, renderW, renderH, VK_FORMAT_R32_SFLOAT, uavUsage, &reconDepthImg));
+    TEST_CHECK(CreateRealVkTestImage(device, memProperties, pfnCreateImage, pfnGetImageMemoryRequirements, pfnAllocateMemory, pfnBindImageMemory, 3840, 2160, VK_FORMAT_R8G8B8A8_UNORM, uavUsage, &outputImg));
 
     VkDeviceContext devContext = {};
     devContext.vkDevice = device;
@@ -3424,12 +3800,15 @@ static void TestM3PrepareInputsRealVulkanExecution()
     FfxmResourceDescription rUavR32F = { FFXM_RESOURCE_TYPE_TEXTURE2D, FFXM_SURFACE_FORMAT_R32_FLOAT, renderW, renderH, 1, 1, FFXM_RESOURCE_FLAGS_NONE, FFXM_RESOURCE_USAGE_UAV };
     FfxmResourceDescription rUavRG16F = { FFXM_RESOURCE_TYPE_TEXTURE2D, FFXM_SURFACE_FORMAT_R16G16_FLOAT, renderW, renderH, 1, 1, FFXM_RESOURCE_FLAGS_NONE, FFXM_RESOURCE_USAGE_UAV };
 
+    FfxmResourceDescription rUavOutput = { FFXM_RESOURCE_TYPE_TEXTURE2D, FFXM_SURFACE_FORMAT_R8G8B8A8_UNORM, 3840, 2160, 1, 1, FFXM_RESOURCE_FLAGS_NONE, FFXM_RESOURCE_USAGE_UAV };
+
     dispDesc.color = ffxmGetResourceVK(colorImg.image, rR8G8B8A8, nullptr, FFXM_RESOURCE_STATE_COMPUTE_READ);
     dispDesc.depth = ffxmGetResourceVK(depthImg.image, rR32F, nullptr, FFXM_RESOURCE_STATE_COMPUTE_READ);
     dispDesc.motionVectors = ffxmGetResourceVK(mvImg.image, rRG16F, nullptr, FFXM_RESOURCE_STATE_COMPUTE_READ);
     dispDesc.dilatedMotionVectors = ffxmGetResourceVK(dilMvImg.image, rUavRG16F, nullptr, FFXM_RESOURCE_STATE_UNORDERED_ACCESS);
     dispDesc.dilatedDepth = ffxmGetResourceVK(dilDepthImg.image, rUavR32F, nullptr, FFXM_RESOURCE_STATE_UNORDERED_ACCESS);
     dispDesc.reconstructedPrevNearestDepth = ffxmGetResourceVK(reconDepthImg.image, rUavR32F, nullptr, FFXM_RESOURCE_STATE_UNORDERED_ACCESS);
+    dispDesc.output = ffxmGetResourceVK(outputImg.image, rUavOutput, nullptr, FFXM_RESOURCE_STATE_UNORDERED_ACCESS);
 
     FfxmErrorCode dispErr = ffxmFsr3UpscalerContextDispatch(&realContext, &dispDesc);
     TEST_CHECK(dispErr == FFXM_OK);
@@ -3553,6 +3932,7 @@ static void TestM3PrepareInputsRealVulkanExecution()
     DestroyRealVkTestImage(device, pfnDestroyImage, pfnFreeMemory, &dilMvImg);
     DestroyRealVkTestImage(device, pfnDestroyImage, pfnFreeMemory, &dilDepthImg);
     DestroyRealVkTestImage(device, pfnDestroyImage, pfnFreeMemory, &reconDepthImg);
+    DestroyRealVkTestImage(device, pfnDestroyImage, pfnFreeMemory, &outputImg);
     DestroyRealVkTestImage(device, pfnDestroyImage, pfnFreeMemory, &reactiveImg);
     DestroyRealVkTestImage(device, pfnDestroyImage, pfnFreeMemory, &transpImg);
 
@@ -3600,6 +3980,7 @@ int main()
     TestM3ComputeShadingChange();
     TestM3PrepareReactivity();
     TestM3LumaInstabilityAndAccumulatePipelines();
+    TestM3ComputeLumaInstabilityAndAccumulate();
     TestM3PrepareInputsRealVulkanExecution();
 
     std::cout << "============================================================" << std::endl;

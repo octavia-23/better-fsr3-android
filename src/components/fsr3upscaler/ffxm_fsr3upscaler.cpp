@@ -1267,6 +1267,7 @@ FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextDispatch(
         { &pDispatchDescription->dilatedMotionVectors, FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_MOTION_VECTORS, FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_MOTION_VECTORS },
         { &pDispatchDescription->dilatedDepth, FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_DEPTH, FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_DEPTH },
         { &pDispatchDescription->reconstructedPrevNearestDepth, FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_RECONSTRUCTED_PREVIOUS_NEAREST_DEPTH, FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_RECONSTRUCTED_PREVIOUS_NEAREST_DEPTH },
+        { &pDispatchDescription->output, FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_UPSCALED_OUTPUT, FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_UPSCALED_OUTPUT },
     };
 
     uint32_t registeredCount = 0;
@@ -1370,8 +1371,43 @@ FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextDispatch(
         contextPrivate->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_ACCUMULATION] =
             contextPrivate->uavResources[currentAccumulationResourceIndex];
 
-        contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FARTHEST_DEPTH] = contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERMEDIATE_FP16x1];
-        contextPrivate->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FARTHEST_DEPTH] = contextPrivate->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERMEDIATE_FP16x1];
+        // Luma history ping-pong: previous history as SRV, current history as UAV
+        const uint32_t currentLumaHistoryResourceIndex = isOddFrame
+            ? FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_HISTORY_2
+            : FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_HISTORY_1;
+        const uint32_t previousLumaHistoryResourceIndex = isOddFrame
+            ? FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_HISTORY_1
+            : FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_HISTORY_2;
+
+        contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_HISTORY] =
+            contextPrivate->srvResources[previousLumaHistoryResourceIndex];
+        contextPrivate->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_HISTORY] =
+            contextPrivate->uavResources[currentLumaHistoryResourceIndex];
+
+        // Internal upscaled color ping-pong: previous upscaled color as SRV, current upscaled color as UAV
+        const uint32_t currentUpscaledColorResourceIndex = isOddFrame
+            ? FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_UPSCALED_COLOR_2
+            : FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_UPSCALED_COLOR_1;
+        const uint32_t previousUpscaledColorResourceIndex = isOddFrame
+            ? FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_UPSCALED_COLOR_1
+            : FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_UPSCALED_COLOR_2;
+
+        contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_UPSCALED_COLOR] =
+            contextPrivate->srvResources[previousUpscaledColorResourceIndex];
+        contextPrivate->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_UPSCALED_COLOR] =
+            contextPrivate->uavResources[currentUpscaledColorResourceIndex];
+
+        // Aliasable intermediate surface routing:
+        // Farthest depth and LumaInstability both alias INTERMEDIATE_FP16x1 safely without lifetime overlap
+        contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FARTHEST_DEPTH] =
+            contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERMEDIATE_FP16x1];
+        contextPrivate->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FARTHEST_DEPTH] =
+            contextPrivate->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERMEDIATE_FP16x1];
+
+        contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_INSTABILITY] =
+            contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERMEDIATE_FP16x1];
+        contextPrivate->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_INSTABILITY] =
+            contextPrivate->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERMEDIATE_FP16x1];
 
         // History Reset Clears
         if (contextPrivate->firstExecution || pDispatchDescription->reset) {
@@ -1401,6 +1437,46 @@ FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextDispatch(
                 clearAccum2Job.clearJobDescriptor.target = contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_ACCUMULATION_2];
                 dispatchResult = contextPrivate->contextDescription.backendInterface.fpScheduleGpuJob(
                     &contextPrivate->contextDescription.backendInterface, &clearAccum2Job);
+            }
+
+            // Clear Luma History 1 to 0.0f
+            if (dispatchResult == FFXM_OK) {
+                FfxmGpuJobDescription clearLumaHist1Job = { FFXM_GPU_JOB_CLEAR_FLOAT };
+                const float clearZero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+                memcpy(clearLumaHist1Job.clearJobDescriptor.color, clearZero, 4 * sizeof(float));
+                clearLumaHist1Job.clearJobDescriptor.target = contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_HISTORY_1];
+                dispatchResult = contextPrivate->contextDescription.backendInterface.fpScheduleGpuJob(
+                    &contextPrivate->contextDescription.backendInterface, &clearLumaHist1Job);
+            }
+
+            // Clear Luma History 2 to 0.0f
+            if (dispatchResult == FFXM_OK) {
+                FfxmGpuJobDescription clearLumaHist2Job = { FFXM_GPU_JOB_CLEAR_FLOAT };
+                const float clearZero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+                memcpy(clearLumaHist2Job.clearJobDescriptor.color, clearZero, 4 * sizeof(float));
+                clearLumaHist2Job.clearJobDescriptor.target = contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_HISTORY_2];
+                dispatchResult = contextPrivate->contextDescription.backendInterface.fpScheduleGpuJob(
+                    &contextPrivate->contextDescription.backendInterface, &clearLumaHist2Job);
+            }
+
+            // Clear Internal Upscaled Color 1 to 0.0f
+            if (dispatchResult == FFXM_OK) {
+                FfxmGpuJobDescription clearUpscaled1Job = { FFXM_GPU_JOB_CLEAR_FLOAT };
+                const float clearZero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+                memcpy(clearUpscaled1Job.clearJobDescriptor.color, clearZero, 4 * sizeof(float));
+                clearUpscaled1Job.clearJobDescriptor.target = contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_UPSCALED_COLOR_1];
+                dispatchResult = contextPrivate->contextDescription.backendInterface.fpScheduleGpuJob(
+                    &contextPrivate->contextDescription.backendInterface, &clearUpscaled1Job);
+            }
+
+            // Clear Internal Upscaled Color 2 to 0.0f
+            if (dispatchResult == FFXM_OK) {
+                FfxmGpuJobDescription clearUpscaled2Job = { FFXM_GPU_JOB_CLEAR_FLOAT };
+                const float clearZero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+                memcpy(clearUpscaled2Job.clearJobDescriptor.color, clearZero, 4 * sizeof(float));
+                clearUpscaled2Job.clearJobDescriptor.target = contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_UPSCALED_COLOR_2];
+                dispatchResult = contextPrivate->contextDescription.backendInterface.fpScheduleGpuJob(
+                    &contextPrivate->contextDescription.backendInterface, &clearUpscaled2Job);
             }
 
             // Clear New Locks to 0.0f
@@ -1498,6 +1574,22 @@ FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextDispatch(
             const int32_t dispatchReactivityX = (pendingConstants.renderSize[0] + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
             const int32_t dispatchReactivityY = (pendingConstants.renderSize[1] + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
             dispatchResult = scheduleDispatch(contextPrivate, pDispatchDescription, &contextPrivate->pipelinePrepareReactivity, dispatchReactivityX, dispatchReactivityY);
+        }
+
+        // Schedule LumaInstability compute pass
+        if (dispatchResult == FFXM_OK) {
+            const int32_t threadGroupWorkRegionDim = 8;
+            const int32_t dispatchLumaInstabilityX = (pendingConstants.renderSize[0] + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
+            const int32_t dispatchLumaInstabilityY = (pendingConstants.renderSize[1] + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
+            dispatchResult = scheduleDispatch(contextPrivate, pDispatchDescription, &contextPrivate->pipelineLumaInstability, dispatchLumaInstabilityX, dispatchLumaInstabilityY);
+        }
+
+        // Schedule Accumulate compute pass
+        if (dispatchResult == FFXM_OK) {
+            const int32_t threadGroupWorkRegionDim = 8;
+            const int32_t dispatchAccumulateX = (pendingConstants.upscaleSize[0] + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
+            const int32_t dispatchAccumulateY = (pendingConstants.upscaleSize[1] + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
+            dispatchResult = scheduleDispatch(contextPrivate, pDispatchDescription, &contextPrivate->pipelineAccumulate, dispatchAccumulateX, dispatchAccumulateY);
         }
 
         // Execute scheduled GPU jobs only if all jobs scheduled successfully
