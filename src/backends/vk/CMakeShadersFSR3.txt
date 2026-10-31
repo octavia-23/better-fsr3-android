@@ -138,3 +138,31 @@ add_custom_command(
 
 add_shader_output("${FSR3_SHADING_CHANGE_PERMUTATION_HEADER}")
 
+set(FSR3_PREPARE_REACTIVITY_SHADER "${CMAKE_CURRENT_SOURCE_DIR}/shaders/fsr3upscaler/ffx_fsr3upscaler_prepare_reactivity_pass.glsl")
+set(FSR3_PREPARE_REACTIVITY_PERMUTATION_HEADER "${FFXM_PASS_SHADER_OUTPUT_PATH}/ffxm_fsr3upscaler_prepare_reactivity_pass_permutations.h")
+
+if(NOT EXISTS "${FSR3_PREPARE_REACTIVITY_SHADER}")
+    message(FATAL_ERROR "FSR3 PrepareReactivity shader source missing: ${FSR3_PREPARE_REACTIVITY_SHADER}")
+endif()
+
+file(RELATIVE_PATH FSR3_REL_SHADER_PREPARE_REACTIVITY "${CMAKE_SOURCE_DIR}" "${FSR3_PREPARE_REACTIVITY_SHADER}")
+
+add_custom_command(
+    OUTPUT ${FSR3_PREPARE_REACTIVITY_PERMUTATION_HEADER}
+    COMMAND ${FFXM_SC_EXECUTABLE}
+        ${FSR3_BASE_ARGS}
+        ${FSR3_GLSL_BASE_ARGS}
+        ${FSR3_PERMUTATION_ARGS}
+        "-I${FSR3_REL_GPU_PATH}"
+        "-I${FSR3_REL_GPU_PATH}/fsr3upscaler"
+        -name=ffxm_fsr3upscaler_prepare_reactivity_pass
+        -output=${FSR3_REL_OUTPUT}
+        ${FSR3_REL_SHADER_PREPARE_REACTIVITY}
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    DEPENDS ${FSR3_PREPARE_REACTIVITY_SHADER}
+    COMMENT "Compiling FSR3 Prepare Reactivity shader permutations with FidelityFX-SC..."
+    VERBATIM
+)
+
+add_shader_output("${FSR3_PREPARE_REACTIVITY_PERMUTATION_HEADER}")
+

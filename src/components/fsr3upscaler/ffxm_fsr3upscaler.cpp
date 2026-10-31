@@ -349,6 +349,10 @@ FfxmErrorCode fsr3UpscalerDestroy(FfxmFsr3UpscalerContext_Private* context)
         backendInterface->fpDestroyPipeline(backendInterface, &context->pipelineShadingChange, context->effectContextId);
         memset(&context->pipelineShadingChange, 0, sizeof(context->pipelineShadingChange));
     }
+    if (context->pipelinePrepareReactivity.pipeline != nullptr && backendInterface->fpDestroyPipeline != nullptr) {
+        backendInterface->fpDestroyPipeline(backendInterface, &context->pipelinePrepareReactivity, context->effectContextId);
+        memset(&context->pipelinePrepareReactivity, 0, sizeof(context->pipelinePrepareReactivity));
+    }
 
     // 1. Release copy staging resources for surfaces created with initial data
     if (backendInterface->fpDestroyResource != nullptr) {
@@ -900,6 +904,26 @@ FfxmErrorCode fsr3UpscalerCreate(
         return pipelineErr;
     }
 
+    // Create compute pipeline for Prepare Reactivity pass
+    wcscpy(pipelineDescription.name, L"FSR3-PREPARE-REACTIVITY");
+    pipelineErr = context->contextDescription.backendInterface.fpCreateComputePipeline(
+        &context->contextDescription.backendInterface,
+        FFXM_EFFECT_FSR3UPSCALER,
+        FFXM_FSR3UPSCALER_PASS_PREPARE_REACTIVITY,
+        0,
+        getPipelinePermutationFlags(contextDescription->flags, FFXM_FSR3UPSCALER_PASS_PREPARE_REACTIVITY, supportedFP16, canForceWave64, useLut),
+        &pipelineDescription,
+        context->effectContextId,
+        &context->pipelinePrepareReactivity);
+    if (pipelineErr != FFXM_OK) {
+        return pipelineErr;
+    }
+
+    pipelineErr = patchResourceBindings(&context->pipelinePrepareReactivity);
+    if (pipelineErr != FFXM_OK) {
+        return pipelineErr;
+    }
+
     return FFXM_OK;
 }
 
@@ -1235,6 +1259,44 @@ FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextDispatch(
                 contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_DEFAULT_EXPOSURE];
         }
 
+        // Route reactive mask: if external mask provided, register it; otherwise alias to default zero reactivity
+        if (dispatchResult == FFXM_OK) {
+            if (pDispatchDescription->reactive.resource != nullptr) {
+                FfxmErrorCode reactRes = contextPrivate->contextDescription.backendInterface.fpRegisterResource(
+                    &contextPrivate->contextDescription.backendInterface,
+                    &pDispatchDescription->reactive,
+                    contextPrivate->effectContextId,
+                    &contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_REACTIVE_MASK]);
+                if (reactRes != FFXM_OK) {
+                    dispatchResult = reactRes;
+                } else {
+                    registeredCount++;
+                }
+            } else {
+                contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_REACTIVE_MASK] =
+                    contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_DEFAULT_REACTIVITY];
+            }
+        }
+
+        // Route transparency and composition mask: if provided, register it; otherwise alias to default zero reactivity
+        if (dispatchResult == FFXM_OK) {
+            if (pDispatchDescription->transparencyAndComposition.resource != nullptr) {
+                FfxmErrorCode tcRes = contextPrivate->contextDescription.backendInterface.fpRegisterResource(
+                    &contextPrivate->contextDescription.backendInterface,
+                    &pDispatchDescription->transparencyAndComposition,
+                    contextPrivate->effectContextId,
+                    &contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_TRANSPARENCY_AND_COMPOSITION_MASK]);
+                if (tcRes != FFXM_OK) {
+                    dispatchResult = tcRes;
+                } else {
+                    registeredCount++;
+                }
+            } else {
+                contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_TRANSPARENCY_AND_COMPOSITION_MASK] =
+                    contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_DEFAULT_REACTIVITY];
+            }
+        }
+
         // Ping-pong & aliasable resource routing
         const bool isOddFrame = !!(contextPrivate->resourceFrameIndex & 1);
         const uint32_t currentLumaResourceIndex = isOddFrame
@@ -1248,6 +1310,18 @@ FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextDispatch(
         contextPrivate->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_CURRENT_LUMA] = contextPrivate->uavResources[currentLumaResourceIndex];
         contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_PREVIOUS_LUMA] = contextPrivate->srvResources[previousLumaResourceIndex];
 
+        const uint32_t currentAccumulationResourceIndex = isOddFrame
+            ? FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_ACCUMULATION_2
+            : FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_ACCUMULATION_1;
+        const uint32_t previousAccumulationResourceIndex = isOddFrame
+            ? FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_ACCUMULATION_1
+            : FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_ACCUMULATION_2;
+
+        contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_ACCUMULATION] =
+            contextPrivate->srvResources[previousAccumulationResourceIndex];
+        contextPrivate->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_ACCUMULATION] =
+            contextPrivate->uavResources[currentAccumulationResourceIndex];
+
         contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FARTHEST_DEPTH] = contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERMEDIATE_FP16x1];
         contextPrivate->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FARTHEST_DEPTH] = contextPrivate->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERMEDIATE_FP16x1];
 
@@ -1260,6 +1334,36 @@ FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextDispatch(
             clearFrameInfoJob.clearJobDescriptor.target = contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FRAME_INFO];
             dispatchResult = contextPrivate->contextDescription.backendInterface.fpScheduleGpuJob(
                 &contextPrivate->contextDescription.backendInterface, &clearFrameInfoJob);
+
+            // Clear Accumulation 1 to 0.0f
+            if (dispatchResult == FFXM_OK) {
+                FfxmGpuJobDescription clearAccum1Job = { FFXM_GPU_JOB_CLEAR_FLOAT };
+                const float clearZero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+                memcpy(clearAccum1Job.clearJobDescriptor.color, clearZero, 4 * sizeof(float));
+                clearAccum1Job.clearJobDescriptor.target = contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_ACCUMULATION_1];
+                dispatchResult = contextPrivate->contextDescription.backendInterface.fpScheduleGpuJob(
+                    &contextPrivate->contextDescription.backendInterface, &clearAccum1Job);
+            }
+
+            // Clear Accumulation 2 to 0.0f
+            if (dispatchResult == FFXM_OK) {
+                FfxmGpuJobDescription clearAccum2Job = { FFXM_GPU_JOB_CLEAR_FLOAT };
+                const float clearZero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+                memcpy(clearAccum2Job.clearJobDescriptor.color, clearZero, 4 * sizeof(float));
+                clearAccum2Job.clearJobDescriptor.target = contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_ACCUMULATION_2];
+                dispatchResult = contextPrivate->contextDescription.backendInterface.fpScheduleGpuJob(
+                    &contextPrivate->contextDescription.backendInterface, &clearAccum2Job);
+            }
+
+            // Clear New Locks to 0.0f
+            if (dispatchResult == FFXM_OK) {
+                FfxmGpuJobDescription clearNewLocksJob = { FFXM_GPU_JOB_CLEAR_FLOAT };
+                const float clearZero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+                memcpy(clearNewLocksJob.clearJobDescriptor.color, clearZero, 4 * sizeof(float));
+                clearNewLocksJob.clearJobDescriptor.target = contextPrivate->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_NEW_LOCKS];
+                dispatchResult = contextPrivate->contextDescription.backendInterface.fpScheduleGpuJob(
+                    &contextPrivate->contextDescription.backendInterface, &clearNewLocksJob);
+            }
         }
 
         // Per-frame clears
@@ -1340,6 +1444,14 @@ FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextDispatch(
             dispatchResult = scheduleDispatch(contextPrivate, pDispatchDescription, &contextPrivate->pipelineShadingChange, dispatchShadingChangeX, dispatchShadingChangeY);
         }
 
+        // Schedule Prepare Reactivity compute pass
+        if (dispatchResult == FFXM_OK) {
+            const int32_t threadGroupWorkRegionDim = 8;
+            const int32_t dispatchReactivityX = (pendingConstants.renderSize[0] + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
+            const int32_t dispatchReactivityY = (pendingConstants.renderSize[1] + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
+            dispatchResult = scheduleDispatch(contextPrivate, pDispatchDescription, &contextPrivate->pipelinePrepareReactivity, dispatchReactivityX, dispatchReactivityY);
+        }
+
         // Execute scheduled GPU jobs only if all jobs scheduled successfully
         if (dispatchResult == FFXM_OK) {
             dispatchResult = contextPrivate->contextDescription.backendInterface.fpExecuteGpuJobs(
@@ -1369,6 +1481,8 @@ FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextDispatch(
             }
         }
         contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_EXPOSURE].internalIndex = -1;
+        contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_REACTIVE_MASK].internalIndex = -1;
+        contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_TRANSPARENCY_AND_COMPOSITION_MASK].internalIndex = -1;
     }
 
     // Transactional state commit: only commit pending frame state on complete dispatch success
