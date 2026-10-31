@@ -348,6 +348,7 @@ static uint32_t s_ExecuteGpuJobsCallCount = 0;
 static uint32_t s_UnregisterResourcesCallCount = 0;
 static std::vector<FfxmGpuJobDescription> s_ScheduledGpuJobs;
 static FfxmErrorCode s_CreatePipelineResult = FFXM_OK;
+static int32_t s_FailAtCreatePipelineIndex = -1;
 
 static FfxmErrorCode MockCreatePipeline(
     FfxmInterface* backendInterface,
@@ -360,6 +361,10 @@ static FfxmErrorCode MockCreatePipeline(
     FfxmPipelineState* outPipeline)
 {
     (void)backendInterface; (void)qualityPreset; (void)pipelineDescription; (void)effectContextId;
+    if (s_FailAtCreatePipelineIndex >= 0 && static_cast<int32_t>(s_CreatePipelineCallCount) == s_FailAtCreatePipelineIndex) {
+        s_CreatePipelineCallCount++;
+        return FFXM_ERROR_BACKEND_API_ERROR;
+    }
     s_CreatePipelineCallCount++;
     if (s_CreatePipelineResult != FFXM_OK) {
         return s_CreatePipelineResult;
@@ -472,6 +477,7 @@ static void ResetMockState()
     s_UnregisterResourcesCallCount = 0;
     s_ScheduledGpuJobs.clear();
     s_CreatePipelineResult = FFXM_OK;
+    s_FailAtCreatePipelineIndex = -1;
     s_FailAtRegisterResourceIndex = -1;
     s_RegisterResourceCallCount = 0;
     s_ScheduleGpuJobResult = FFXM_OK;
@@ -1505,7 +1511,7 @@ void TestM3PrepareInputsPassExecution()
     SetupMockInterface(&desc.backendInterface);
 
     TEST_CHECK(ffxmFsr3UpscalerContextCreate(&context, &desc) == FFXM_OK);
-    TEST_CHECK(s_CreatePipelineCallCount == 5);
+    TEST_CHECK(s_CreatePipelineCallCount == 7);
 
     FfxmFsr3UpscalerContext_Private* priv = reinterpret_cast<FfxmFsr3UpscalerContext_Private*>(&context);
     TEST_CHECK(priv->pipelinePrepareInputs.pipeline != nullptr);
@@ -1590,6 +1596,37 @@ void TestM3PrepareInputsPassExecution()
 
     TEST_CHECK(priv->pipelineShadingChangePyramid.constantBufferBindings[0].resourceIdentifier == FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_FSR3UPSCALER);
     TEST_CHECK(priv->pipelineShadingChangePyramid.constantBufferBindings[1].resourceIdentifier == FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_SPD);
+
+    // Verify LumaInstability pipeline
+    TEST_CHECK(priv->pipelineLumaInstability.pipeline != nullptr);
+    TEST_CHECK(priv->pipelineLumaInstability.srvTextureCount == 5);
+    TEST_CHECK(priv->pipelineLumaInstability.uavTextureCount == 2);
+    TEST_CHECK(priv->pipelineLumaInstability.constCount == 1);
+    TEST_CHECK(priv->pipelineLumaInstability.srvTextureBindings[0].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_EXPOSURE);
+    TEST_CHECK(priv->pipelineLumaInstability.srvTextureBindings[1].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_REACTIVE_MASKS);
+    TEST_CHECK(priv->pipelineLumaInstability.srvTextureBindings[2].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_MOTION_VECTORS);
+    TEST_CHECK(priv->pipelineLumaInstability.srvTextureBindings[3].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_HISTORY);
+    TEST_CHECK(priv->pipelineLumaInstability.srvTextureBindings[4].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_CURRENT_LUMA);
+    TEST_CHECK(priv->pipelineLumaInstability.uavTextureBindings[0].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_HISTORY);
+    TEST_CHECK(priv->pipelineLumaInstability.uavTextureBindings[1].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_INSTABILITY);
+    TEST_CHECK(priv->pipelineLumaInstability.constantBufferBindings[0].resourceIdentifier == FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_FSR3UPSCALER);
+
+    // Verify Accumulate pipeline
+    TEST_CHECK(priv->pipelineAccumulate.pipeline != nullptr);
+    TEST_CHECK(priv->pipelineAccumulate.srvTextureCount == 7);
+    TEST_CHECK(priv->pipelineAccumulate.uavTextureCount == 3);
+    TEST_CHECK(priv->pipelineAccumulate.constCount == 1);
+    TEST_CHECK(priv->pipelineAccumulate.srvTextureBindings[0].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_EXPOSURE);
+    TEST_CHECK(priv->pipelineAccumulate.srvTextureBindings[1].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_REACTIVE_MASKS);
+    TEST_CHECK(priv->pipelineAccumulate.srvTextureBindings[2].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_MOTION_VECTORS);
+    TEST_CHECK(priv->pipelineAccumulate.srvTextureBindings[3].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_UPSCALED_COLOR);
+    TEST_CHECK(priv->pipelineAccumulate.srvTextureBindings[4].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FARTHEST_DEPTH_MIP1);
+    TEST_CHECK(priv->pipelineAccumulate.srvTextureBindings[5].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_INSTABILITY);
+    TEST_CHECK(priv->pipelineAccumulate.srvTextureBindings[6].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_COLOR);
+    TEST_CHECK(priv->pipelineAccumulate.uavTextureBindings[0].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_UPSCALED_COLOR);
+    TEST_CHECK(priv->pipelineAccumulate.uavTextureBindings[1].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_UPSCALED_OUTPUT);
+    TEST_CHECK(priv->pipelineAccumulate.uavTextureBindings[2].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_NEW_LOCKS);
+    TEST_CHECK(priv->pipelineAccumulate.constantBufferBindings[0].resourceIdentifier == FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_FSR3UPSCALER);
 
     // 3. Dispatch a real frame
     FfxmCommandList dummyCmdList = reinterpret_cast<FfxmCommandList>(0xABCD);
@@ -3003,6 +3040,128 @@ static void DestroyRealVkTestImage(
 }
 #endif
 
+static void TestM3LumaInstabilityAndAccumulatePipelines()
+{
+    std::cout << "--- Test 23: M3 LumaInstability and Accumulate Permutations & Pipeline Rollback ---" << std::endl;
+
+    // 1. Verify all 64 permutations of LumaInstability
+    for (uint32_t opt = 0; opt < 64; ++opt) {
+        FfxmShaderBlob blob = {};
+        FfxmErrorCode err = arm::ffxmGetPermutationBlobByIndex(FFXM_EFFECT_FSR3UPSCALER, FFXM_FSR3UPSCALER_PASS_LUMA_INSTABILITY, opt, &blob);
+        TEST_CHECK(err == FFXM_OK);
+        TEST_CHECK(blob.data != nullptr);
+        TEST_CHECK(blob.size > 0);
+        const uint32_t* spirv = reinterpret_cast<const uint32_t*>(blob.data);
+        TEST_CHECK(spirv[0] == 0x07230203);
+        TEST_CHECK(blob.cbvCount == 1);
+        TEST_CHECK(blob.boundConstantBuffers[0] == 9);
+        TEST_CHECK(blob.srvTextureCount == 5);
+        TEST_CHECK(blob.uavTextureCount == 2);
+        TEST_CHECK(blob.samplerCount == 1);
+    }
+
+    // 2. Verify all 64 permutations of Accumulate
+    for (uint32_t opt = 0; opt < 64; ++opt) {
+        FfxmShaderBlob blob = {};
+        FfxmErrorCode err = arm::ffxmGetPermutationBlobByIndex(FFXM_EFFECT_FSR3UPSCALER, FFXM_FSR3UPSCALER_PASS_ACCUMULATE, opt, &blob);
+        TEST_CHECK(err == FFXM_OK);
+        TEST_CHECK(blob.data != nullptr);
+        TEST_CHECK(blob.size > 0);
+        const uint32_t* spirv = reinterpret_cast<const uint32_t*>(blob.data);
+        TEST_CHECK(spirv[0] == 0x07230203);
+        TEST_CHECK(blob.cbvCount == 1);
+        TEST_CHECK(blob.boundConstantBuffers[0] == 12);
+        TEST_CHECK(blob.samplerCount == 1);
+
+        bool useLut = (opt & FSR3UPSCALER_SHADER_PERMUTATION_USE_LANCZOS_TYPE) != 0;
+        bool sharpening = (opt & FSR3UPSCALER_SHADER_PERMUTATION_ENABLE_SHARPENING) != 0;
+
+        if (useLut) {
+            TEST_CHECK(blob.srvTextureCount == 8);
+        } else {
+            TEST_CHECK(blob.srvTextureCount == 7);
+        }
+
+        if (sharpening) {
+            TEST_CHECK(blob.uavTextureCount == 2);
+        } else {
+            TEST_CHECK(blob.uavTextureCount == 3);
+        }
+    }
+
+    // 3. Verify error handling for invalid arguments and pass IDs
+    {
+        TEST_CHECK(arm::ffxmGetPermutationBlobByIndex(FFXM_EFFECT_FSR3UPSCALER, FFXM_FSR3UPSCALER_PASS_ACCUMULATE, 0, nullptr) == FFXM_ERROR_INVALID_POINTER);
+        TEST_CHECK(arm::ffxmGetPermutationBlobByIndex(FFXM_EFFECT_FSR3UPSCALER, FFXM_FSR3UPSCALER_PASS_LUMA_INSTABILITY, 0, nullptr) == FFXM_ERROR_INVALID_POINTER);
+
+        FfxmShaderBlob dummyBlob = {};
+        uint8_t zeroBytes[sizeof(FfxmShaderBlob)] = {};
+
+        memset(&dummyBlob, 0xAA, sizeof(dummyBlob));
+        TEST_CHECK(arm::ffxmGetPermutationBlobByIndex(FFXM_EFFECT_FSR3UPSCALER, static_cast<FfxmPass>(12), 0, &dummyBlob) == FFXM_ERROR_INVALID_ARGUMENT);
+        TEST_CHECK(memcmp(&dummyBlob, zeroBytes, sizeof(dummyBlob)) == 0);
+
+        memset(&dummyBlob, 0xBB, sizeof(dummyBlob));
+        TEST_CHECK(arm::ffxmGetPermutationBlobByIndex(FFXM_EFFECT_FSR3UPSCALER, static_cast<FfxmPass>(999), 0, &dummyBlob) == FFXM_ERROR_INVALID_ARGUMENT);
+        TEST_CHECK(memcmp(&dummyBlob, zeroBytes, sizeof(dummyBlob)) == 0);
+    }
+
+    // 4. Verify partial pipeline creation rollback at each stage (stages 0 through 6)
+    for (int32_t failStage = 0; failStage < 7; ++failStage) {
+        ResetMockState();
+        s_FailAtCreatePipelineIndex = failStage;
+
+        FfxmFsr3UpscalerContext context;
+        memset(&context, 0xEE, sizeof(context));
+        FfxmFsr3UpscalerContextDescription desc = {};
+        desc.maxRenderSize = { 1920, 1080 };
+        desc.maxUpscaleSize = { 3840, 2160 };
+        desc.flags = FFXM_FSR3UPSCALER_ENABLE_AUTO_EXPOSURE;
+        SetupMockInterface(&desc.backendInterface);
+
+        FfxmErrorCode err = ffxmFsr3UpscalerContextCreate(&context, &desc);
+        TEST_CHECK(err == FFXM_ERROR_BACKEND_API_ERROR);
+
+        TEST_CHECK(s_DestroyPipelineCallCount == static_cast<uint32_t>(failStage));
+        TEST_CHECK(s_BackendContextActive == false);
+        VerifyOccurrenceAwareResourceBalance();
+
+        uint8_t zeros[sizeof(FfxmFsr3UpscalerContext)] = {};
+        TEST_CHECK(memcmp(&context, zeros, sizeof(context)) == 0);
+    }
+
+    // 5. Verify successful creation and destruction after rollback tests
+    {
+        ResetMockState();
+        s_FailAtCreatePipelineIndex = -1;
+
+        FfxmFsr3UpscalerContext context;
+        FfxmFsr3UpscalerContextDescription desc = {};
+        desc.maxRenderSize = { 1920, 1080 };
+        desc.maxUpscaleSize = { 3840, 2160 };
+        desc.flags = FFXM_FSR3UPSCALER_ENABLE_AUTO_EXPOSURE;
+        SetupMockInterface(&desc.backendInterface);
+
+        TEST_CHECK(ffxmFsr3UpscalerContextCreate(&context, &desc) == FFXM_OK);
+        TEST_CHECK(s_CreatePipelineCallCount == 7);
+
+        FfxmFsr3UpscalerContext_Private* priv = reinterpret_cast<FfxmFsr3UpscalerContext_Private*>(&context);
+        TEST_CHECK(priv->pipelinePrepareInputs.pipeline != nullptr);
+        TEST_CHECK(priv->pipelineLumaPyramid.pipeline != nullptr);
+        TEST_CHECK(priv->pipelineShadingChangePyramid.pipeline != nullptr);
+        TEST_CHECK(priv->pipelineShadingChange.pipeline != nullptr);
+        TEST_CHECK(priv->pipelinePrepareReactivity.pipeline != nullptr);
+        TEST_CHECK(priv->pipelineLumaInstability.pipeline != nullptr);
+        TEST_CHECK(priv->pipelineAccumulate.pipeline != nullptr);
+
+        TEST_CHECK(ffxmFsr3UpscalerContextDestroy(&context) == FFXM_OK);
+        TEST_CHECK(s_DestroyPipelineCallCount == 7);
+        VerifyOccurrenceAwareResourceBalance();
+    }
+
+    std::cout << "PASS: All 7 compute passes, permutations, and pipeline rollback behaviors verified." << std::endl;
+}
+
 static void TestM3PrepareInputsRealVulkanExecution()
 {
     std::cout << "--- Test 18: Real Vulkan GPU Hardware Execution of PrepareInputs ---" << std::endl;
@@ -3234,6 +3393,15 @@ static void TestM3PrepareInputsRealVulkanExecution()
     FfxmErrorCode createErr = ffxmFsr3UpscalerContextCreate(&realContext, &contextDesc);
     TEST_CHECK(createErr == FFXM_OK);
 
+    FfxmFsr3UpscalerContext_Private* privReal = reinterpret_cast<FfxmFsr3UpscalerContext_Private*>(&realContext);
+    TEST_CHECK(privReal->pipelinePrepareInputs.pipeline != nullptr);
+    TEST_CHECK(privReal->pipelineLumaPyramid.pipeline != nullptr);
+    TEST_CHECK(privReal->pipelineShadingChangePyramid.pipeline != nullptr);
+    TEST_CHECK(privReal->pipelineShadingChange.pipeline != nullptr);
+    TEST_CHECK(privReal->pipelinePrepareReactivity.pipeline != nullptr);
+    TEST_CHECK(privReal->pipelineLumaInstability.pipeline != nullptr);
+    TEST_CHECK(privReal->pipelineAccumulate.pipeline != nullptr);
+
     VkCommandBufferBeginInfo beginInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     pfnBeginCommandBuffer(cmdBuffer, &beginInfo);
@@ -3431,6 +3599,7 @@ int main()
     TestM3ComputeShadingChangePyramid();
     TestM3ComputeShadingChange();
     TestM3PrepareReactivity();
+    TestM3LumaInstabilityAndAccumulatePipelines();
     TestM3PrepareInputsRealVulkanExecution();
 
     std::cout << "============================================================" << std::endl;

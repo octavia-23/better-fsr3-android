@@ -353,6 +353,14 @@ FfxmErrorCode fsr3UpscalerDestroy(FfxmFsr3UpscalerContext_Private* context)
         backendInterface->fpDestroyPipeline(backendInterface, &context->pipelinePrepareReactivity, context->effectContextId);
         memset(&context->pipelinePrepareReactivity, 0, sizeof(context->pipelinePrepareReactivity));
     }
+    if (context->pipelineLumaInstability.pipeline != nullptr && backendInterface->fpDestroyPipeline != nullptr) {
+        backendInterface->fpDestroyPipeline(backendInterface, &context->pipelineLumaInstability, context->effectContextId);
+        memset(&context->pipelineLumaInstability, 0, sizeof(context->pipelineLumaInstability));
+    }
+    if (context->pipelineAccumulate.pipeline != nullptr && backendInterface->fpDestroyPipeline != nullptr) {
+        backendInterface->fpDestroyPipeline(backendInterface, &context->pipelineAccumulate, context->effectContextId);
+        memset(&context->pipelineAccumulate, 0, sizeof(context->pipelineAccumulate));
+    }
 
     // 1. Release copy staging resources for surfaces created with initial data
     if (backendInterface->fpDestroyResource != nullptr) {
@@ -920,6 +928,46 @@ FfxmErrorCode fsr3UpscalerCreate(
     }
 
     pipelineErr = patchResourceBindings(&context->pipelinePrepareReactivity);
+    if (pipelineErr != FFXM_OK) {
+        return pipelineErr;
+    }
+
+    // Create compute pipeline for Luma Instability pass
+    wcscpy(pipelineDescription.name, L"FSR3-LUMA-INSTABILITY");
+    pipelineErr = context->contextDescription.backendInterface.fpCreateComputePipeline(
+        &context->contextDescription.backendInterface,
+        FFXM_EFFECT_FSR3UPSCALER,
+        FFXM_FSR3UPSCALER_PASS_LUMA_INSTABILITY,
+        0,
+        getPipelinePermutationFlags(contextDescription->flags, FFXM_FSR3UPSCALER_PASS_LUMA_INSTABILITY, supportedFP16, canForceWave64, useLut),
+        &pipelineDescription,
+        context->effectContextId,
+        &context->pipelineLumaInstability);
+    if (pipelineErr != FFXM_OK) {
+        return pipelineErr;
+    }
+
+    pipelineErr = patchResourceBindings(&context->pipelineLumaInstability);
+    if (pipelineErr != FFXM_OK) {
+        return pipelineErr;
+    }
+
+    // Create compute pipeline for Accumulate pass
+    wcscpy(pipelineDescription.name, L"FSR3-ACCUMULATE");
+    pipelineErr = context->contextDescription.backendInterface.fpCreateComputePipeline(
+        &context->contextDescription.backendInterface,
+        FFXM_EFFECT_FSR3UPSCALER,
+        FFXM_FSR3UPSCALER_PASS_ACCUMULATE,
+        0,
+        getPipelinePermutationFlags(contextDescription->flags, FFXM_FSR3UPSCALER_PASS_ACCUMULATE, supportedFP16, canForceWave64, useLut),
+        &pipelineDescription,
+        context->effectContextId,
+        &context->pipelineAccumulate);
+    if (pipelineErr != FFXM_OK) {
+        return pipelineErr;
+    }
+
+    pipelineErr = patchResourceBindings(&context->pipelineAccumulate);
     if (pipelineErr != FFXM_OK) {
         return pipelineErr;
     }
