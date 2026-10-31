@@ -128,3 +128,23 @@ if(ANDROID)
     # ffxmAssertReport() reports through logcat.
     target_link_libraries(Arm_ASR_api PUBLIC log)
 endif()
+
+# ------------------------------------------------------
+# Tests
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(test_milestone2 tests/test_milestone2.cpp)
+    target_link_libraries(test_milestone2 PRIVATE Arm_ASR_api)
+    target_include_directories(test_milestone2 PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${FFXM_INCLUDE_PATH}
+        ${FFXM_HOST_PATH}
+        ${FFXM_GPU_PATH}
+        ${FFXM_HOST_BACKENDS_PATH}/vk)
+    target_compile_features(test_milestone2 PRIVATE cxx_std_20)
+    if(ANDROID)
+        target_link_libraries(test_milestone2 PRIVATE log)
+    endif()
+    add_test(NAME test_milestone2 COMMAND test_milestone2)
+endif()
+

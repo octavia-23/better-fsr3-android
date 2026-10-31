@@ -261,6 +261,7 @@ bool VkContext::createDevice()
     VkPhysicalDeviceFeatures wanted = {};
     wanted.shaderInt16          = features2.features.shaderInt16;
     wanted.samplerAnisotropy    = features2.features.samplerAnisotropy;
+    wanted.shaderStorageImageExtendedFormats = features2.features.shaderStorageImageExtendedFormats;
     features2.features          = wanted;
 
     const float priority = 1.0f;

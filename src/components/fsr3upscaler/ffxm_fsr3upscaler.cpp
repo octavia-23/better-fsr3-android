@@ -170,9 +170,9 @@ FfxmErrorCode fsr3UpscalerCreate(
         &context->contextDescription.backendInterface, &context->deviceCapabilities);
     FFXM_RETURN_ON_ERROR(errorCode == FFXM_OK, errorCode);
 
-    // Reject unsupported FP16 hardware cleanly using existing error semantics
+    // Reject unsupported FP16 hardware cleanly using FFXM_ERROR_UNSUPPORTED_DEVICE
     if (!context->deviceCapabilities.fp16Supported) {
-        return FFXM_ERROR_INVALID_ARGUMENT;
+        return FFXM_ERROR_UNSUPPORTED_DEVICE;
     }
 
     // Create backend context space

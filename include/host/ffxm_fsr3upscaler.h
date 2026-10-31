@@ -360,6 +360,8 @@ typedef uint32_t FfxmVersionNumber;
 /// FFXM_ERROR_INCOMPLETE_INTERFACE      The operation failed because the <c><i>FfxmFsr3UpscalerContextDescription.backendInterface</i></c> was not fully specified.
 /// @retval
 /// FFXM_ERROR_BACKEND_API_ERROR         The operation failed because of an error returned from the backend.
+/// @retval
+/// FFXM_ERROR_UNSUPPORTED_DEVICE        The operation failed because the device lacks required hardware features (e.g. shaderFloat16).
 ///
 /// @ingroup ffxmFsr3Upscaler
 FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextCreate(

@@ -6,6 +6,7 @@
 #include <cstring>
 #include <cmath>
 #include <vector>
+#include <map>
 #include <set>
 
 #include "host/ffxm_fsr3upscaler.h"
@@ -28,8 +29,14 @@ static int32_t s_FailAtResourceIndex = -1; // -1 means no failure
 static int32_t s_CurrentResourceCreateCount = 0;
 static int32_t s_NextResourceIndex = 0;
 
-static std::vector<int32_t> s_CreatedResourceIndices;
-static std::vector<int32_t> s_DestroyedResourceIndices;
+// Occurrence-aware resource creation & destruction tracking
+static std::map<int32_t, int> s_ResourceCreationCounts;
+static std::map<int32_t, int> s_ResourceDestructionCounts;
+static std::vector<int32_t> s_CreatedResourceOrder;
+static std::vector<int32_t> s_DestroyedResourceOrder;
+
+// Captured resource descriptions for regression verification
+static std::vector<FfxmCreateResourceDescription> s_CapturedResourceDescriptions;
 
 static FfxmVersionNumber MockGetSDKVersion(FfxmInterface* backendInterface)
 {
@@ -80,9 +87,14 @@ static FfxmErrorCode MockCreateResource(
         return FFXM_ERROR_OUT_OF_MEMORY;
     }
 
+    if (createResourceDescription) {
+        s_CapturedResourceDescriptions.push_back(*createResourceDescription);
+    }
+
     int32_t idx = s_NextResourceIndex++;
     s_CurrentResourceCreateCount++;
-    s_CreatedResourceIndices.push_back(idx);
+    s_ResourceCreationCounts[idx]++;
+    s_CreatedResourceOrder.push_back(idx);
 
     if (outResource) {
         outResource->internalIndex = idx;
@@ -91,7 +103,8 @@ static FfxmErrorCode MockCreateResource(
     // If resource has initial data, backend creates a copy staging resource at idx + 1
     if (createResourceDescription && createResourceDescription->initData) {
         int32_t copyIdx = s_NextResourceIndex++;
-        s_CreatedResourceIndices.push_back(copyIdx);
+        s_ResourceCreationCounts[copyIdx]++;
+        s_CreatedResourceOrder.push_back(copyIdx);
     }
 
     return FFXM_OK;
@@ -101,7 +114,8 @@ static FfxmErrorCode MockDestroyResource(FfxmInterface* backendInterface, FfxmRe
 {
     (void)backendInterface;
     if (resource.internalIndex != -1) {
-        s_DestroyedResourceIndices.push_back(resource.internalIndex);
+        s_ResourceDestructionCounts[resource.internalIndex]++;
+        s_DestroyedResourceOrder.push_back(resource.internalIndex);
     }
     return FFXM_OK;
 }
@@ -184,8 +198,11 @@ static void ResetMockState()
     s_FailAtResourceIndex = -1;
     s_CurrentResourceCreateCount = 0;
     s_NextResourceIndex = 0;
-    s_CreatedResourceIndices.clear();
-    s_DestroyedResourceIndices.clear();
+    s_ResourceCreationCounts.clear();
+    s_ResourceDestructionCounts.clear();
+    s_CreatedResourceOrder.clear();
+    s_DestroyedResourceOrder.clear();
+    s_CapturedResourceDescriptions.clear();
 }
 
 static void SetupMockInterface(FfxmInterface* iface)
@@ -208,6 +225,30 @@ static void SetupMockInterface(FfxmInterface* iface)
     iface->fpDestroyPipeline = MockDestroyPipeline;
     iface->fpScheduleGpuJob = MockScheduleGpuJob;
     iface->fpExecuteGpuJobs = MockExecuteGpuJobs;
+}
+
+static void VerifyOccurrenceAwareResourceBalance()
+{
+    // 1. Total unique created and destroyed resource counts must match
+    assert(s_ResourceCreationCounts.size() == s_ResourceDestructionCounts.size());
+
+    // 2. Every acquired resource must be destroyed exactly once
+    for (const auto& kv : s_ResourceCreationCounts) {
+        int32_t idx = kv.first;
+        assert(kv.second == 1);
+        auto it = s_ResourceDestructionCounts.find(idx);
+        assert(it != s_ResourceDestructionCounts.end());
+        assert(it->second == 1);
+    }
+
+    // 3. No unacquired resource was destroyed
+    for (const auto& kv : s_ResourceDestructionCounts) {
+        int32_t idx = kv.first;
+        assert(s_ResourceCreationCounts.find(idx) != s_ResourceCreationCounts.end());
+    }
+
+    // 4. Exact map equality
+    assert(s_ResourceCreationCounts == s_ResourceDestructionCounts);
 }
 
 // 1. Context Size and Alignment
@@ -272,13 +313,11 @@ void TestSuccessfulContextCreation()
     assert(s_DestroyBackendContextCalled == true);
     assert(s_DestroyedContextId == 100);
 
-    // Verify all created resources were destroyed exactly once
-    assert(s_CreatedResourceIndices.size() == s_DestroyedResourceIndices.size());
-    std::set<int32_t> createdSet(s_CreatedResourceIndices.begin(), s_CreatedResourceIndices.end());
-    std::set<int32_t> destroyedSet(s_DestroyedResourceIndices.begin(), s_DestroyedResourceIndices.end());
-    assert(createdSet == destroyedSet);
+    // Verify occurrence-aware resource balance (19 surfaces, 4 copy resources, 0 leaks, 0 double-frees)
+    VerifyOccurrenceAwareResourceBalance();
+    assert(s_ResourceCreationCounts.size() == 23); // 19 textures + 4 copy staging resources
 
-    // Verify context was cleared
+    // Verify context was cleanly zeroed
     uint8_t zeros[sizeof(FfxmFsr3UpscalerContext)] = {};
     assert(memcmp(&context, zeros, sizeof(context)) == 0);
 
@@ -300,18 +339,18 @@ void TestUnsupportedFP16Hardware()
     SetupMockInterface(&desc.backendInterface);
 
     FfxmErrorCode res = ffxmFsr3UpscalerContextCreate(&context, &desc);
-    assert(static_cast<uint32_t>(res) == static_cast<uint32_t>(FFXM_ERROR_INVALID_ARGUMENT));
+    assert(res == FFXM_ERROR_UNSUPPORTED_DEVICE);
     assert(s_GetDeviceCapsCalled == true);
     assert(s_CreateBackendContextCalled == false); // Must NOT create backend context
     assert(s_DestroyBackendContextCalled == false); // Must NOT destroy backend context that was never created
-    assert(s_CreatedResourceIndices.empty());
-    assert(s_DestroyedResourceIndices.empty());
+    assert(s_ResourceCreationCounts.empty());
+    assert(s_ResourceDestructionCounts.empty());
 
     // Context must be cleanly zeroed
     uint8_t zeros[sizeof(FfxmFsr3UpscalerContext)] = {};
     assert(memcmp(&context, zeros, sizeof(context)) == 0);
 
-    std::cout << "PASS: Unsupported FP16 hardware returns FFXM_ERROR_INVALID_ARGUMENT and touches no backend state." << std::endl;
+    std::cout << "PASS: Unsupported FP16 hardware returns FFXM_ERROR_UNSUPPORTED_DEVICE and touches no backend state." << std::endl;
 }
 
 // 4. Backend Context Creation Failure
@@ -329,11 +368,11 @@ void TestBackendContextCreationFailure()
     SetupMockInterface(&desc.backendInterface);
 
     FfxmErrorCode res = ffxmFsr3UpscalerContextCreate(&context, &desc);
-    assert(static_cast<uint32_t>(res) == static_cast<uint32_t>(FFXM_ERROR_OUT_OF_MEMORY));
+    assert(res == FFXM_ERROR_OUT_OF_MEMORY);
     assert(s_CreateBackendContextCalled == true);
     assert(s_DestroyBackendContextCalled == false); // Never successfully created, so must NOT destroy
-    assert(s_CreatedResourceIndices.empty());
-    assert(s_DestroyedResourceIndices.empty());
+    assert(s_ResourceCreationCounts.empty());
+    assert(s_ResourceDestructionCounts.empty());
 
     uint8_t zeros[sizeof(FfxmFsr3UpscalerContext)] = {};
     assert(memcmp(&context, zeros, sizeof(context)) == 0);
@@ -341,7 +380,7 @@ void TestBackendContextCreationFailure()
     std::cout << "PASS: Backend context creation failure safely handled without destroying uncreated context." << std::endl;
 }
 
-// 5. Resource Allocation Failure at Each Stage (0 to 18)
+// 5. Resource Allocation Failure at Each Stage (0 to 18) with Occurrence-Aware Tracking
 void TestResourceAllocationFailureAtEachStage()
 {
     std::cout << "--- Test 5: Resource Allocation Failure at Each Stage (0 to 18) ---" << std::endl;
@@ -358,25 +397,22 @@ void TestResourceAllocationFailureAtEachStage()
         SetupMockInterface(&desc.backendInterface);
 
         FfxmErrorCode res = ffxmFsr3UpscalerContextCreate(&context, &desc);
-        assert(static_cast<uint32_t>(res) == static_cast<uint32_t>(FFXM_ERROR_OUT_OF_MEMORY));
+        assert(res == FFXM_ERROR_OUT_OF_MEMORY);
 
         // Backend context WAS created, so it MUST be destroyed
         assert(s_CreateBackendContextCalled == true);
         assert(s_DestroyBackendContextCalled == true);
         assert(s_DestroyedContextId == 100);
 
-        // Every resource allocated prior to failure must be destroyed exactly once
-        assert(s_CreatedResourceIndices.size() == s_DestroyedResourceIndices.size());
-        std::set<int32_t> createdSet(s_CreatedResourceIndices.begin(), s_CreatedResourceIndices.end());
-        std::set<int32_t> destroyedSet(s_DestroyedResourceIndices.begin(), s_DestroyedResourceIndices.end());
-        assert(createdSet == destroyedSet);
+        // Occurrence-aware check: every resource allocated prior to failure must be destroyed exactly once
+        VerifyOccurrenceAwareResourceBalance();
 
         // Context must be zeroed out
         uint8_t zeros[sizeof(FfxmFsr3UpscalerContext)] = {};
         assert(memcmp(&context, zeros, sizeof(context)) == 0);
     }
 
-    std::cout << "PASS: All 19 allocation failure stages cleanly rolled back with zero leaks and zero double-frees." << std::endl;
+    std::cout << "PASS: All 19 allocation failure stages cleanly rolled back with occurrence-aware balance." << std::endl;
 }
 
 // 6. Correct Resource Destruction & Double Destruction Safety
@@ -395,15 +431,14 @@ void TestCorrectResourceDestruction()
 
     // Destroy once
     assert(ffxmFsr3UpscalerContextDestroy(&context) == FFXM_OK);
-    size_t destroyedCountFirst = s_DestroyedResourceIndices.size();
-    assert(destroyedCountFirst == s_CreatedResourceIndices.size());
+    VerifyOccurrenceAwareResourceBalance();
     assert(s_DestroyBackendContextCalled == true);
 
     // Destroy second time on zeroed context
     s_DestroyBackendContextCalled = false;
     assert(ffxmFsr3UpscalerContextDestroy(&context) == FFXM_OK);
     // Nothing new should have been destroyed
-    assert(s_DestroyedResourceIndices.size() == destroyedCountFirst);
+    VerifyOccurrenceAwareResourceBalance();
     assert(s_DestroyBackendContextCalled == false);
 
     std::cout << "PASS: Resource destruction is complete and double-destruction is fully safe." << std::endl;
@@ -429,11 +464,9 @@ void TestRepeatedCreateDestroyCycles()
         assert(res == FFXM_OK);
     }
 
-    // Verify equal creations and destructions across all 10 cycles
-    assert(s_CreatedResourceIndices.size() == s_DestroyedResourceIndices.size());
-    std::set<int32_t> createdSet(s_CreatedResourceIndices.begin(), s_CreatedResourceIndices.end());
-    std::set<int32_t> destroyedSet(s_DestroyedResourceIndices.begin(), s_DestroyedResourceIndices.end());
-    assert(createdSet == destroyedSet);
+    // Verify occurrence-aware tracking across all 10 cycles
+    VerifyOccurrenceAwareResourceBalance();
+    assert(s_ResourceCreationCounts.size() == 230); // 23 resources * 10 cycles
 
     std::cout << "PASS: 10 repeated create/destroy cycles executed with 100% resource tracking fidelity." << std::endl;
 }
@@ -488,7 +521,7 @@ void TestProtectedUnfinishedAPIs()
     dispDesc.viewSpaceToMetersFactor = 1.0f;
 
     FfxmErrorCode dispRes = ffxmFsr3UpscalerContextDispatch(&context, &dispDesc);
-    assert(static_cast<uint32_t>(dispRes) == static_cast<uint32_t>(FFXM_ERROR_INCOMPLETE_INTERFACE));
+    assert(dispRes == FFXM_ERROR_INCOMPLETE_INTERFACE);
 
     // Test GenerateReactive protection
     FfxmFsr3UpscalerGenerateReactiveDescription genDesc = {};
@@ -498,10 +531,319 @@ void TestProtectedUnfinishedAPIs()
     genDesc.binaryValue = 1.0f;
 
     FfxmErrorCode genRes = ffxmFsr3UpscalerContextGenerateReactiveMask(&context, &genDesc);
-    assert(static_cast<uint32_t>(genRes) == static_cast<uint32_t>(FFXM_ERROR_INCOMPLETE_INTERFACE));
+    assert(genRes == FFXM_ERROR_INCOMPLETE_INTERFACE);
 
     assert(ffxmFsr3UpscalerContextDestroy(&context) == FFXM_OK);
     std::cout << "PASS: Unfinished dispatch and reactive APIs explicitly return FFXM_ERROR_INCOMPLETE_INTERFACE." << std::endl;
+}
+
+// 10. Test All Four Constant-Buffer Staging Slots
+void TestConstantBufferStagingSlots()
+{
+    std::cout << "--- Test 10: Constant-Buffer Staging Slots (All 4 Slots) ---" << std::endl;
+    ResetMockState();
+
+    FfxmFsr3UpscalerContext context;
+    FfxmFsr3UpscalerContextDescription desc = {};
+    desc.maxRenderSize = { 1920, 1080 };
+    desc.maxUpscaleSize = { 3840, 2160 };
+    SetupMockInterface(&desc.backendInterface);
+    assert(ffxmFsr3UpscalerContextCreate(&context, &desc) == FFXM_OK);
+
+    FfxmFsr3UpscalerContext_Private* priv = reinterpret_cast<FfxmFsr3UpscalerContext_Private*>(&context);
+
+    // 1. Verify entry counts for all 4 slots staged during context creation
+    assert(priv->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_FSR3UPSCALER].num32BitEntries ==
+        sizeof(Fsr3UpscalerConstants) / sizeof(uint32_t));
+    assert(priv->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_SPD].num32BitEntries ==
+        sizeof(Fsr3UpscalerSpdConstants) / sizeof(uint32_t));
+    assert(priv->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_RCAS].num32BitEntries ==
+        sizeof(Fsr3UpscalerRcasConstants) / sizeof(uint32_t));
+    assert(priv->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_GENREACTIVE].num32BitEntries ==
+        sizeof(Fsr3UpscalerGenerateReactiveConstants) / sizeof(uint32_t));
+
+    // 2. Verify byte-for-byte staging for Slot 0 (FSR3UPSCALER)
+    Fsr3UpscalerConstants testFsr3 = {};
+    for (size_t i = 0; i < sizeof(testFsr3); ++i) {
+        reinterpret_cast<uint8_t*>(&testFsr3)[i] = static_cast<uint8_t>((i * 7 + 13) & 0xFF);
+    }
+    priv->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_FSR3UPSCALER].num32BitEntries =
+        sizeof(Fsr3UpscalerConstants) / sizeof(uint32_t);
+    memcpy(priv->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_FSR3UPSCALER].data,
+        &testFsr3, sizeof(testFsr3));
+    assert(memcmp(priv->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_FSR3UPSCALER].data,
+        &testFsr3, sizeof(testFsr3)) == 0);
+
+    // 3. Verify byte-for-byte staging for Slot 1 (SPD)
+    Fsr3UpscalerSpdConstants testSpd = {};
+    testSpd.mips = 7;
+    testSpd.numWorkGroups = 42;
+    testSpd.workGroupOffset[0] = 16;
+    testSpd.workGroupOffset[1] = 32;
+    testSpd.renderSize[0] = 960;
+    testSpd.renderSize[1] = 540;
+
+    priv->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_SPD].num32BitEntries =
+        sizeof(Fsr3UpscalerSpdConstants) / sizeof(uint32_t);
+    memcpy(priv->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_SPD].data,
+        &testSpd, sizeof(testSpd));
+    assert(priv->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_SPD].num32BitEntries == 6);
+    assert(memcmp(priv->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_SPD].data,
+        &testSpd, sizeof(testSpd)) == 0);
+
+    // 4. Verify byte-for-byte staging for Slot 2 (RCAS)
+    Fsr3UpscalerRcasConstants testRcas = {};
+    testRcas.rcasConfig[0] = 0x3F800000;
+    testRcas.rcasConfig[1] = 0x40000000;
+    testRcas.rcasConfig[2] = 0x12345678;
+    testRcas.rcasConfig[3] = 0x9ABCDEF0;
+
+    priv->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_RCAS].num32BitEntries =
+        sizeof(Fsr3UpscalerRcasConstants) / sizeof(uint32_t);
+    memcpy(priv->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_RCAS].data,
+        &testRcas, sizeof(testRcas));
+    assert(priv->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_RCAS].num32BitEntries == 4);
+    assert(memcmp(priv->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_RCAS].data,
+        &testRcas, sizeof(testRcas)) == 0);
+
+    // 5. Verify byte-for-byte staging for Slot 3 (GENREACTIVE) via public API
+    FfxmCommandList dummyCmdList = reinterpret_cast<FfxmCommandList>(0xCAFE);
+    FfxmFsr3UpscalerGenerateReactiveDescription genDesc = {};
+    genDesc.commandList = dummyCmdList;
+    genDesc.scale = 0.75f;
+    genDesc.cutoffThreshold = 0.35f;
+    genDesc.binaryValue = 0.9f;
+    genDesc.flags = 0x03;
+
+    FfxmErrorCode genRes = ffxmFsr3UpscalerContextGenerateReactiveMask(&context, &genDesc);
+    assert(genRes == FFXM_ERROR_INCOMPLETE_INTERFACE); // protected until Milestone 3
+
+    Fsr3UpscalerGenerateReactiveConstants expectedGen = {};
+    expectedGen.scale = genDesc.scale;
+    expectedGen.cutoffThreshold = genDesc.cutoffThreshold;
+    expectedGen.binaryValue = genDesc.binaryValue;
+    expectedGen.flags = genDesc.flags;
+
+    assert(priv->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_GENREACTIVE].num32BitEntries ==
+        sizeof(Fsr3UpscalerGenerateReactiveConstants) / sizeof(uint32_t));
+    assert(priv->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_GENREACTIVE].num32BitEntries == 4);
+    assert(memcmp(priv->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_GENREACTIVE].data,
+        &expectedGen, sizeof(expectedGen)) == 0);
+
+    // 6. Verify Dispatch stages Slot 0 (FSR3UPSCALER) via public API
+    FfxmFsr3UpscalerDispatchDescription dispDesc = {};
+    dispDesc.commandList = dummyCmdList;
+    dispDesc.renderSize = { 1280, 720 };
+    dispDesc.upscaleSize = { 2560, 1440 };
+    dispDesc.jitterOffset = { 0.33f, -0.66f };
+    dispDesc.motionVectorScale = { 1.5f, 2.0f };
+    dispDesc.frameTimeDelta = 0.01666f;
+    dispDesc.cameraFovAngleVertical = 1.047f;
+    dispDesc.viewSpaceToMetersFactor = 1.0f;
+    dispDesc.cameraNear = 0.1f;
+    dispDesc.cameraFar = 1000.0f;
+
+    FfxmErrorCode dispRes = ffxmFsr3UpscalerContextDispatch(&context, &dispDesc);
+    assert(dispRes == FFXM_ERROR_INCOMPLETE_INTERFACE); // protected until Milestone 3
+
+    assert(priv->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_FSR3UPSCALER].num32BitEntries ==
+        sizeof(Fsr3UpscalerConstants) / sizeof(uint32_t));
+    assert(memcmp(priv->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_FSR3UPSCALER].data,
+        &priv->constants, sizeof(Fsr3UpscalerConstants)) == 0);
+
+    assert(ffxmFsr3UpscalerContextDestroy(&context) == FFXM_OK);
+    std::cout << "PASS: All 4 constant-buffer staging slots verified for entry counts and byte-for-byte equality." << std::endl;
+}
+
+// 11. Regression Table Validation for All 19 Internal Resource Descriptions
+void TestInternalResourceDescriptionsRegressionTable()
+{
+    std::cout << "--- Test 11: Internal Resource Descriptions Regression Table (All 19 Surfaces) ---" << std::endl;
+    ResetMockState();
+
+    FfxmFsr3UpscalerContext context;
+    FfxmFsr3UpscalerContextDescription desc = {};
+    desc.maxRenderSize = { 1920, 1080 };
+    desc.maxUpscaleSize = { 3840, 2160 };
+    SetupMockInterface(&desc.backendInterface);
+    assert(ffxmFsr3UpscalerContextCreate(&context, &desc) == FFXM_OK);
+
+    assert(s_CapturedResourceDescriptions.size() == FFXM_FSR3UPSCALER_INTERNAL_SURFACE_COUNT);
+
+    struct ExpectedResourceDesc {
+        uint32_t               id;
+        const wchar_t*         name;
+        FfxmSurfaceFormat       format;
+        uint32_t               width;
+        uint32_t               height;
+        uint32_t               mipCount;
+        FfxmResourceFlags      flags;
+        FfxmResourceUsage      usage;
+        FfxmResourceStates     initialState;
+        uint32_t               initDataSize;
+    };
+
+    const ExpectedResourceDesc expectedTable[19] = {
+        // 0. ACCUMULATION_1
+        { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_ACCUMULATION_1, L"FSR3UPSCALER_Accumulation1",
+          FFXM_SURFACE_FORMAT_R8_UNORM, 1920, 1080, 1,
+          FFXM_RESOURCE_FLAGS_NONE,
+          static_cast<FfxmResourceUsage>(FFXM_RESOURCE_USAGE_RENDERTARGET | FFXM_RESOURCE_USAGE_UAV),
+          FFXM_RESOURCE_STATE_UNORDERED_ACCESS, 0 },
+
+        // 1. ACCUMULATION_2
+        { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_ACCUMULATION_2, L"FSR3UPSCALER_Accumulation2",
+          FFXM_SURFACE_FORMAT_R8_UNORM, 1920, 1080, 1,
+          FFXM_RESOURCE_FLAGS_NONE,
+          static_cast<FfxmResourceUsage>(FFXM_RESOURCE_USAGE_RENDERTARGET | FFXM_RESOURCE_USAGE_UAV),
+          FFXM_RESOURCE_STATE_UNORDERED_ACCESS, 0 },
+
+        // 2. LUMA_1
+        { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_1, L"FSR3UPSCALER_Luma1",
+          FFXM_SURFACE_FORMAT_R16_FLOAT, 1920, 1080, 1,
+          FFXM_RESOURCE_FLAGS_NONE,
+          static_cast<FfxmResourceUsage>(FFXM_RESOURCE_USAGE_RENDERTARGET | FFXM_RESOURCE_USAGE_UAV),
+          FFXM_RESOURCE_STATE_UNORDERED_ACCESS, 0 },
+
+        // 3. LUMA_2
+        { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_2, L"FSR3UPSCALER_Luma2",
+          FFXM_SURFACE_FORMAT_R16_FLOAT, 1920, 1080, 1,
+          FFXM_RESOURCE_FLAGS_NONE,
+          static_cast<FfxmResourceUsage>(FFXM_RESOURCE_USAGE_RENDERTARGET | FFXM_RESOURCE_USAGE_UAV),
+          FFXM_RESOURCE_STATE_UNORDERED_ACCESS, 0 },
+
+        // 4. INTERMEDIATE_FP16x1 (Aliasable)
+        { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERMEDIATE_FP16x1, L"FSR3UPSCALER_IntermediateFp16x1",
+          FFXM_SURFACE_FORMAT_R16_FLOAT, 1920, 1080, 1,
+          FFXM_RESOURCE_FLAGS_ALIASABLE,
+          static_cast<FfxmResourceUsage>(FFXM_RESOURCE_USAGE_RENDERTARGET | FFXM_RESOURCE_USAGE_UAV),
+          FFXM_RESOURCE_STATE_UNORDERED_ACCESS, 0 },
+
+        // 5. SHADING_CHANGE (Aliasable)
+        { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_SHADING_CHANGE, L"FSR3UPSCALER_ShadingChange",
+          FFXM_SURFACE_FORMAT_R8_UNORM, 960, 540, 1,
+          FFXM_RESOURCE_FLAGS_ALIASABLE,
+          static_cast<FfxmResourceUsage>(FFXM_RESOURCE_USAGE_RENDERTARGET | FFXM_RESOURCE_USAGE_UAV),
+          FFXM_RESOURCE_STATE_UNORDERED_ACCESS, 0 },
+
+        // 6. NEW_LOCKS (Aliasable)
+        { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_NEW_LOCKS, L"FSR3UPSCALER_NewLocks",
+          FFXM_SURFACE_FORMAT_R8_UNORM, 3840, 2160, 1,
+          FFXM_RESOURCE_FLAGS_ALIASABLE,
+          FFXM_RESOURCE_USAGE_UAV,
+          FFXM_RESOURCE_STATE_UNORDERED_ACCESS, 0 },
+
+        // 7. INTERNAL_UPSCALED_COLOR_1
+        { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_UPSCALED_COLOR_1, L"FSR3UPSCALER_InternalUpscaled1",
+          FFXM_SURFACE_FORMAT_R16G16B16A16_FLOAT, 3840, 2160, 1,
+          FFXM_RESOURCE_FLAGS_NONE,
+          static_cast<FfxmResourceUsage>(FFXM_RESOURCE_USAGE_RENDERTARGET | FFXM_RESOURCE_USAGE_UAV),
+          FFXM_RESOURCE_STATE_UNORDERED_ACCESS, 0 },
+
+        // 8. INTERNAL_UPSCALED_COLOR_2
+        { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_UPSCALED_COLOR_2, L"FSR3UPSCALER_InternalUpscaled2",
+          FFXM_SURFACE_FORMAT_R16G16B16A16_FLOAT, 3840, 2160, 1,
+          FFXM_RESOURCE_FLAGS_NONE,
+          static_cast<FfxmResourceUsage>(FFXM_RESOURCE_USAGE_RENDERTARGET | FFXM_RESOURCE_USAGE_UAV),
+          FFXM_RESOURCE_STATE_UNORDERED_ACCESS, 0 },
+
+        // 9. SPD_MIPS (Aliasable, full mip chain)
+        { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_SPD_MIPS, L"FSR3UPSCALER_SpdMips",
+          FFXM_SURFACE_FORMAT_R16G16_FLOAT, 960, 540, 0,
+          FFXM_RESOURCE_FLAGS_ALIASABLE,
+          FFXM_RESOURCE_USAGE_UAV,
+          FFXM_RESOURCE_STATE_UNORDERED_ACCESS, 0 },
+
+        // 10. FARTHEST_DEPTH_MIP1 (Aliasable)
+        { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FARTHEST_DEPTH_MIP1, L"FSR3UPSCALER_FarthestDepthMip1",
+          FFXM_SURFACE_FORMAT_R16_FLOAT, 960, 540, 1,
+          FFXM_RESOURCE_FLAGS_ALIASABLE,
+          FFXM_RESOURCE_USAGE_UAV,
+          FFXM_RESOURCE_STATE_UNORDERED_ACCESS, 0 },
+
+        // 11. LUMA_HISTORY_1
+        { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_HISTORY_1, L"FSR3UPSCALER_LumaHistory1",
+          FFXM_SURFACE_FORMAT_R16G16B16A16_FLOAT, 1920, 1080, 1,
+          FFXM_RESOURCE_FLAGS_NONE,
+          static_cast<FfxmResourceUsage>(FFXM_RESOURCE_USAGE_RENDERTARGET | FFXM_RESOURCE_USAGE_UAV),
+          FFXM_RESOURCE_STATE_UNORDERED_ACCESS, 0 },
+
+        // 12. LUMA_HISTORY_2
+        { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_HISTORY_2, L"FSR3UPSCALER_LumaHistory2",
+          FFXM_SURFACE_FORMAT_R16G16B16A16_FLOAT, 1920, 1080, 1,
+          FFXM_RESOURCE_FLAGS_NONE,
+          static_cast<FfxmResourceUsage>(FFXM_RESOURCE_USAGE_RENDERTARGET | FFXM_RESOURCE_USAGE_UAV),
+          FFXM_RESOURCE_STATE_UNORDERED_ACCESS, 0 },
+
+        // 13. SPD_ATOMIC_COUNT
+        { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_SPD_ATOMIC_COUNT, L"FSR3UPSCALER_SpdAtomicCounter",
+          FFXM_SURFACE_FORMAT_R32_UINT, 1, 1, 1,
+          FFXM_RESOURCE_FLAGS_NONE,
+          FFXM_RESOURCE_USAGE_UAV,
+          FFXM_RESOURCE_STATE_UNORDERED_ACCESS, 4 },
+
+        // 14. DILATED_REACTIVE_MASKS (Aliasable)
+        { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_REACTIVE_MASKS, L"FSR3UPSCALER_DilatedReactiveMasks",
+          FFXM_SURFACE_FORMAT_R8G8B8A8_UNORM, 1920, 1080, 1,
+          FFXM_RESOURCE_FLAGS_ALIASABLE,
+          static_cast<FfxmResourceUsage>(FFXM_RESOURCE_USAGE_RENDERTARGET | FFXM_RESOURCE_USAGE_UAV),
+          FFXM_RESOURCE_STATE_UNORDERED_ACCESS, 0 },
+
+        // 15. LANCZOS_LUT
+        { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LANCZOS_LUT, L"FSR3UPSCALER_LanczosLutData",
+          FFXM_SURFACE_FORMAT_R16_SNORM, 128, 1, 1,
+          FFXM_RESOURCE_FLAGS_NONE,
+          FFXM_RESOURCE_USAGE_READ_ONLY,
+          FFXM_RESOURCE_STATE_COMPUTE_READ, 256 },
+
+        // 16. INTERNAL_DEFAULT_REACTIVITY
+        { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_DEFAULT_REACTIVITY, L"FSR3UPSCALER_DefaultReactivityMask",
+          FFXM_SURFACE_FORMAT_R8_UNORM, 1, 1, 1,
+          FFXM_RESOURCE_FLAGS_NONE,
+          FFXM_RESOURCE_USAGE_READ_ONLY,
+          FFXM_RESOURCE_STATE_COMPUTE_READ, 1 },
+
+        // 17. INTERNAL_DEFAULT_EXPOSURE
+        { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_DEFAULT_EXPOSURE, L"FSR3UPSCALER_DefaultExposure",
+          FFXM_SURFACE_FORMAT_R32G32_FLOAT, 1, 1, 1,
+          FFXM_RESOURCE_FLAGS_NONE,
+          FFXM_RESOURCE_USAGE_READ_ONLY,
+          FFXM_RESOURCE_STATE_COMPUTE_READ, 8 },
+
+        // 18. FRAME_INFO
+        { FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FRAME_INFO, L"FSR3UPSCALER_FrameInfo",
+          FFXM_SURFACE_FORMAT_R32G32B32A32_FLOAT, 1, 1, 1,
+          FFXM_RESOURCE_FLAGS_NONE,
+          FFXM_RESOURCE_USAGE_UAV,
+          FFXM_RESOURCE_STATE_UNORDERED_ACCESS, 0 }
+    };
+
+    for (size_t i = 0; i < 19; ++i) {
+        const auto& actual = s_CapturedResourceDescriptions[i];
+        const auto& expected = expectedTable[i];
+
+        assert(actual.id == expected.id);
+        assert(wcscmp(actual.name, expected.name) == 0);
+        assert(actual.heapType == FFXM_HEAP_TYPE_DEFAULT);
+        assert(actual.resourceDescription.type == FFXM_RESOURCE_TYPE_TEXTURE2D);
+        assert(actual.resourceDescription.format == expected.format);
+        assert(actual.resourceDescription.width == expected.width);
+        assert(actual.resourceDescription.height == expected.height);
+        assert(actual.resourceDescription.depth == 1);
+        assert(actual.resourceDescription.mipCount == expected.mipCount);
+        assert(actual.resourceDescription.flags == expected.flags);
+        assert(actual.resourceDescription.usage == expected.usage);
+        assert(actual.initalState == expected.initialState);
+        assert(actual.initDataSize == expected.initDataSize);
+        if (expected.initDataSize > 0) {
+            assert(actual.initData != nullptr);
+        } else {
+            assert(actual.initData == nullptr);
+        }
+    }
+
+    assert(ffxmFsr3UpscalerContextDestroy(&context) == FFXM_OK);
+    std::cout << "PASS: All 19 internal resource descriptions match authoritative FSR 3.1.4 reference." << std::endl;
 }
 
 int main()
@@ -519,6 +861,8 @@ int main()
     TestRepeatedCreateDestroyCycles();
     TestSharedResourceDescriptions();
     TestProtectedUnfinishedAPIs();
+    TestConstantBufferStagingSlots();
+    TestInternalResourceDescriptionsRegressionTable();
 
     std::cout << "============================================================" << std::endl;
     std::cout << "ALL MILESTONE 2 TESTS PASSED PERFECTLY!" << std::endl;
