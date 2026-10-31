@@ -7,6 +7,7 @@
 #include <ffxm_fsr3upscaler_prepare_inputs_pass_permutations.h>
 #include <ffxm_fsr3upscaler_luma_pyramid_pass_permutations.h>
 #include <ffxm_fsr3upscaler_shading_change_pyramid_pass_permutations.h>
+#include <ffxm_fsr3upscaler_shading_change_pass_permutations.h>
 #include <string.h>
 
 namespace arm
@@ -48,6 +49,15 @@ static FfxmShaderBlob fsr3UpscalerGetShadingChangePyramidPassPermutationBlobByIn
     return POPULATE_SHADER_BLOB_FFX(g_ffxm_fsr3upscaler_shading_change_pyramid_pass_PermutationInfo, tableIndex);
 }
 
+static FfxmShaderBlob fsr3UpscalerGetShadingChangePassPermutationBlobByIndex(uint32_t permutationOptions)
+{
+    ffxm_fsr3upscaler_shading_change_pass_PermutationKey key;
+    POPULATE_PERMUTATION_KEY(permutationOptions, key);
+
+    const int32_t tableIndex = g_ffxm_fsr3upscaler_shading_change_pass_IndirectionTable[key.index];
+    return POPULATE_SHADER_BLOB_FFX(g_ffxm_fsr3upscaler_shading_change_pass_PermutationInfo, tableIndex);
+}
+
 FfxmErrorCode fsr3UpscalerGetPermutationBlobByIndex(
     FfxmFsr3UpscalerPass passId,
     uint32_t permutationOptions,
@@ -73,6 +83,12 @@ FfxmErrorCode fsr3UpscalerGetPermutationBlobByIndex(
     case FFXM_FSR3UPSCALER_PASS_SHADING_CHANGE_PYRAMID:
     {
         FfxmShaderBlob blob = fsr3UpscalerGetShadingChangePyramidPassPermutationBlobByIndex(permutationOptions);
+        memcpy(outBlob, &blob, sizeof(FfxmShaderBlob));
+        return FFXM_OK;
+    }
+    case FFXM_FSR3UPSCALER_PASS_SHADING_CHANGE:
+    {
+        FfxmShaderBlob blob = fsr3UpscalerGetShadingChangePassPermutationBlobByIndex(permutationOptions);
         memcpy(outBlob, &blob, sizeof(FfxmShaderBlob));
         return FFXM_OK;
     }

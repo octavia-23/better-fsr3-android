@@ -176,11 +176,12 @@ static uint32_t getPipelinePermutationFlags(
 }
 
 static void setupDeviceDepthToViewSpaceDepthParams(
-    FfxmFsr3UpscalerContext_Private* context,
+    Fsr3UpscalerConstants* constants,
+    const FfxmFsr3UpscalerContextDescription* contextDescription,
     const FfxmFsr3UpscalerDispatchDescription* params)
 {
-    const bool bInverted = (context->contextDescription.flags & FFXM_FSR3UPSCALER_ENABLE_DEPTH_INVERTED) == FFXM_FSR3UPSCALER_ENABLE_DEPTH_INVERTED;
-    const bool bInfinite = (context->contextDescription.flags & FFXM_FSR3UPSCALER_ENABLE_DEPTH_INFINITE) == FFXM_FSR3UPSCALER_ENABLE_DEPTH_INFINITE;
+    const bool bInverted = (contextDescription->flags & FFXM_FSR3UPSCALER_ENABLE_DEPTH_INVERTED) == FFXM_FSR3UPSCALER_ENABLE_DEPTH_INVERTED;
+    const bool bInfinite = (contextDescription->flags & FFXM_FSR3UPSCALER_ENABLE_DEPTH_INFINITE) == FFXM_FSR3UPSCALER_ENABLE_DEPTH_INFINITE;
 
     float fMin = std::min(params->cameraNear, params->cameraFar);
     float fMax = std::max(params->cameraNear, params->cameraFar);
@@ -204,8 +205,8 @@ static void setupDeviceDepthToViewSpaceDepthParams(
         { fQ * fMin, fMax }
     };
 
-    context->constants.deviceToViewDepth[0] = d * matrix_elem_c[bInverted ? 1 : 0][bInfinite ? 1 : 0];
-    context->constants.deviceToViewDepth[1] = matrix_elem_e[bInverted ? 1 : 0][bInfinite ? 1 : 0];
+    constants->deviceToViewDepth[0] = d * matrix_elem_c[bInverted ? 1 : 0][bInfinite ? 1 : 0];
+    constants->deviceToViewDepth[1] = matrix_elem_e[bInverted ? 1 : 0][bInfinite ? 1 : 0];
 
     const float aspect = (params->renderSize.height > 0)
         ? (static_cast<float>(params->renderSize.width) / static_cast<float>(params->renderSize.height))
@@ -216,8 +217,8 @@ static void setupDeviceDepthToViewSpaceDepthParams(
     const float a = (aspect > 0.0f) ? (cotHalfFovY / aspect) : cotHalfFovY;
     const float b = cotHalfFovY;
 
-    context->constants.deviceToViewDepth[2] = (fabsf(a) > 1e-7f) ? (1.0f / a) : 0.0f;
-    context->constants.deviceToViewDepth[3] = (fabsf(b) > 1e-7f) ? (1.0f / b) : 0.0f;
+    constants->deviceToViewDepth[2] = (fabsf(a) > 1e-7f) ? (1.0f / a) : 0.0f;
+    constants->deviceToViewDepth[3] = (fabsf(b) > 1e-7f) ? (1.0f / b) : 0.0f;
 }
 
 static FfxmErrorCode scheduleDispatch(
@@ -343,6 +344,10 @@ FfxmErrorCode fsr3UpscalerDestroy(FfxmFsr3UpscalerContext_Private* context)
     if (context->pipelineShadingChangePyramid.pipeline != nullptr && backendInterface->fpDestroyPipeline != nullptr) {
         backendInterface->fpDestroyPipeline(backendInterface, &context->pipelineShadingChangePyramid, context->effectContextId);
         memset(&context->pipelineShadingChangePyramid, 0, sizeof(context->pipelineShadingChangePyramid));
+    }
+    if (context->pipelineShadingChange.pipeline != nullptr && backendInterface->fpDestroyPipeline != nullptr) {
+        backendInterface->fpDestroyPipeline(backendInterface, &context->pipelineShadingChange, context->effectContextId);
+        memset(&context->pipelineShadingChange, 0, sizeof(context->pipelineShadingChange));
     }
 
     // 1. Release copy staging resources for surfaces created with initial data
@@ -875,6 +880,26 @@ FfxmErrorCode fsr3UpscalerCreate(
         return pipelineErr;
     }
 
+    // Create compute pipeline for Compute Shading Change pass
+    wcscpy(pipelineDescription.name, L"FSR3-SHADING-CHANGE");
+    pipelineErr = context->contextDescription.backendInterface.fpCreateComputePipeline(
+        &context->contextDescription.backendInterface,
+        FFXM_EFFECT_FSR3UPSCALER,
+        FFXM_FSR3UPSCALER_PASS_SHADING_CHANGE,
+        0,
+        getPipelinePermutationFlags(contextDescription->flags, FFXM_FSR3UPSCALER_PASS_SHADING_CHANGE, supportedFP16, canForceWave64, useLut),
+        &pipelineDescription,
+        context->effectContextId,
+        &context->pipelineShadingChange);
+    if (pipelineErr != FFXM_OK) {
+        return pipelineErr;
+    }
+
+    pipelineErr = patchResourceBindings(&context->pipelineShadingChange);
+    if (pipelineErr != FFXM_OK) {
+        return pipelineErr;
+    }
+
     return FFXM_OK;
 }
 
@@ -1037,26 +1062,76 @@ FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextDispatch(
         pDispatchDescription->upscaleSize.height <= contextPrivate->contextDescription.maxUpscaleSize.height,
         FFXM_ERROR_OUT_OF_RANGE);
 
-    // Update frame constants
-    contextPrivate->constants.renderSize[0] = pDispatchDescription->renderSize.width;
-    contextPrivate->constants.renderSize[1] = pDispatchDescription->renderSize.height;
-    contextPrivate->constants.upscaleSize[0] = pDispatchDescription->upscaleSize.width;
-    contextPrivate->constants.upscaleSize[1] = pDispatchDescription->upscaleSize.height;
+    // Transactional temporal state handling:
+    // Build pending constants locally starting from the last committed state.
+    Fsr3UpscalerConstants pendingConstants = contextPrivate->constants;
 
-    contextPrivate->constants.jitterOffset[0] = pDispatchDescription->jitterOffset.x;
-    contextPrivate->constants.jitterOffset[1] = pDispatchDescription->jitterOffset.y;
-    contextPrivate->constants.motionVectorScale[0] = pDispatchDescription->motionVectorScale.x;
-    contextPrivate->constants.motionVectorScale[1] = pDispatchDescription->motionVectorScale.y;
+    pendingConstants.renderSize[0] = pDispatchDescription->renderSize.width;
+    pendingConstants.renderSize[1] = pDispatchDescription->renderSize.height;
+    pendingConstants.upscaleSize[0] = pDispatchDescription->upscaleSize.width;
+    pendingConstants.upscaleSize[1] = pDispatchDescription->upscaleSize.height;
 
-    contextPrivate->constants.deltaTime = pDispatchDescription->frameTimeDelta;
-    contextPrivate->constants.tanHalfFOV = tanf(pDispatchDescription->cameraFovAngleVertical * 0.5f);
-    contextPrivate->constants.viewSpaceToMetersFactor = pDispatchDescription->viewSpaceToMetersFactor;
+    pendingConstants.jitterOffset[0] = pDispatchDescription->jitterOffset.x;
+    pendingConstants.jitterOffset[1] = pDispatchDescription->jitterOffset.y;
 
-    // Stage updated constants into constant buffer slot 0 via adapter
+    // Motion vector scales
+    const int32_t* motionVectorsTargetSize = (contextPrivate->contextDescription.flags & FFXM_FSR3UPSCALER_ENABLE_DISPLAY_RESOLUTION_MOTION_VECTORS)
+        ? pendingConstants.upscaleSize
+        : pendingConstants.renderSize;
+    if (motionVectorsTargetSize[0] > 0 && motionVectorsTargetSize[1] > 0) {
+        pendingConstants.motionVectorScale[0] = (pDispatchDescription->motionVectorScale.x / static_cast<float>(motionVectorsTargetSize[0]));
+        pendingConstants.motionVectorScale[1] = (pDispatchDescription->motionVectorScale.y / static_cast<float>(motionVectorsTargetSize[1]));
+    } else {
+        pendingConstants.motionVectorScale[0] = pDispatchDescription->motionVectorScale.x;
+        pendingConstants.motionVectorScale[1] = pDispatchDescription->motionVectorScale.y;
+    }
+
+    // Downscale factor
+    if (pendingConstants.upscaleSize[0] > 0 && pendingConstants.upscaleSize[1] > 0) {
+        pendingConstants.downscaleFactor[0] = static_cast<float>(pendingConstants.renderSize[0]) / static_cast<float>(pendingConstants.upscaleSize[0]);
+        pendingConstants.downscaleFactor[1] = static_cast<float>(pendingConstants.renderSize[1]) / static_cast<float>(pendingConstants.upscaleSize[1]);
+    }
+
+    pendingConstants.deltaTime = pDispatchDescription->frameTimeDelta;
+    pendingConstants.tanHalfFOV = tanf(pDispatchDescription->cameraFovAngleVertical * 0.5f);
+    pendingConstants.viewSpaceToMetersFactor = pDispatchDescription->viewSpaceToMetersFactor;
+
+    // Compute device depth to view space depth parameters into pendingConstants
+    setupDeviceDepthToViewSpaceDepthParams(&pendingConstants, &contextPrivate->contextDescription, pDispatchDescription);
+
+    // Pending Pre-exposure factors
+    const float pendingPreviousFramePreExposure = contextPrivate->preExposure;
+    const float pendingPreExposure = (pDispatchDescription->preExposure != 0.0f) ? pDispatchDescription->preExposure : 1.0f;
+    pendingConstants.deltaPreExposure = 1.0f;
+    if (pendingPreviousFramePreExposure > 0.0f) {
+        pendingConstants.deltaPreExposure = pendingPreExposure / pendingPreviousFramePreExposure;
+    }
+
+    // Pending Frame index & jitter phase count
+    const int32_t jitterPhaseCount = ffxmFsr3UpscalerGetJitterPhaseCount(pDispatchDescription->renderSize.width, pendingConstants.upscaleSize[0]);
+    float pendingJitterPhaseCount = contextPrivate->constants.jitterPhaseCount;
+    float pendingFrameIndex = contextPrivate->constants.frameIndex;
+
+    if (pDispatchDescription->reset || contextPrivate->firstExecution || pendingJitterPhaseCount == 0.0f) {
+        pendingJitterPhaseCount = static_cast<float>(jitterPhaseCount);
+        pendingFrameIndex = 0.0f;
+    } else {
+        const int32_t jitterPhaseCountDelta = static_cast<int32_t>(jitterPhaseCount - pendingJitterPhaseCount);
+        if (jitterPhaseCountDelta > 0) {
+            pendingJitterPhaseCount += 1.0f;
+        } else if (jitterPhaseCountDelta < 0) {
+            pendingJitterPhaseCount -= 1.0f;
+        }
+        pendingFrameIndex += 1.0f;
+    }
+    pendingConstants.jitterPhaseCount = pendingJitterPhaseCount;
+    pendingConstants.frameIndex = pendingFrameIndex;
+
+    // Stage pending constants into constant buffer slot 0 for shader execution
     stageConstantBuffer(
         &contextPrivate->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_FSR3UPSCALER],
-        &contextPrivate->constants,
-        sizeof(contextPrivate->constants));
+        &pendingConstants,
+        sizeof(pendingConstants));
 
     // Auto exposure SPD constants setup
     uint32_t dispatchThreadGroupCountXY[2];
@@ -1176,53 +1251,6 @@ FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextDispatch(
         contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FARTHEST_DEPTH] = contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERMEDIATE_FP16x1];
         contextPrivate->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FARTHEST_DEPTH] = contextPrivate->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERMEDIATE_FP16x1];
 
-        // Compute device depth to view space depth parameters
-        setupDeviceDepthToViewSpaceDepthParams(contextPrivate, pDispatchDescription);
-
-        // Update motion vector scales
-        const int32_t* motionVectorsTargetSize = (contextPrivate->contextDescription.flags & FFXM_FSR3UPSCALER_ENABLE_DISPLAY_RESOLUTION_MOTION_VECTORS)
-            ? contextPrivate->constants.upscaleSize
-            : contextPrivate->constants.renderSize;
-        if (motionVectorsTargetSize[0] > 0 && motionVectorsTargetSize[1] > 0) {
-            contextPrivate->constants.motionVectorScale[0] = (pDispatchDescription->motionVectorScale.x / static_cast<float>(motionVectorsTargetSize[0]));
-            contextPrivate->constants.motionVectorScale[1] = (pDispatchDescription->motionVectorScale.y / static_cast<float>(motionVectorsTargetSize[1]));
-        }
-
-        // Downscale factor
-        if (contextPrivate->constants.upscaleSize[0] > 0 && contextPrivate->constants.upscaleSize[1] > 0) {
-            contextPrivate->constants.downscaleFactor[0] = static_cast<float>(contextPrivate->constants.renderSize[0]) / static_cast<float>(contextPrivate->constants.upscaleSize[0]);
-            contextPrivate->constants.downscaleFactor[1] = static_cast<float>(contextPrivate->constants.renderSize[1]) / static_cast<float>(contextPrivate->constants.upscaleSize[1]);
-        }
-
-        // Pre-exposure factors
-        contextPrivate->constants.deltaPreExposure = 1.0f;
-        contextPrivate->previousFramePreExposure = contextPrivate->preExposure;
-        contextPrivate->preExposure = (pDispatchDescription->preExposure != 0.0f) ? pDispatchDescription->preExposure : 1.0f;
-        if (contextPrivate->previousFramePreExposure > 0.0f) {
-            contextPrivate->constants.deltaPreExposure = contextPrivate->preExposure / contextPrivate->previousFramePreExposure;
-        }
-
-        // Frame index & jitter phase count
-        const int32_t jitterPhaseCount = ffxmFsr3UpscalerGetJitterPhaseCount(pDispatchDescription->renderSize.width, contextPrivate->constants.upscaleSize[0]);
-        if (pDispatchDescription->reset || contextPrivate->firstExecution || contextPrivate->constants.jitterPhaseCount == 0.0f) {
-            contextPrivate->constants.jitterPhaseCount = static_cast<float>(jitterPhaseCount);
-            contextPrivate->constants.frameIndex = 0.0f;
-        } else {
-            const int32_t jitterPhaseCountDelta = static_cast<int32_t>(jitterPhaseCount - contextPrivate->constants.jitterPhaseCount);
-            if (jitterPhaseCountDelta > 0) {
-                contextPrivate->constants.jitterPhaseCount += 1.0f;
-            } else if (jitterPhaseCountDelta < 0) {
-                contextPrivate->constants.jitterPhaseCount -= 1.0f;
-            }
-            contextPrivate->constants.frameIndex += 1.0f;
-        }
-
-        // Re-stage constant buffers with computed parameters
-        stageConstantBuffer(
-            &contextPrivate->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_FSR3UPSCALER],
-            &contextPrivate->constants,
-            sizeof(contextPrivate->constants));
-
         // History Reset Clears
         if (contextPrivate->firstExecution || pDispatchDescription->reset) {
             // Clear Frame Info to {-1.0f, 1.0f, 0.0f, 0.0f}
@@ -1269,8 +1297,8 @@ FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextDispatch(
         // Schedule PrepareInputs compute pass
         if (dispatchResult == FFXM_OK) {
             const int32_t threadGroupWorkRegionDim = 8;
-            const int32_t dispatchSrcX = (contextPrivate->constants.renderSize[0] + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
-            const int32_t dispatchSrcY = (contextPrivate->constants.renderSize[1] + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
+            const int32_t dispatchSrcX = (pendingConstants.renderSize[0] + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
+            const int32_t dispatchSrcY = (pendingConstants.renderSize[1] + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
             dispatchResult = scheduleDispatch(contextPrivate, pDispatchDescription, &contextPrivate->pipelinePrepareInputs, dispatchSrcX, dispatchSrcY);
         }
 
@@ -1300,6 +1328,16 @@ FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextDispatch(
                     sizeof(shadingChangePyramidConstants));
                 dispatchResult = scheduleDispatch(contextPrivate, pDispatchDescription, &contextPrivate->pipelineShadingChangePyramid, dispatchShadingThreadGroupCountXY[0], dispatchShadingThreadGroupCountXY[1]);
             }
+        }
+
+        // Schedule Compute Shading Change compute pass
+        if (dispatchResult == FFXM_OK) {
+            const int32_t threadGroupWorkRegionDim = 8;
+            const int32_t shadingChangeWidth = std::max(1, pendingConstants.renderSize[0] / 2);
+            const int32_t shadingChangeHeight = std::max(1, pendingConstants.renderSize[1] / 2);
+            const int32_t dispatchShadingChangeX = (shadingChangeWidth + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
+            const int32_t dispatchShadingChangeY = (shadingChangeHeight + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
+            dispatchResult = scheduleDispatch(contextPrivate, pDispatchDescription, &contextPrivate->pipelineShadingChange, dispatchShadingChangeX, dispatchShadingChangeY);
         }
 
         // Execute scheduled GPU jobs only if all jobs scheduled successfully
@@ -1333,10 +1371,35 @@ FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextDispatch(
         contextPrivate->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_EXPOSURE].internalIndex = -1;
     }
 
-    // Only advance frame state and clear firstExecution on completely successful execution
+    // Transactional state commit: only commit pending frame state on complete dispatch success
     if (dispatchResult == FFXM_OK) {
+        contextPrivate->constants = pendingConstants;
+        contextPrivate->previousFramePreExposure = pendingPreviousFramePreExposure;
+        contextPrivate->preExposure = pendingPreExposure;
+
+        contextPrivate->constants.previousFrameRenderSize[0] = pDispatchDescription->renderSize.width;
+        contextPrivate->constants.previousFrameRenderSize[1] = pDispatchDescription->renderSize.height;
+        contextPrivate->constants.previousFrameUpscaleSize[0] = pDispatchDescription->upscaleSize.width;
+        contextPrivate->constants.previousFrameUpscaleSize[1] = pDispatchDescription->upscaleSize.height;
+
+        contextPrivate->constants.previousFrameJitterOffset[0] = pDispatchDescription->jitterOffset.x;
+        contextPrivate->constants.previousFrameJitterOffset[1] = pDispatchDescription->jitterOffset.y;
+        contextPrivate->previousJitterOffset[0] = pDispatchDescription->jitterOffset.x;
+        contextPrivate->previousJitterOffset[1] = pDispatchDescription->jitterOffset.y;
+
         contextPrivate->resourceFrameIndex = (contextPrivate->resourceFrameIndex + 1) % 16;
         contextPrivate->firstExecution = false;
+
+        stageConstantBuffer(
+            &contextPrivate->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_FSR3UPSCALER],
+            &contextPrivate->constants,
+            sizeof(contextPrivate->constants));
+    } else {
+        // Transactional rollback: preserve committed constants in constant buffer slot 0
+        stageConstantBuffer(
+            &contextPrivate->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_FSR3UPSCALER],
+            &contextPrivate->constants,
+            sizeof(contextPrivate->constants));
     }
 
     return dispatchResult;

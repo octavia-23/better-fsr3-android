@@ -110,3 +110,31 @@ add_custom_command(
 
 add_shader_output("${FSR3_SHADING_CHANGE_PYRAMID_PERMUTATION_HEADER}")
 
+set(FSR3_SHADING_CHANGE_SHADER "${CMAKE_CURRENT_SOURCE_DIR}/shaders/fsr3upscaler/ffx_fsr3upscaler_shading_change_pass.glsl")
+set(FSR3_SHADING_CHANGE_PERMUTATION_HEADER "${FFXM_PASS_SHADER_OUTPUT_PATH}/ffxm_fsr3upscaler_shading_change_pass_permutations.h")
+
+if(NOT EXISTS "${FSR3_SHADING_CHANGE_SHADER}")
+    message(FATAL_ERROR "FSR3 ShadingChange shader source missing: ${FSR3_SHADING_CHANGE_SHADER}")
+endif()
+
+file(RELATIVE_PATH FSR3_REL_SHADER_SHADING_PASS "${CMAKE_SOURCE_DIR}" "${FSR3_SHADING_CHANGE_SHADER}")
+
+add_custom_command(
+    OUTPUT ${FSR3_SHADING_CHANGE_PERMUTATION_HEADER}
+    COMMAND ${FFXM_SC_EXECUTABLE}
+        ${FSR3_BASE_ARGS}
+        ${FSR3_GLSL_BASE_ARGS}
+        ${FSR3_PERMUTATION_ARGS}
+        "-I${FSR3_REL_GPU_PATH}"
+        "-I${FSR3_REL_GPU_PATH}/fsr3upscaler"
+        -name=ffxm_fsr3upscaler_shading_change_pass
+        -output=${FSR3_REL_OUTPUT}
+        ${FSR3_REL_SHADER_SHADING_PASS}
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    DEPENDS ${FSR3_SHADING_CHANGE_SHADER}
+    COMMENT "Compiling FSR3 Compute Shading Change shader permutations with FidelityFX-SC..."
+    VERBATIM
+)
+
+add_shader_output("${FSR3_SHADING_CHANGE_PERMUTATION_HEADER}")
+

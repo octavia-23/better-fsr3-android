@@ -2130,6 +2130,7 @@ FfxmErrorCode CreateComputePipelineVK(FfxmInterface* backendInterface,
     // One root signature (or pipeline layout) per pipeline
     FFXM_ASSERT_MESSAGE(effectContext.nextPipelineLayout < (effectContextId * FFXM_MAX_PASS_COUNT) + FFXM_MAX_PASS_COUNT, "ffxmInterface: Vulkan: Ran out of pipeline layouts. Please increase FFXM_MAX_PASS_COUNT");
     BackendContext_VK::PipelineLayout* pPipelineLayout = &backendContext->pPipelineLayouts[effectContext.nextPipelineLayout++];
+    memset(pPipelineLayout->samplers, 0, sizeof(pPipelineLayout->samplers));
 
     // Start by creating samplers
     FFXM_ASSERT(pipelineDescription->samplerCount <= FFXM_MAX_SAMPLERS);
@@ -2177,12 +2178,16 @@ FfxmErrorCode CreateComputePipelineVK(FfxmInterface* backendInterface,
 
         // Create the sampler only if it is needed
         const FfxmUInt32 curBinding = pipelineDescription->samplers[currentSamplerIndex].binding;
-        for(FfxmUInt32 curBlobSamplerIdx = 0; curBlobSamplerIdx < shaderBlob.samplerCount; ++curBlobSamplerIdx)
+        for (FfxmUInt32 curBlobSamplerIdx = 0; curBlobSamplerIdx < shaderBlob.samplerCount; ++curBlobSamplerIdx)
         {
-            if(curBinding == shaderBlob.boundSamplers[curBlobSamplerIdx])
+            const FfxmUInt32 blobBinding = shaderBlob.boundSamplers[curBlobSamplerIdx];
+            if (curBinding == blobBinding || (blobBinding >= 1000 && curBinding == (blobBinding - 1000)))
             {
-                if (backendContext->vkFunctionTable.vkCreateSampler(backendContext->device, &createInfo, nullptr, &pPipelineLayout->samplers[curBinding]) != VK_SUCCESS) {
-                    return FFXM_ERROR_BACKEND_API_ERROR;
+                if (curBlobSamplerIdx < FFXM_MAX_SAMPLERS)
+                {
+                    if (backendContext->vkFunctionTable.vkCreateSampler(backendContext->device, &createInfo, nullptr, &pPipelineLayout->samplers[curBlobSamplerIdx]) != VK_SUCCESS) {
+                        return FFXM_ERROR_BACKEND_API_ERROR;
+                    }
                 }
                 break;
             }
@@ -2197,12 +2202,12 @@ FfxmErrorCode CreateComputePipelineVK(FfxmInterface* backendInterface,
     VkShaderStageFlags shaderStageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
     // Samplers - just the static ones for now
-    for (FfxmUInt32 currentSamplerIndex = 0; currentSamplerIndex < shaderBlob.samplerCount; ++currentSamplerIndex)
+    for (FfxmUInt32 currentSamplerIndex = 0; currentSamplerIndex < shaderBlob.samplerCount && currentSamplerIndex < FFXM_MAX_SAMPLERS; ++currentSamplerIndex)
     {
         FfxmUInt32 set = shaderBlob.boundSamplerSets[currentSamplerIndex];
         FfxmUInt32 binding = shaderBlob.boundSamplers[currentSamplerIndex];
         layoutBindings[set][numLayoutBindings[set]++] =
-            { binding, VK_DESCRIPTOR_TYPE_SAMPLER, shaderBlob.boundSamplerCounts[currentSamplerIndex], shaderStageFlags, &pPipelineLayout->samplers[binding] };
+            { binding, VK_DESCRIPTOR_TYPE_SAMPLER, shaderBlob.boundSamplerCounts[currentSamplerIndex], shaderStageFlags, &pPipelineLayout->samplers[currentSamplerIndex] };
     }
 
     // Texture SRVs
@@ -2436,6 +2441,7 @@ FfxmErrorCode CreateGraphicsPipelineVK(FfxmInterface* backendInterface,
     // One root signature (or pipeline layout) per pipeline
     FFXM_ASSERT_MESSAGE(effectContext.nextPipelineLayout < (effectContextId * FFXM_MAX_PASS_COUNT) + FFXM_MAX_PASS_COUNT, "ffxmInterface: Vulkan: Ran out of pipeline layouts. Please increase FFXM_MAX_PASS_COUNT");
     BackendContext_VK::PipelineLayout* pPipelineLayout = &backendContext->pPipelineLayouts[effectContext.nextPipelineLayout++];
+    memset(pPipelineLayout->samplers, 0, sizeof(pPipelineLayout->samplers));
 
     // Start by creating samplers
     FFXM_ASSERT(pipelineDescription->samplerCount <= FFXM_MAX_SAMPLERS);
@@ -2483,12 +2489,16 @@ FfxmErrorCode CreateGraphicsPipelineVK(FfxmInterface* backendInterface,
 
         // Create the sampler only if is needed
         const FfxmUInt32 curBinding = pipelineDescription->samplers[currentSamplerIndex].binding;
-        for(FfxmUInt32 curBlobSamplerIdx = 0; curBlobSamplerIdx < shaderBlob.samplerCount; ++curBlobSamplerIdx)
+        for (FfxmUInt32 curBlobSamplerIdx = 0; curBlobSamplerIdx < shaderBlob.samplerCount; ++curBlobSamplerIdx)
         {
-            if(curBinding == shaderBlob.boundSamplers[curBlobSamplerIdx])
+            const FfxmUInt32 blobBinding = shaderBlob.boundSamplers[curBlobSamplerIdx];
+            if (curBinding == blobBinding || (blobBinding >= 1000 && curBinding == (blobBinding - 1000)))
             {
-                if (backendContext->vkFunctionTable.vkCreateSampler(backendContext->device, &createInfo, nullptr, &pPipelineLayout->samplers[curBinding]) != VK_SUCCESS) {
-                    return FFXM_ERROR_BACKEND_API_ERROR;
+                if (curBlobSamplerIdx < FFXM_MAX_SAMPLERS)
+                {
+                    if (backendContext->vkFunctionTable.vkCreateSampler(backendContext->device, &createInfo, nullptr, &pPipelineLayout->samplers[curBlobSamplerIdx]) != VK_SUCCESS) {
+                        return FFXM_ERROR_BACKEND_API_ERROR;
+                    }
                 }
                 break;
             }
@@ -2504,12 +2514,12 @@ FfxmErrorCode CreateGraphicsPipelineVK(FfxmInterface* backendInterface,
     VkShaderStageFlags shaderStageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
     // Samplers - just the static ones for now
-    for (FfxmUInt32 currentSamplerIndex = 0; currentSamplerIndex < shaderBlob.samplerCount; ++currentSamplerIndex)
+    for (FfxmUInt32 currentSamplerIndex = 0; currentSamplerIndex < shaderBlob.samplerCount && currentSamplerIndex < FFXM_MAX_SAMPLERS; ++currentSamplerIndex)
     {
         FfxmUInt32 set = shaderBlob.boundSamplerSets[currentSamplerIndex];
         FfxmUInt32 binding = shaderBlob.boundSamplers[currentSamplerIndex];
         layoutBindings[set][numLayoutBindings[set]++] =
-            { binding, VK_DESCRIPTOR_TYPE_SAMPLER, shaderBlob.boundSamplerCounts[currentSamplerIndex], shaderStageFlags, &pPipelineLayout->samplers[binding] };
+            { binding, VK_DESCRIPTOR_TYPE_SAMPLER, shaderBlob.boundSamplerCounts[currentSamplerIndex], shaderStageFlags, &pPipelineLayout->samplers[currentSamplerIndex] };
     }
 
     // Texture SRVs
