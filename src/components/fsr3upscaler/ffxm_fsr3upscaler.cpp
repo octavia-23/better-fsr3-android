@@ -24,6 +24,11 @@
 #include <cstring>
 #include <cfloat>
 
+#define FFXM_CPU
+#include "ffxm_core.h"
+#include "fsr1/ffxm_fsr1.h"
+#include "spd/ffxm_spd.h"
+
 #include "host/ffxm_fsr3upscaler.h"
 #include "ffxm_fsr3upscaler_private.h"
 #include "host/ffxm_util.h"
@@ -70,7 +75,7 @@ static inline float maxZero(float value)
 }
 
 // Inline constant-buffer staging adapter replacing upstream fpStageConstantBufferDataFunc
-static inline void stageConstantBuffer(
+void stageConstantBuffer(
     FfxmConstantBuffer* dstBuffer,
     const void* srcData,
     size_t srcSizeBytes)
@@ -553,6 +558,18 @@ FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextCreate(
     FFXM_RETURN_ON_ERROR(pContext != nullptr, FFXM_ERROR_INVALID_POINTER);
     FFXM_RETURN_ON_ERROR(pContextDescription != nullptr, FFXM_ERROR_INVALID_POINTER);
 
+    // Validate dimensions
+    FFXM_RETURN_ON_ERROR(
+        pContextDescription->maxRenderSize.width > 0 &&
+        pContextDescription->maxRenderSize.height > 0 &&
+        pContextDescription->maxUpscaleSize.width > 0 &&
+        pContextDescription->maxUpscaleSize.height > 0,
+        FFXM_ERROR_INVALID_ARGUMENT);
+    FFXM_RETURN_ON_ERROR(
+        pContextDescription->maxRenderSize.width <= pContextDescription->maxUpscaleSize.width &&
+        pContextDescription->maxRenderSize.height <= pContextDescription->maxUpscaleSize.height,
+        FFXM_ERROR_INVALID_ARGUMENT);
+
     // Validate that all required callbacks are provided by the backend interface
     FFXM_RETURN_ON_ERROR(pContextDescription->backendInterface.fpGetDeviceCapabilities != nullptr, FFXM_ERROR_INCOMPLETE_INTERFACE);
     FFXM_RETURN_ON_ERROR(pContextDescription->backendInterface.fpCreateBackendContext != nullptr, FFXM_ERROR_INCOMPLETE_INTERFACE);
@@ -711,6 +728,37 @@ FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextDispatch(
         &contextPrivate->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_FSR3UPSCALER],
         &contextPrivate->constants,
         sizeof(contextPrivate->constants));
+
+    // Auto exposure SPD constants setup
+    uint32_t dispatchThreadGroupCountXY[2];
+    uint32_t workGroupOffset[2];
+    uint32_t numWorkGroupsAndMips[2];
+    uint32_t rectInfo[4] = { 0, 0, pDispatchDescription->renderSize.width, pDispatchDescription->renderSize.height };
+    ffxSpdSetup(dispatchThreadGroupCountXY, workGroupOffset, numWorkGroupsAndMips, rectInfo);
+
+    // Downsample SPD pyramid constants
+    Fsr3UpscalerSpdConstants luminancePyramidConstants;
+    luminancePyramidConstants.mips = numWorkGroupsAndMips[1];
+    luminancePyramidConstants.numWorkGroups = numWorkGroupsAndMips[0];
+    luminancePyramidConstants.workGroupOffset[0] = workGroupOffset[0];
+    luminancePyramidConstants.workGroupOffset[1] = workGroupOffset[1];
+    luminancePyramidConstants.renderSize[0] = pDispatchDescription->renderSize.width;
+    luminancePyramidConstants.renderSize[1] = pDispatchDescription->renderSize.height;
+
+    // RCAS sharpening constants
+    Fsr3UpscalerRcasConstants rcasConsts = {};
+    const float sharpnessRemapped = (-2.0f * pDispatchDescription->sharpness) + 2.0f;
+    FsrRcasCon(rcasConsts.rcasConfig, sharpnessRemapped);
+
+    // Stage SPD (slot 1) and RCAS (slot 2) constant buffers
+    stageConstantBuffer(
+        &contextPrivate->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_SPD],
+        &luminancePyramidConstants,
+        sizeof(luminancePyramidConstants));
+    stageConstantBuffer(
+        &contextPrivate->constantBuffers[FFXM_FSR3UPSCALER_CONSTANTBUFFER_IDENTIFIER_RCAS],
+        &rcasConsts,
+        sizeof(rcasConsts));
 
     // Milestone 2 boundary: GPU compute dispatch passes are scheduled in Milestone 3.
     // Return FFXM_ERROR_INCOMPLETE_INTERFACE to prevent reporting execution before GPU jobs are scheduled.

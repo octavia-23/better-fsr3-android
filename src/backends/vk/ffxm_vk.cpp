@@ -298,6 +298,10 @@ typedef struct BackendContext_VK {
 
 FFXM_API size_t ffxmGetScratchMemorySizeVK(VkPhysicalDevice physicalDevice, size_t maxContexts)
 {
+    if (maxContexts == 0) {
+        return 0;
+    }
+
     FfxmUInt32 numExtensions = 0;
 
     if (physicalDevice)
@@ -990,8 +994,11 @@ FfxmErrorCode CreateBackendContextVK(FfxmInterface* backendInterface, FfxmUInt32
         FfxmUInt32 extensionPropArraySize = sizeof(VkExtensionProperties) * numDeviceExtensions;
         pMem += extensionPropArraySize;
 
-        // Bounds assertion after complete pointer carving
+        // Bounds check after complete pointer carving
         FFXM_ASSERT(static_cast<size_t>(pMem - (uint8_t*)backendContext) <= backendInterface->scratchBufferSize);
+        if (static_cast<size_t>(pMem - (uint8_t*)backendContext) > backendInterface->scratchBufferSize) {
+            return FFXM_ERROR_INSUFFICIENT_MEMORY;
+        }
 
 
         // if vkGetDeviceProcAddr is NULL, use the one from the vulkan header

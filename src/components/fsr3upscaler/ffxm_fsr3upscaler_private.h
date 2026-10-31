@@ -148,5 +148,6 @@ static_assert(alignof(FfxmFsr3UpscalerContext) >= alignof(FfxmFsr3UpscalerContex
 
 FfxmErrorCode fsr3UpscalerCreate(FfxmFsr3UpscalerContext_Private* context, const FfxmFsr3UpscalerContextDescription* contextDescription);
 FfxmErrorCode fsr3UpscalerDestroy(FfxmFsr3UpscalerContext_Private* context);
+void stageConstantBuffer(FfxmConstantBuffer* dstBuffer, const void* srcData, size_t srcSizeBytes);
 
 } // namespace arm
