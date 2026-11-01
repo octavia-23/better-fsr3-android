@@ -2,15 +2,79 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "common.h"
 #include "scene.h"
-#include "vk_context.h"
 
 #include <host/backends/vk/ffxm_vk.h>
 #include <host/ffxm_fsr3upscaler.h>
 
 #include <cstdint>
 #include <vector>
+
+class VkContext;
+
+namespace arm {
+
+struct VulkanResourceCleanupFunctions {
+    void (VKAPI_PTR *vkDestroyImageView)(VkDevice, VkImageView, const VkAllocationCallbacks*) = nullptr;
+    void (VKAPI_PTR *vkDestroyImage)(VkDevice, VkImage, const VkAllocationCallbacks*) = nullptr;
+    void (VKAPI_PTR *vkFreeMemory)(VkDevice, VkDeviceMemory, const VkAllocationCallbacks*) = nullptr;
+};
+
+// Production cleanup function for Vulkan render targets (used by Fsr3Upscaler and Scene):
+// Destroys image view, then image, then frees bound memory, and resets rt to {}.
+inline void destroyRenderTarget(VkDevice device, RenderTarget& rt,
+                                const VulkanResourceCleanupFunctions* fn = nullptr)
+{
+    if (device == VK_NULL_HANDLE) {
+        rt = {};
+        return;
+    }
+
+    if (fn) {
+        if (rt.view != VK_NULL_HANDLE) {
+            if (fn->vkDestroyImageView) fn->vkDestroyImageView(device, rt.view, nullptr);
+            rt.view = VK_NULL_HANDLE;
+        }
+        if (rt.image != VK_NULL_HANDLE) {
+            if (fn->vkDestroyImage) fn->vkDestroyImage(device, rt.image, nullptr);
+            rt.image = VK_NULL_HANDLE;
+        }
+        if (rt.memory != VK_NULL_HANDLE) {
+            if (fn->vkFreeMemory) fn->vkFreeMemory(device, rt.memory, nullptr);
+            rt.memory = VK_NULL_HANDLE;
+        }
+    } else {
+#if !defined(SWAPCHAIN_SYNC_NO_VULKAN_SYMBOLS)
+        if (rt.view != VK_NULL_HANDLE) {
+            ::vkDestroyImageView(device, rt.view, nullptr);
+            rt.view = VK_NULL_HANDLE;
+        }
+        if (rt.image != VK_NULL_HANDLE) {
+            ::vkDestroyImage(device, rt.image, nullptr);
+            rt.image = VK_NULL_HANDLE;
+        }
+        if (rt.memory != VK_NULL_HANDLE) {
+            ::vkFreeMemory(device, rt.memory, nullptr);
+            rt.memory = VK_NULL_HANDLE;
+        }
+#endif
+    }
+    rt = {};
+}
+
+// Production cleanup function for the three FSR 3.1.4 shared resources.
+inline void destroySharedResources(VkDevice device,
+                                   RenderTarget& dilatedDepth,
+                                   RenderTarget& dilatedMotionVectors,
+                                   RenderTarget& reconstructedPrevNearestDepth,
+                                   const VulkanResourceCleanupFunctions* fn = nullptr)
+{
+    destroyRenderTarget(device, dilatedDepth, fn);
+    destroyRenderTarget(device, dilatedMotionVectors, fn);
+    destroyRenderTarget(device, reconstructedPrevNearestDepth, fn);
+}
+
+} // namespace arm
 
 // Wraps the FSR 3.1.4 compute upscaler integration path:
 // scratch buffer -> FfxmDevice -> FfxmInterface -> FfxmFsr3UpscalerContext ->
@@ -31,6 +95,34 @@ public:
 
     static uint32_t initializationFlags();
 
+    static void destroyTarget(VkDevice device, RenderTarget& rt,
+                              const arm::VulkanResourceCleanupFunctions* fn = nullptr)
+    {
+        arm::destroyRenderTarget(device, rt, fn);
+    }
+
+    static void destroySharedResourceTargets(VkDevice device,
+                                             RenderTarget& dilatedDepth,
+                                             RenderTarget& dilatedMotionVectors,
+                                             RenderTarget& reconstructedPrevNearestDepth,
+                                             const arm::VulkanResourceCleanupFunctions* fn = nullptr)
+    {
+        arm::destroySharedResources(device, dilatedDepth, dilatedMotionVectors, reconstructedPrevNearestDepth, fn);
+    }
+
+    void destroySharedResources(VkDevice device,
+                                const arm::VulkanResourceCleanupFunctions* fn = nullptr)
+    {
+        arm::destroySharedResources(device, dilatedDepth_, dilatedMotionVectors_, reconstructedPrevNearestDepth_, fn);
+        sharedResourcesInitialized_ = false;
+    }
+
+    void destroySharedResources(VkContext& ctx);
+    bool createSharedResources(VkContext& ctx);
+
+    RenderTarget& dilatedDepth() { return dilatedDepth_; }
+    RenderTarget& dilatedMotionVectors() { return dilatedMotionVectors_; }
+    RenderTarget& reconstructedPrevNearestDepth() { return reconstructedPrevNearestDepth_; }
     const RenderTarget& dilatedDepth() const { return dilatedDepth_; }
     const RenderTarget& dilatedMotionVectors() const { return dilatedMotionVectors_; }
     const RenderTarget& reconstructedPrevNearestDepth() const { return reconstructedPrevNearestDepth_; }
@@ -38,8 +130,6 @@ public:
 private:
     bool createTarget(VkContext& ctx, RenderTarget& rt, VkFormat format, VkExtent2D extent,
                       VkImageUsageFlags usage, VkImageAspectFlags aspect);
-    bool createSharedResources(VkContext& ctx);
-    void destroySharedResources(VkContext& ctx);
 
     VkDevice                 device_        = VK_NULL_HANDLE;
     VkContext*               pVkCtx_        = nullptr;

@@ -282,7 +282,16 @@ bool VkContext::createDevice()
 bool VkContext::createSwapchain()
 {
     VkSurfaceCapabilitiesKHR surfaceCaps = {};
-    VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice_, surface_, &surfaceCaps));
+    VkResult capsRes = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice_, surface_, &surfaceCaps);
+    if (capsRes != VK_SUCCESS) {
+        LOGE("vkGetPhysicalDeviceSurfaceCapabilitiesKHR failed with VkResult %d", (int)capsRes);
+        if (capsRes == VK_ERROR_SURFACE_LOST_KHR) {
+            sync_.notifySurfaceLost();
+        } else if (capsRes == VK_ERROR_DEVICE_LOST) {
+            sync_.notifyDeviceLost();
+        }
+        return false;
+    }
 
     uint32_t formatCount = 0;
     VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice_, surface_, &formatCount, nullptr));
@@ -319,7 +328,16 @@ bool VkContext::createSwapchain()
     ci.presentMode      = VK_PRESENT_MODE_FIFO_KHR;
     ci.clipped          = VK_TRUE;
 
-    VK_CHECK(vkCreateSwapchainKHR(device_, &ci, nullptr, &swapchain_));
+    VkResult createRes = vkCreateSwapchainKHR(device_, &ci, nullptr, &swapchain_);
+    if (createRes != VK_SUCCESS) {
+        LOGE("vkCreateSwapchainKHR failed with VkResult %d", (int)createRes);
+        if (createRes == VK_ERROR_DEVICE_LOST) {
+            sync_.notifyDeviceLost();
+        } else if (createRes == VK_ERROR_SURFACE_LOST_KHR) {
+            sync_.notifySurfaceLost();
+        }
+        return false;
+    }
 
     uint32_t count = 0;
     VK_CHECK(vkGetSwapchainImagesKHR(device_, swapchain_, &count, nullptr));
@@ -392,7 +410,21 @@ bool VkContext::init(ANativeWindow* window)
 
 bool VkContext::recreateSwapchain(ANativeWindow*)
 {
-    VK_CHECK(vkDeviceWaitIdle(device_));
+    if (sync_.isTerminalError() || device_ == VK_NULL_HANDLE) {
+        return false;
+    }
+
+    VkResult waitRes = vkDeviceWaitIdle(device_);
+    if (waitRes != VK_SUCCESS) {
+        LOGE("vkDeviceWaitIdle failed during swapchain recreation with VkResult %d", (int)waitRes);
+        if (waitRes == VK_ERROR_DEVICE_LOST) {
+            sync_.notifyDeviceLost();
+        } else {
+            sync_.notifyRecoveryFailed();
+        }
+        return false;
+    }
+
     destroySwapchain();
     bool ok = createSwapchain();
     if (ok) {

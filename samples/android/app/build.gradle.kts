@@ -26,7 +26,7 @@ android {
 
         externalNativeBuild {
             cmake {
-                arguments += listOf("-DANDROID_STL=c++_shared")
+                arguments += listOf("-DANDROID_STL=c++_shared", "-DBUILD_TESTING=OFF")
             }
         }
     }

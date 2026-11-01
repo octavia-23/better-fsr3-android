@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "fsr3_upscaler.h"
+#include "common.h"
+#include "vk_context.h"
 
 #include <cstring>
 
@@ -183,33 +185,7 @@ bool Fsr3Upscaler::createSharedResources(VkContext& ctx)
 
 void Fsr3Upscaler::destroySharedResources(VkContext& ctx)
 {
-    if (ctx.device() == VK_NULL_HANDLE) {
-        dilatedDepth_ = {};
-        dilatedMotionVectors_ = {};
-        reconstructedPrevNearestDepth_ = {};
-        sharedResourcesInitialized_ = false;
-        return;
-    }
-
-    auto destroyTarget = [&](RenderTarget& rt) {
-        if (rt.view != VK_NULL_HANDLE) {
-            vkDestroyImageView(ctx.device(), rt.view, nullptr);
-            rt.view = VK_NULL_HANDLE;
-        }
-        if (rt.image != VK_NULL_HANDLE) {
-            vkDestroyImage(ctx.device(), rt.image, nullptr);
-            rt.image = VK_NULL_HANDLE;
-        }
-        if (rt.memory != VK_NULL_HANDLE) {
-            vkFreeMemory(ctx.device(), rt.memory, nullptr);
-            rt.memory = VK_NULL_HANDLE;
-        }
-        rt = {};
-    };
-    destroyTarget(dilatedDepth_);
-    destroyTarget(dilatedMotionVectors_);
-    destroyTarget(reconstructedPrevNearestDepth_);
-    sharedResourcesInitialized_ = false;
+    destroySharedResources(ctx.device());
 }
 
 bool Fsr3Upscaler::init(VkContext& ctx, VkExtent2D renderExtent, VkExtent2D displayExtent,
@@ -360,10 +336,11 @@ void Fsr3Upscaler::destroy()
     if (contextCreated_) {
         if (device_ != VK_NULL_HANDLE)
             vkDeviceWaitIdle(device_);
-        if (pVkCtx_)
-            destroySharedResources(*pVkCtx_);
+        destroySharedResources(device_);
         ffxmFsr3UpscalerContextDestroy(&context_);
         contextCreated_ = false;
+    } else if (device_ != VK_NULL_HANDLE) {
+        destroySharedResources(device_);
     }
     scratchBuffer_.clear();
     pVkCtx_ = nullptr;

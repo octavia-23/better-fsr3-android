@@ -22,8 +22,10 @@
 #include "src/components/fsr3upscaler/ffxm_fsr3upscaler_private.h"
 #include "host/ffxm_util.h"
 #include "src/backends/shared/ffxm_shader_blobs.h"
+#define SWAPCHAIN_SYNC_NO_VULKAN_SYMBOLS 1
 #include "swapchain_sync.h"
 #include "swapchain_recovery.h"
+#include "fsr3_upscaler.h"
 
 #if defined(FFXM_HAS_VK_BACKEND)
 #include "host/backends/vk/ffxm_vk.h"
@@ -5320,104 +5322,140 @@ static void TestM3FinalCloseoutVulkanLifetimeAndRecovery()
 {
     std::cout << "--- Test 31: M3 Final Closeout - Vulkan Lifetime, Sync Recovery, and State Validation ---" << std::endl;
 
-    // --- Subtest 31.1: FSR3 Shared-Resource Lifetime & Strict Destruction Ordering ---
+    // --- Subtest 31.1: Production FSR3 Shared-Resource Lifetime & Strict Destruction Ordering ---
     {
         struct DestructionStep {
             std::string type;
             uint64_t handle;
         };
-        std::vector<DestructionStep> log;
+        static std::vector<DestructionStep> s_DestructionLog;
+        s_DestructionLog.clear();
 
-        auto mockDestroyImageView = [&](VkDevice dev, VkImageView v, const VkAllocationCallbacks*) {
+        arm::VulkanResourceCleanupFunctions cleanupFn = {};
+        cleanupFn.vkDestroyImageView = [](VkDevice dev, VkImageView v, const VkAllocationCallbacks*) {
             (void)dev;
-            log.push_back({"view", reinterpret_cast<uint64_t>(v)});
+            s_DestructionLog.push_back({"view", reinterpret_cast<uint64_t>(v)});
         };
-        auto mockDestroyImage = [&](VkDevice dev, VkImage img, const VkAllocationCallbacks*) {
+        cleanupFn.vkDestroyImage = [](VkDevice dev, VkImage img, const VkAllocationCallbacks*) {
             (void)dev;
-            log.push_back({"image", reinterpret_cast<uint64_t>(img)});
+            s_DestructionLog.push_back({"image", reinterpret_cast<uint64_t>(img)});
         };
-        auto mockFreeMemory = [&](VkDevice dev, VkDeviceMemory mem, const VkAllocationCallbacks*) {
+        cleanupFn.vkFreeMemory = [](VkDevice dev, VkDeviceMemory mem, const VkAllocationCallbacks*) {
             (void)dev;
-            log.push_back({"memory", reinterpret_cast<uint64_t>(mem)});
+            s_DestructionLog.push_back({"memory", reinterpret_cast<uint64_t>(mem)});
         };
 
-        struct LocalRenderTarget {
-            VkImage image = VK_NULL_HANDLE;
-            VkDeviceMemory memory = VK_NULL_HANDLE;
-            VkImageView view = VK_NULL_HANDLE;
-            VkFormat format = VK_FORMAT_UNDEFINED;
-            VkExtent2D extent = {0, 0};
-        };
+        VkDevice dummyDevice = makeMockHandle<VkDevice>(0x1);
 
-        auto destroyTarget = [&](LocalRenderTarget& rt) {
-            if (rt.view != VK_NULL_HANDLE) {
-                mockDestroyImageView(makeMockHandle<VkDevice>(0x1), rt.view, nullptr);
-                rt.view = VK_NULL_HANDLE;
-            }
-            if (rt.image != VK_NULL_HANDLE) {
-                mockDestroyImage(makeMockHandle<VkDevice>(0x1), rt.image, nullptr);
-                rt.image = VK_NULL_HANDLE;
-            }
-            if (rt.memory != VK_NULL_HANDLE) {
-                mockFreeMemory(makeMockHandle<VkDevice>(0x1), rt.memory, nullptr);
-                rt.memory = VK_NULL_HANDLE;
-            }
-            rt = {};
-        };
+        // 1. Test production arm::destroyRenderTarget on individual targets
+        RenderTarget singleTarget = {};
+        singleTarget.image = makeMockHandle<VkImage>(0x101);
+        singleTarget.memory = makeMockHandle<VkDeviceMemory>(0x201);
+        singleTarget.view = makeMockHandle<VkImageView>(0x301);
+        singleTarget.format = VK_FORMAT_R32_SFLOAT;
+        singleTarget.extent = { 1920, 1080 };
 
-        LocalRenderTarget targets[3];
-        for (int i = 0; i < 3; ++i) {
-            targets[i].image = makeMockHandle<VkImage>(0x1000 + i);
-            targets[i].memory = makeMockHandle<VkDeviceMemory>(0x2000 + i);
-            targets[i].view = makeMockHandle<VkImageView>(0x3000 + i);
-            targets[i].format = VK_FORMAT_R32_SFLOAT;
-            targets[i].extent = { 1920, 1080 };
-        }
+        arm::destroyRenderTarget(dummyDevice, singleTarget, &cleanupFn);
 
-        // Destroy all 3 targets
-        for (int i = 0; i < 3; ++i) {
-            destroyTarget(targets[i]);
-            // Verify handles reset to null
-            TEST_CHECK(targets[i].view == VK_NULL_HANDLE);
-            TEST_CHECK(targets[i].image == VK_NULL_HANDLE);
-            TEST_CHECK(targets[i].memory == VK_NULL_HANDLE);
-            TEST_CHECK(targets[i].format == VK_FORMAT_UNDEFINED);
-            TEST_CHECK(targets[i].extent.width == 0 && targets[i].extent.height == 0);
-        }
+        // Verify ordering: view destroyed before image, image destroyed before memory
+        TEST_CHECK(s_DestructionLog.size() == 3);
+        TEST_CHECK(s_DestructionLog[0].type == "view" && s_DestructionLog[0].handle == 0x301);
+        TEST_CHECK(s_DestructionLog[1].type == "image" && s_DestructionLog[1].handle == 0x101);
+        TEST_CHECK(s_DestructionLog[2].type == "memory" && s_DestructionLog[2].handle == 0x201);
 
-        // Verify total calls: 3 views, 3 images, 3 memories
-        TEST_CHECK(log.size() == 9);
-        // Verify strict ordering: view -> image -> memory for each target
+        // Verify handle reset
+        TEST_CHECK(singleTarget.view == VK_NULL_HANDLE);
+        TEST_CHECK(singleTarget.image == VK_NULL_HANDLE);
+        TEST_CHECK(singleTarget.memory == VK_NULL_HANDLE);
+        TEST_CHECK(singleTarget.format == VK_FORMAT_UNDEFINED);
+        TEST_CHECK(singleTarget.extent.width == 0 && singleTarget.extent.height == 0);
+
+        // Repeated destruction is a safe no-op
+        arm::destroyRenderTarget(dummyDevice, singleTarget, &cleanupFn);
+        TEST_CHECK(s_DestructionLog.size() == 3);
+
+        // 2. Test production arm::destroySharedResources across all 3 FSR3 shared resources
+        s_DestructionLog.clear();
+        RenderTarget dilatedDepth = {};
+        dilatedDepth.image = makeMockHandle<VkImage>(0x1001);
+        dilatedDepth.memory = makeMockHandle<VkDeviceMemory>(0x2001);
+        dilatedDepth.view = makeMockHandle<VkImageView>(0x3001);
+        dilatedDepth.format = VK_FORMAT_R32_SFLOAT;
+        dilatedDepth.extent = { 1920, 1080 };
+
+        RenderTarget dilatedMv = {};
+        dilatedMv.image = makeMockHandle<VkImage>(0x1002);
+        dilatedMv.memory = makeMockHandle<VkDeviceMemory>(0x2002);
+        dilatedMv.view = makeMockHandle<VkImageView>(0x3002);
+        dilatedMv.format = VK_FORMAT_R16G16_SFLOAT;
+        dilatedMv.extent = { 1920, 1080 };
+
+        RenderTarget reconDepth = {};
+        reconDepth.image = makeMockHandle<VkImage>(0x1003);
+        reconDepth.memory = makeMockHandle<VkDeviceMemory>(0x2003);
+        reconDepth.view = makeMockHandle<VkImageView>(0x3003);
+        reconDepth.format = VK_FORMAT_R32_UINT;
+        reconDepth.extent = { 1920, 1080 };
+
+        arm::destroySharedResources(dummyDevice, dilatedDepth, dilatedMv, reconDepth, &cleanupFn);
+
+        // Verify all 3 targets destroyed with strict View -> Image -> Memory ordering
+        TEST_CHECK(s_DestructionLog.size() == 9);
         for (size_t i = 0; i < 3; ++i) {
-            TEST_CHECK(log[i * 3 + 0].type == "view");
-            TEST_CHECK(log[i * 3 + 0].handle == (0x3000 + i));
-            TEST_CHECK(log[i * 3 + 1].type == "image");
-            TEST_CHECK(log[i * 3 + 1].handle == (0x1000 + i));
-            TEST_CHECK(log[i * 3 + 2].type == "memory");
-            TEST_CHECK(log[i * 3 + 2].handle == (0x2000 + i));
+            TEST_CHECK(s_DestructionLog[i * 3 + 0].type == "view");
+            TEST_CHECK(s_DestructionLog[i * 3 + 0].handle == (0x3001 + i));
+            TEST_CHECK(s_DestructionLog[i * 3 + 1].type == "image");
+            TEST_CHECK(s_DestructionLog[i * 3 + 1].handle == (0x1001 + i));
+            TEST_CHECK(s_DestructionLog[i * 3 + 2].type == "memory");
+            TEST_CHECK(s_DestructionLog[i * 3 + 2].handle == (0x2001 + i));
         }
+        TEST_CHECK(dilatedDepth.view == VK_NULL_HANDLE && dilatedDepth.image == VK_NULL_HANDLE && dilatedDepth.memory == VK_NULL_HANDLE);
+        TEST_CHECK(dilatedMv.view == VK_NULL_HANDLE && dilatedMv.image == VK_NULL_HANDLE && dilatedMv.memory == VK_NULL_HANDLE);
+        TEST_CHECK(reconDepth.view == VK_NULL_HANDLE && reconDepth.image == VK_NULL_HANDLE && reconDepth.memory == VK_NULL_HANDLE);
 
-        // Verify repeated destruction is a safe no-op
-        size_t logSizeBefore = log.size();
-        for (int i = 0; i < 3; ++i) {
-            destroyTarget(targets[i]);
-        }
-        TEST_CHECK(log.size() == logSizeBefore);
+        // Safe repeated destruction
+        arm::destroySharedResources(dummyDevice, dilatedDepth, dilatedMv, reconDepth, &cleanupFn);
+        TEST_CHECK(s_DestructionLog.size() == 9);
 
-        // Verify partial initialization failure unwinds cleanly
-        LocalRenderTarget partialTargets[3] = {};
-        partialTargets[0].image = makeMockHandle<VkImage>(0x4000);
-        partialTargets[0].memory = makeMockHandle<VkDeviceMemory>(0x5000);
-        partialTargets[0].view = makeMockHandle<VkImageView>(0x6000);
-        // target 1 fails midway (only has image allocated)
-        partialTargets[1].image = makeMockHandle<VkImage>(0x4001);
+        // 3. Test production Fsr3Upscaler::destroySharedResources method
+        s_DestructionLog.clear();
+        Fsr3Upscaler upscaler;
+        upscaler.dilatedDepth().image = makeMockHandle<VkImage>(0x4001);
+        upscaler.dilatedDepth().memory = makeMockHandle<VkDeviceMemory>(0x5001);
+        upscaler.dilatedDepth().view = makeMockHandle<VkImageView>(0x6001);
 
-        for (int i = 0; i < 3; ++i) {
-            destroyTarget(partialTargets[i]);
-            TEST_CHECK(partialTargets[i].view == VK_NULL_HANDLE);
-            TEST_CHECK(partialTargets[i].image == VK_NULL_HANDLE);
-            TEST_CHECK(partialTargets[i].memory == VK_NULL_HANDLE);
-        }
+        upscaler.dilatedMotionVectors().image = makeMockHandle<VkImage>(0x4002);
+        upscaler.dilatedMotionVectors().memory = makeMockHandle<VkDeviceMemory>(0x5002);
+        upscaler.dilatedMotionVectors().view = makeMockHandle<VkImageView>(0x6002);
+
+        upscaler.reconstructedPrevNearestDepth().image = makeMockHandle<VkImage>(0x4003);
+        upscaler.reconstructedPrevNearestDepth().memory = makeMockHandle<VkDeviceMemory>(0x5003);
+        upscaler.reconstructedPrevNearestDepth().view = makeMockHandle<VkImageView>(0x6003);
+
+        upscaler.destroySharedResources(dummyDevice, &cleanupFn);
+        TEST_CHECK(s_DestructionLog.size() == 9);
+        TEST_CHECK(upscaler.dilatedDepth().view == VK_NULL_HANDLE && upscaler.dilatedDepth().image == VK_NULL_HANDLE);
+        TEST_CHECK(upscaler.dilatedMotionVectors().view == VK_NULL_HANDLE && upscaler.dilatedMotionVectors().image == VK_NULL_HANDLE);
+        TEST_CHECK(upscaler.reconstructedPrevNearestDepth().view == VK_NULL_HANDLE && upscaler.reconstructedPrevNearestDepth().image == VK_NULL_HANDLE);
+
+        // 4. Test partial initialization failures cleanup
+        s_DestructionLog.clear();
+        RenderTarget partialA = {};
+        partialA.image = makeMockHandle<VkImage>(0x7001); // only image allocated (memory allocation failed)
+
+        RenderTarget partialB = {};
+        partialB.image = makeMockHandle<VkImage>(0x7002); // image and memory allocated (view creation failed)
+        partialB.memory = makeMockHandle<VkDeviceMemory>(0x8002);
+
+        RenderTarget partialC = {}; // completely unallocated
+
+        arm::destroySharedResources(dummyDevice, partialA, partialB, partialC, &cleanupFn);
+        // partialA: 1 call (image). partialB: 2 calls (image, memory). partialC: 0 calls. Total: 3 calls.
+        TEST_CHECK(s_DestructionLog.size() == 3);
+        TEST_CHECK(s_DestructionLog[0].type == "image" && s_DestructionLog[0].handle == 0x7001);
+        TEST_CHECK(s_DestructionLog[1].type == "image" && s_DestructionLog[1].handle == 0x7002);
+        TEST_CHECK(s_DestructionLog[2].type == "memory" && s_DestructionLog[2].handle == 0x8002);
+        TEST_CHECK(partialA.image == VK_NULL_HANDLE && partialB.image == VK_NULL_HANDLE && partialB.memory == VK_NULL_HANDLE);
     }
 
     // --- Subtest 31.2: SwapchainSync Frame-State Validation Tightening ---
@@ -5588,6 +5626,207 @@ static void TestM3FinalCloseoutVulkanLifetimeAndRecovery()
             TEST_CHECK(syncMissing.isRecoveryFailed() == true);
             TEST_CHECK(syncMissing.isTerminalError() == true);
         }
+    }
+
+    // --- Subtest 31.4: Presentation Error Classification ---
+    {
+        s_MockVk = MockVulkanState();
+
+        VkDevice dummyDevice = makeMockHandle<VkDevice>(0x1);
+        VkQueue dummyQueue = makeMockHandle<VkQueue>(0x2);
+        VkSwapchainKHR dummySwapchain = makeMockHandle<VkSwapchainKHR>(0x3);
+        std::vector<VkImage> dummyImages = {
+            makeMockHandle<VkImage>(0x10),
+            makeMockHandle<VkImage>(0x20)
+        };
+        VkCommandBuffer dummyCmds[2] = { makeMockHandle<VkCommandBuffer>(0x100), makeMockHandle<VkCommandBuffer>(0x101) };
+        VkSemaphore dummyAcq[2] = { makeMockHandle<VkSemaphore>(0x30), makeMockHandle<VkSemaphore>(0x31) };
+        VkSemaphore dummyRel[2] = { makeMockHandle<VkSemaphore>(0x40), makeMockHandle<VkSemaphore>(0x41) };
+        VkFence dummyFences[2] = { makeMockHandle<VkFence>(0x50), makeMockHandle<VkFence>(0x51) };
+
+        arm::SwapchainSync::VulkanFunctions fn;
+        fn.vkWaitForFences = MockVkWaitForFences;
+        fn.vkAcquireNextImageKHR = MockVkAcquireNextImageKHR;
+        fn.vkResetFences = MockVkResetFences;
+        fn.vkResetCommandBuffer = MockVkResetCommandBuffer;
+        fn.vkBeginCommandBuffer = MockVkBeginCommandBuffer;
+        fn.vkEndCommandBuffer = MockVkEndCommandBuffer;
+        fn.vkQueueSubmit = MockVkQueueSubmit;
+        fn.vkQueuePresentKHR = MockVkQueuePresentKHR;
+        fn.vkCmdPipelineBarrier = MockVkCmdPipelineBarrier;
+        fn.vkCmdClearColorImage = MockVkCmdClearColorImage;
+        fn.vkDeviceWaitIdle = MockVkDeviceWaitIdle;
+        fn.vkCreateFence = MockVkCreateFence;
+        fn.vkDestroyFence = MockVkDestroyFence;
+        fn.vkCreateSemaphore = MockVkCreateSemaphore;
+        fn.vkDestroySemaphore = MockVkDestroySemaphore;
+
+        // 1. Success
+        {
+            arm::SwapchainSync sync;
+            sync.setVulkanFunctions(fn);
+            sync.init(dummyDevice, dummyQueue, dummySwapchain, dummyImages, dummyCmds, dummyAcq, dummyRel, dummyFences);
+            uint32_t img = 0;
+            s_MockVk.presentResult = VK_SUCCESS;
+            TEST_CHECK(sync.beginFrame(&img) == true);
+            TEST_CHECK(sync.endFrame(img) == true);
+            TEST_CHECK(sync.lastPresentResult() == arm::SwapchainSync::PresentResult::Success);
+            TEST_CHECK(sync.isTerminalError() == false);
+        }
+
+        // 2. Suboptimal swapchain (non-terminal, advances frame)
+        {
+            arm::SwapchainSync sync;
+            sync.setVulkanFunctions(fn);
+            sync.init(dummyDevice, dummyQueue, dummySwapchain, dummyImages, dummyCmds, dummyAcq, dummyRel, dummyFences);
+            uint32_t img = 0;
+            s_MockVk.presentResult = VK_SUBOPTIMAL_KHR;
+            TEST_CHECK(sync.beginFrame(&img) == true);
+            uint32_t frameBefore = sync.frame();
+            TEST_CHECK(sync.endFrame(img) == false);
+            TEST_CHECK(sync.lastPresentResult() == arm::SwapchainSync::PresentResult::Suboptimal);
+            TEST_CHECK(sync.isTerminalError() == false);
+            TEST_CHECK(sync.frame() == (frameBefore + 1) % arm::SwapchainSync::kFramesInFlight);
+        }
+
+        // 3. Out-of-date swapchain (non-terminal, advances frame)
+        {
+            arm::SwapchainSync sync;
+            sync.setVulkanFunctions(fn);
+            sync.init(dummyDevice, dummyQueue, dummySwapchain, dummyImages, dummyCmds, dummyAcq, dummyRel, dummyFences);
+            uint32_t img = 0;
+            s_MockVk.presentResult = VK_ERROR_OUT_OF_DATE_KHR;
+            TEST_CHECK(sync.beginFrame(&img) == true);
+            uint32_t frameBefore = sync.frame();
+            TEST_CHECK(sync.endFrame(img) == false);
+            TEST_CHECK(sync.lastPresentResult() == arm::SwapchainSync::PresentResult::OutOfDate);
+            TEST_CHECK(sync.isTerminalError() == false);
+            TEST_CHECK(sync.frame() == (frameBefore + 1) % arm::SwapchainSync::kFramesInFlight);
+        }
+
+        // 4. Surface lost (TERMINAL, does not advance frame or route to ordinary swapchain-only recreation)
+        {
+            arm::SwapchainSync sync;
+            sync.setVulkanFunctions(fn);
+            sync.init(dummyDevice, dummyQueue, dummySwapchain, dummyImages, dummyCmds, dummyAcq, dummyRel, dummyFences);
+            uint32_t img = 0;
+            s_MockVk.presentResult = VK_ERROR_SURFACE_LOST_KHR;
+            TEST_CHECK(sync.beginFrame(&img) == true);
+            uint32_t frameBefore = sync.frame();
+            TEST_CHECK(sync.endFrame(img) == false);
+            TEST_CHECK(sync.lastPresentResult() == arm::SwapchainSync::PresentResult::SurfaceLost);
+            TEST_CHECK(sync.isSurfaceLost() == true);
+            TEST_CHECK(sync.isTerminalError() == true);
+            TEST_CHECK(sync.frame() == frameBefore); // frame not advanced
+        }
+
+        // 5. Device lost (TERMINAL)
+        {
+            arm::SwapchainSync sync;
+            sync.setVulkanFunctions(fn);
+            sync.init(dummyDevice, dummyQueue, dummySwapchain, dummyImages, dummyCmds, dummyAcq, dummyRel, dummyFences);
+            uint32_t img = 0;
+            s_MockVk.presentResult = VK_ERROR_DEVICE_LOST;
+            TEST_CHECK(sync.beginFrame(&img) == true);
+            TEST_CHECK(sync.endFrame(img) == false);
+            TEST_CHECK(sync.lastPresentResult() == arm::SwapchainSync::PresentResult::DeviceLost);
+            TEST_CHECK(sync.isDeviceLost() == true);
+            TEST_CHECK(sync.isTerminalError() == true);
+        }
+
+        // 6. Other Vulkan failure (e.g. VK_ERROR_INITIALIZATION_FAILED) -> marks recoveryFailed_, TERMINAL
+        {
+            arm::SwapchainSync sync;
+            sync.setVulkanFunctions(fn);
+            sync.init(dummyDevice, dummyQueue, dummySwapchain, dummyImages, dummyCmds, dummyAcq, dummyRel, dummyFences);
+            uint32_t img = 0;
+            s_MockVk.presentResult = VK_ERROR_INITIALIZATION_FAILED;
+            TEST_CHECK(sync.beginFrame(&img) == true);
+            TEST_CHECK(sync.endFrame(img) == false);
+            TEST_CHECK(sync.lastPresentResult() == arm::SwapchainSync::PresentResult::OtherError);
+            TEST_CHECK(sync.isRecoveryFailed() == true);
+            TEST_CHECK(sync.isTerminalError() == true);
+        }
+
+        // 7. Verify presentation classification also holds during abortFrame()
+        {
+            arm::SwapchainSync syncAbort;
+            syncAbort.setVulkanFunctions(fn);
+            syncAbort.init(dummyDevice, dummyQueue, dummySwapchain, dummyImages, dummyCmds, dummyAcq, dummyRel, dummyFences);
+            uint32_t img = 0;
+            s_MockVk.presentResult = VK_ERROR_SURFACE_LOST_KHR;
+            TEST_CHECK(syncAbort.beginFrame(&img) == true);
+            TEST_CHECK(syncAbort.abortFrame(img) == false);
+            TEST_CHECK(syncAbort.lastPresentResult() == arm::SwapchainSync::PresentResult::SurfaceLost);
+            TEST_CHECK(syncAbort.isSurfaceLost() == true);
+            TEST_CHECK(syncAbort.isTerminalError() == true);
+        }
+    }
+
+    // --- Subtest 31.5: Device Loss and Surface Loss during Swapchain Recreation ---
+    {
+        arm::SwapchainSync sync;
+        sync.init(makeMockHandle<VkDevice>(0x1), makeMockHandle<VkQueue>(0x2),
+                  makeMockHandle<VkSwapchainKHR>(0x3), { makeMockHandle<VkImage>(0x10) },
+                  nullptr, nullptr, nullptr, nullptr);
+
+        TEST_CHECK(sync.isDeviceLost() == false);
+        TEST_CHECK(sync.isSurfaceLost() == false);
+        TEST_CHECK(sync.isTerminalError() == false);
+
+        // Notify device loss
+        sync.notifyDeviceLost();
+        TEST_CHECK(sync.isDeviceLost() == true);
+        TEST_CHECK(sync.isTerminalError() == true);
+
+        // Reset and notify surface loss
+        sync.init(makeMockHandle<VkDevice>(0x1), makeMockHandle<VkQueue>(0x2),
+                  makeMockHandle<VkSwapchainKHR>(0x3), { makeMockHandle<VkImage>(0x10) },
+                  nullptr, nullptr, nullptr, nullptr);
+        TEST_CHECK(sync.isTerminalError() == false);
+        sync.notifySurfaceLost();
+        TEST_CHECK(sync.isSurfaceLost() == true);
+        TEST_CHECK(sync.isTerminalError() == true);
+
+        // Reset and notify recovery failed
+        sync.init(makeMockHandle<VkDevice>(0x1), makeMockHandle<VkQueue>(0x2),
+                  makeMockHandle<VkSwapchainKHR>(0x3), { makeMockHandle<VkImage>(0x10) },
+                  nullptr, nullptr, nullptr, nullptr);
+        sync.notifyRecoveryFailed();
+        TEST_CHECK(sync.isRecoveryFailed() == true);
+        TEST_CHECK(sync.isTerminalError() == true);
+    }
+
+    // --- Subtest 31.6: Immediate Loop Termination on Terminal Error Without Retry Counter ---
+    {
+        uint32_t consecutiveFailures = 0;
+        bool swapchainDirty = false;
+
+        // Normal failure increments retry counter
+        bool canContinue = arm::SwapchainRecoveryPolicy::handleRebuildResult(
+            arm::SwapchainRebuildResult::Failed, swapchainDirty, consecutiveFailures);
+        TEST_CHECK(canContinue == true);
+        TEST_CHECK(consecutiveFailures == 1);
+        TEST_CHECK(swapchainDirty == true);
+
+        // But when a terminal error occurs (e.g. device lost), application logic checks
+        // sync.isTerminalError() and breaks immediately without executing handleRebuildResult
+        arm::SwapchainSync sync;
+        sync.init(makeMockHandle<VkDevice>(0x1), makeMockHandle<VkQueue>(0x2),
+                  makeMockHandle<VkSwapchainKHR>(0x3), { makeMockHandle<VkImage>(0x10) },
+                  nullptr, nullptr, nullptr, nullptr);
+        sync.notifyDeviceLost();
+
+        bool loopTerminatedImmediately = false;
+        if (sync.isTerminalError()) {
+            loopTerminatedImmediately = true;
+            // Does not pass through handleRebuildResult
+        } else {
+            arm::SwapchainRecoveryPolicy::handleRebuildResult(
+                arm::SwapchainRebuildResult::Failed, swapchainDirty, consecutiveFailures);
+        }
+        TEST_CHECK(loopTerminatedImmediately == true);
+        TEST_CHECK(consecutiveFailures == 1); // Not incremented!
     }
 
     std::cout << "PASS: Test 31: M3 Final Closeout - Vulkan Lifetime, Sync Recovery, and State Validation passed perfectly." << std::endl;

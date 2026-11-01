@@ -16,6 +16,7 @@ set(SHADER_DIR ${COMMON_DIR}/shaders)
 # The Android defaults in the root CMakeLists build the standalone Vulkan
 # backend against the checked-in prebuilt SPIR-V and link the NDK's libvulkan,
 # so no extra options are needed here.
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 add_subdirectory(${ARM_ASR_ROOT} ${CMAKE_CURRENT_BINARY_DIR}/arm_asr)
 
 # ---------------------------------------------------------------------------

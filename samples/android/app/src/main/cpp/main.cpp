@@ -85,7 +85,8 @@ SwapchainRebuildResult rebuildSwapchainResources(App& app)
     }
     if (app.ctx.sync().isTerminalError()) {
         LOGE("Terminal Vulkan error (%s); cannot rebuild Android swapchain",
-             app.ctx.sync().isDeviceLost() ? "device lost" : "sync recovery failed");
+             app.ctx.sync().isDeviceLost() ? "device lost" :
+             app.ctx.sync().isSurfaceLost() ? "surface lost" : "sync recovery failed");
         return SwapchainRebuildResult::Failed;
     }
 
@@ -93,7 +94,13 @@ SwapchainRebuildResult rebuildSwapchainResources(App& app)
     app.renderReady = false;
 
     if (!app.ctx.recreateSwapchain(app.window)) {
-        LOGE("Android swapchain recreation failed");
+        if (app.ctx.sync().isTerminalError()) {
+            LOGE("Terminal Vulkan error (%s) during Android swapchain recreation; aborting",
+                 app.ctx.sync().isDeviceLost() ? "device lost" :
+                 app.ctx.sync().isSurfaceLost() ? "surface lost" : "sync recovery failed");
+        } else {
+            LOGE("Android swapchain recreation failed");
+        }
         return SwapchainRebuildResult::Failed;
     }
     if (!createSizedResources(app)) {
@@ -158,6 +165,14 @@ void drawFrame(App& app)
 {
     if (app.swapchainDirty) {
         SwapchainRebuildResult res = rebuildSwapchainResources(app);
+        if (app.ctx.sync().isTerminalError()) {
+            LOGE("Terminal Vulkan error (%s); aborting Android rendering loop immediately",
+                 app.ctx.sync().isDeviceLost() ? "device lost" :
+                 app.ctx.sync().isSurfaceLost() ? "surface lost" : "sync recovery failed");
+            app.renderReady = false;
+            app.renderingTerminated = true;
+            return;
+        }
         if (!SwapchainRecoveryPolicy::handleRebuildResult(res, app.swapchainDirty, app.consecutiveRecreateFailures)) {
             LOGE("Repeated swapchain recreation failure on Android (%u consecutive failures); aborting rendering loop",
                  app.consecutiveRecreateFailures);
@@ -185,7 +200,8 @@ void drawFrame(App& app)
     if (!app.ctx.beginFrame(&imageIndex)) {
         if (app.ctx.sync().isTerminalError()) {
             LOGE("Terminal Vulkan error (%s) during Android beginFrame; aborting rendering loop",
-                 app.ctx.sync().isDeviceLost() ? "device lost" : "sync recovery failed");
+                 app.ctx.sync().isDeviceLost() ? "device lost" :
+                 app.ctx.sync().isSurfaceLost() ? "surface lost" : "sync recovery failed");
             app.renderReady = false;
             app.renderingTerminated = true;
             return;
@@ -223,7 +239,8 @@ void drawFrame(App& app)
         if (!app.ctx.abortFrame(imageIndex)) {
             if (app.ctx.sync().isTerminalError()) {
                 LOGE("Terminal Vulkan error (%s) during Android abortFrame; aborting rendering loop",
-                     app.ctx.sync().isDeviceLost() ? "device lost" : "sync recovery failed");
+                     app.ctx.sync().isDeviceLost() ? "device lost" :
+                     app.ctx.sync().isSurfaceLost() ? "surface lost" : "sync recovery failed");
                 app.renderReady = false;
                 app.renderingTerminated = true;
                 return;
@@ -239,7 +256,8 @@ void drawFrame(App& app)
     if (!app.ctx.endFrame(imageIndex)) {
         if (app.ctx.sync().isTerminalError()) {
             LOGE("Terminal Vulkan error (%s) during Android endFrame; aborting rendering loop",
-                 app.ctx.sync().isDeviceLost() ? "device lost" : "sync recovery failed");
+                 app.ctx.sync().isDeviceLost() ? "device lost" :
+                 app.ctx.sync().isSurfaceLost() ? "surface lost" : "sync recovery failed");
             app.renderReady = false;
             app.renderingTerminated = true;
             return;

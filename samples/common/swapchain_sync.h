@@ -22,6 +22,15 @@ class SwapchainSync {
 public:
     static constexpr uint32_t kFramesInFlight = 2;
 
+    enum class PresentResult {
+        Success,
+        Suboptimal,
+        OutOfDate,
+        SurfaceLost,
+        DeviceLost,
+        OtherError
+    };
+
     struct VulkanFunctions {
         VkResult (VKAPI_PTR *vkWaitForFences)(VkDevice, uint32_t, const VkFence*, VkBool32, uint64_t) = nullptr;
         VkResult (VKAPI_PTR *vkAcquireNextImageKHR)(VkDevice, VkSwapchainKHR, uint64_t, VkSemaphore, VkFence, uint32_t*) = nullptr;
@@ -94,6 +103,8 @@ public:
         submissionQueued_ = false;
         deviceLost_ = false;
         recoveryFailed_ = false;
+        surfaceLost_ = false;
+        lastPresentResult_ = PresentResult::Success;
     }
 
     void onSwapchainRecreated()
@@ -117,7 +128,13 @@ public:
     bool isSubmissionQueued() const { return submissionQueued_; }
     bool isDeviceLost() const { return deviceLost_; }
     bool isRecoveryFailed() const { return recoveryFailed_; }
-    bool isTerminalError() const { return deviceLost_ || recoveryFailed_; }
+    bool isSurfaceLost() const { return surfaceLost_; }
+    bool isTerminalError() const { return deviceLost_ || recoveryFailed_ || surfaceLost_; }
+    PresentResult lastPresentResult() const { return lastPresentResult_; }
+
+    void notifyDeviceLost() { deviceLost_ = true; }
+    void notifyRecoveryFailed() { recoveryFailed_ = true; }
+    void notifySurfaceLost() { surfaceLost_ = true; }
 
     VkFence inFlightFence(uint32_t i) const { return (i < kFramesInFlight) ? inFlightFences_[i] : VK_NULL_HANDLE; }
     VkSemaphore acquireSemaphore(uint32_t i) const { return (i < kFramesInFlight) ? acquireSemaphores_[i] : VK_NULL_HANDLE; }
@@ -366,22 +383,50 @@ public:
         present.pImageIndices      = &imageIndex;
 
         VkResult presented = fn_.vkQueuePresentKHR(queue_, &present);
-        frame_ = (frame_ + 1) % kFramesInFlight;
         imageAcquired_ = false;
         submissionQueued_ = false;
 
+        if (presented == VK_SUCCESS) {
+            lastPresentResult_ = swapchainSuboptimal_ ? PresentResult::Suboptimal : PresentResult::Success;
+            frame_ = (frame_ + 1) % kFramesInFlight;
+            if (swapchainSuboptimal_) {
+                swapchainSuboptimal_ = false;
+                return false;
+            }
+            return true;
+        }
+
+        if (presented == VK_SUBOPTIMAL_KHR) {
+            lastPresentResult_ = PresentResult::Suboptimal;
+            swapchainSuboptimal_ = false;
+            frame_ = (frame_ + 1) % kFramesInFlight;
+            return false;
+        }
+
+        if (presented == VK_ERROR_OUT_OF_DATE_KHR) {
+            lastPresentResult_ = PresentResult::OutOfDate;
+            swapchainSuboptimal_ = false;
+            frame_ = (frame_ + 1) % kFramesInFlight;
+            return false;
+        }
+
+        if (presented == VK_ERROR_SURFACE_LOST_KHR) {
+            lastPresentResult_ = PresentResult::SurfaceLost;
+            surfaceLost_ = true;
+            return false;
+        }
+
         if (presented == VK_ERROR_DEVICE_LOST) {
+            lastPresentResult_ = PresentResult::DeviceLost;
             deviceLost_ = true;
             return false;
         }
-        if (swapchainSuboptimal_ || presented == VK_ERROR_OUT_OF_DATE_KHR || presented == VK_SUBOPTIMAL_KHR) {
-            swapchainSuboptimal_ = false;
-            return false;
-        }
-        if (presented != VK_SUCCESS) {
-            return false;
-        }
-        return true;
+
+        // Other Vulkan failures:
+        // Uncertain presentation state means synchronization objects cannot be safely reused.
+        lastPresentResult_ = PresentResult::OtherError;
+        recoveryFailed_ = true;
+        return false;
     }
 
     bool abortFrame(uint32_t imageIndex)
@@ -510,22 +555,50 @@ public:
         present.pImageIndices      = &imageIndex;
 
         VkResult presented = fn_.vkQueuePresentKHR(queue_, &present);
-        frame_ = (frame_ + 1) % kFramesInFlight;
         imageAcquired_ = false;
         submissionQueued_ = false;
 
+        if (presented == VK_SUCCESS) {
+            lastPresentResult_ = swapchainSuboptimal_ ? PresentResult::Suboptimal : PresentResult::Success;
+            frame_ = (frame_ + 1) % kFramesInFlight;
+            if (swapchainSuboptimal_) {
+                swapchainSuboptimal_ = false;
+                return false;
+            }
+            return true;
+        }
+
+        if (presented == VK_SUBOPTIMAL_KHR) {
+            lastPresentResult_ = PresentResult::Suboptimal;
+            swapchainSuboptimal_ = false;
+            frame_ = (frame_ + 1) % kFramesInFlight;
+            return false;
+        }
+
+        if (presented == VK_ERROR_OUT_OF_DATE_KHR) {
+            lastPresentResult_ = PresentResult::OutOfDate;
+            swapchainSuboptimal_ = false;
+            frame_ = (frame_ + 1) % kFramesInFlight;
+            return false;
+        }
+
+        if (presented == VK_ERROR_SURFACE_LOST_KHR) {
+            lastPresentResult_ = PresentResult::SurfaceLost;
+            surfaceLost_ = true;
+            return false;
+        }
+
         if (presented == VK_ERROR_DEVICE_LOST) {
+            lastPresentResult_ = PresentResult::DeviceLost;
             deviceLost_ = true;
             return false;
         }
-        if (swapchainSuboptimal_ || presented == VK_ERROR_OUT_OF_DATE_KHR || presented == VK_SUBOPTIMAL_KHR) {
-            swapchainSuboptimal_ = false;
-            return false;
-        }
-        if (presented != VK_SUCCESS) {
-            return false;
-        }
-        return true;
+
+        // Other Vulkan failures:
+        // Uncertain presentation state means synchronization objects cannot be safely reused.
+        lastPresentResult_ = PresentResult::OtherError;
+        recoveryFailed_ = true;
+        return false;
     }
 
 private:
@@ -549,6 +622,8 @@ private:
     bool                     submissionQueued_ = false;
     bool                     deviceLost_ = false;
     bool                     recoveryFailed_ = false;
+    bool                     surfaceLost_ = false;
+    PresentResult            lastPresentResult_ = PresentResult::Success;
     VulkanFunctions          fn_;
 };
 

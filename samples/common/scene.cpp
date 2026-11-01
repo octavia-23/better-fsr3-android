@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 #include "scene.h"
+#include "fsr3_upscaler.h"
+#include "common.h"
+#include "vk_context.h"
 
 #include "blit_frag.spv.h"
 #include "fullscreen_vert.spv.h"
@@ -537,9 +540,6 @@ void Scene::destroy(VkContext& ctx)
     scenePass_        = VK_NULL_HANDLE;
 
     for (RenderTarget* rt : {&color_, &motion_, &depth_, &output_}) {
-        vkDestroyImageView(device, rt->view, nullptr);
-        vkDestroyImage(device, rt->image, nullptr);
-        vkFreeMemory(device, rt->memory, nullptr);
-        *rt = {};
+        arm::destroyRenderTarget(device, *rt);
     }
 }

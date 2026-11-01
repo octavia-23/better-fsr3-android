@@ -56,6 +56,16 @@ jobs:
           cp build/libArm_ASR_api.a out/${{ matrix.abi }}/
           cp build/src/backends/vk/libArm_ASR_backend.a out/${{ matrix.abi }}/
 
+      - name: Verify production symbols (zero ffxmTest in production libraries)
+        run: |
+          set -eux
+          LLVM_NM="${ANDROID_HOME}/ndk/${NDK_VERSION}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm"
+          if "$LLVM_NM" out/${{ matrix.abi }}/libArm_ASR_backend.a | grep -i "ffxmTest"; then
+            echo "ERROR: Test hook symbols found in production library libArm_ASR_backend.a"
+            exit 1
+          fi
+          echo "Verified: Zero test-only symbols found in libArm_ASR_backend.a for ${{ matrix.abi }}."
+
       - uses: actions/upload-artifact@v5
         with:
           name: android-${{ matrix.abi }}
@@ -194,6 +204,21 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug
+
+      - name: Verify production symbols (zero ffxmTest in APK native libraries)
+        run: |
+          set -eux
+          mkdir -p /tmp/apk-contents
+          unzip -q samples/android/app/build/outputs/apk/debug/app-debug.apk -d /tmp/apk-contents
+          LLVM_NM="${ANDROID_HOME}/ndk/${NDK_VERSION}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm"
+          for so in $(find /tmp/apk-contents -name "*.so"); do
+            echo "Checking symbols in $so..."
+            if "$LLVM_NM" -D "$so" | grep -i "ffxmTest"; then
+              echo "ERROR: Test hook symbols found in production library $so"
+              exit 1
+            fi
+          done
+          echo "Verified: Zero test-only symbols found in Android APK native libraries."
 
       - uses: actions/upload-artifact@v5
         with:

@@ -2,8 +2,15 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "common.h"
-#include "vk_context.h"
+#if defined(__ANDROID__)
+#   define VK_USE_PLATFORM_ANDROID_KHR 1
+#elif defined(_WIN32)
+#   define VK_USE_PLATFORM_WIN32_KHR 1
+#endif
+#include <vulkan/vulkan.h>
+#include <cstdint>
+
+class VkContext;
 
 // The render-resolution G-buffer Arm ASR consumes, plus the display-resolution
 // target it writes into.

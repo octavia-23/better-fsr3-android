@@ -183,7 +183,8 @@ SwapchainRebuildResult rebuildSwapchainResources(App& app)
 
     if (app.ctx.sync().isTerminalError()) {
         LOGE("Terminal Vulkan error (%s); cannot rebuild Windows swapchain",
-             app.ctx.sync().isDeviceLost() ? "device lost" : "sync recovery failed");
+             app.ctx.sync().isDeviceLost() ? "device lost" :
+             app.ctx.sync().isSurfaceLost() ? "surface lost" : "sync recovery failed");
         return SwapchainRebuildResult::Failed;
     }
 
@@ -191,7 +192,13 @@ SwapchainRebuildResult rebuildSwapchainResources(App& app)
     app.renderReady = false;
 
     if (!app.ctx.recreateSwapchain(app.hwnd)) {
-        LOGE("Swapchain recreation failed");
+        if (app.ctx.sync().isTerminalError()) {
+            LOGE("Terminal Vulkan error (%s) during Windows swapchain recreation; quitting",
+                 app.ctx.sync().isDeviceLost() ? "device lost" :
+                 app.ctx.sync().isSurfaceLost() ? "surface lost" : "sync recovery failed");
+        } else {
+            LOGE("Swapchain recreation failed");
+        }
         return SwapchainRebuildResult::Failed;
     }
     if (!createSizedResources(app)) {
@@ -221,7 +228,8 @@ void drawFrame(App& app)
     if (!app.ctx.beginFrame(&imageIndex)) {
         if (app.ctx.sync().isTerminalError()) {
             LOGE("Terminal Vulkan error (%s) during Windows beginFrame; quitting",
-                 app.ctx.sync().isDeviceLost() ? "device lost" : "sync recovery failed");
+                 app.ctx.sync().isDeviceLost() ? "device lost" :
+                 app.ctx.sync().isSurfaceLost() ? "surface lost" : "sync recovery failed");
             app.quit = true;
             return;
         }
@@ -269,7 +277,8 @@ void drawFrame(App& app)
         if (!app.ctx.abortFrame(imageIndex)) {
             if (app.ctx.sync().isTerminalError()) {
                 LOGE("Terminal Vulkan error (%s) during Windows abortFrame; quitting",
-                     app.ctx.sync().isDeviceLost() ? "device lost" : "sync recovery failed");
+                     app.ctx.sync().isDeviceLost() ? "device lost" :
+                     app.ctx.sync().isSurfaceLost() ? "surface lost" : "sync recovery failed");
                 app.quit = true;
                 return;
             }
@@ -284,7 +293,8 @@ void drawFrame(App& app)
     if (!app.ctx.endFrame(imageIndex)) {
         if (app.ctx.sync().isTerminalError()) {
             LOGE("Terminal Vulkan error (%s) during Windows endFrame; quitting",
-                 app.ctx.sync().isDeviceLost() ? "device lost" : "sync recovery failed");
+                 app.ctx.sync().isDeviceLost() ? "device lost" :
+                 app.ctx.sync().isSurfaceLost() ? "surface lost" : "sync recovery failed");
             app.quit = true;
             return;
         }
@@ -432,6 +442,13 @@ int main(int argc, char** argv)
 
         if (app.swapchainDirty) {
             SwapchainRebuildResult res = rebuildSwapchainResources(app);
+            if (app.ctx.sync().isTerminalError()) {
+                LOGE("Terminal Vulkan error (%s); quitting immediately",
+                     app.ctx.sync().isDeviceLost() ? "device lost" :
+                     app.ctx.sync().isSurfaceLost() ? "surface lost" : "sync recovery failed");
+                app.quit = true;
+                break;
+            }
             if (!SwapchainRecoveryPolicy::handleRebuildResult(res, app.swapchainDirty, app.consecutiveRecreateFailures)) {
                 LOGE("Repeated swapchain recreation failure on Windows (%u consecutive failures); quitting",
                      app.consecutiveRecreateFailures);
