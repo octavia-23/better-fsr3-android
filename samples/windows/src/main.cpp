@@ -181,6 +181,11 @@ SwapchainRebuildResult rebuildSwapchainResources(App& app)
     if (client.width == 0 || client.height == 0)
         return SwapchainRebuildResult::Minimized;   // minimised: stay dirty and retry once the window is restored
 
+    if (app.ctx.sync().isTerminalError()) {
+        LOGE("Terminal Vulkan error (device lost); cannot rebuild Windows swapchain");
+        return SwapchainRebuildResult::Failed;
+    }
+
     destroySizedResources(app);
     app.renderReady = false;
 
@@ -213,6 +218,11 @@ void drawFrame(App& app)
 
     uint32_t imageIndex = 0;
     if (!app.ctx.beginFrame(&imageIndex)) {
+        if (app.ctx.sync().isTerminalError()) {
+            LOGE("Terminal Vulkan error (device lost) during Windows beginFrame; quitting");
+            app.quit = true;
+            return;
+        }
         app.swapchainDirty = true;   // OUT_OF_DATE / SUBOPTIMAL
         return;
     }
@@ -254,16 +264,28 @@ void drawFrame(App& app)
 
     if (!dispatchOk) {
         LOGE("Upscaler dispatch failed on frame %d; recovering via abortFrame", app.frameIndex);
-        if (!app.ctx.abortFrame(imageIndex))
+        if (!app.ctx.abortFrame(imageIndex)) {
+            if (app.ctx.sync().isTerminalError()) {
+                LOGE("Terminal Vulkan error (device lost) during Windows abortFrame; quitting");
+                app.quit = true;
+                return;
+            }
             app.swapchainDirty = true;
+        }
         return;
     }
 
     app.scene.recordBlit(cmd, app.ctx.swapchainImageView(imageIndex),
                          app.ctx.swapchainExtent());
 
-    if (!app.ctx.endFrame(imageIndex))
+    if (!app.ctx.endFrame(imageIndex)) {
+        if (app.ctx.sync().isTerminalError()) {
+            LOGE("Terminal Vulkan error (device lost) during Windows endFrame; quitting");
+            app.quit = true;
+            return;
+        }
         app.swapchainDirty = true;
+    }
 
     if (app.frameIndex == 0)
         LOGI("First frame dispatched successfully");

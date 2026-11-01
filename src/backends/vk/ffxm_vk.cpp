@@ -29,6 +29,7 @@
 #include <string.h>
 #include <math.h>
 #include <array>
+#include <vector>
 #include <ffxm_hash.h>
 #include <wchar.h>
 
@@ -1914,6 +1915,9 @@ FfxmErrorCode RegisterResourceVK(
     // Failure to find the pre-existing resource at the expected location will force a search until the resource is found.
     // If it is not found, a new entry will be created
     FFXM_ASSERT(effectContext.nextDynamicResource > effectContext.nextStaticResource);
+    if (effectContext.nextDynamicResource <= effectContext.nextStaticResource) {
+        return FFXM_ERROR_OUT_OF_RANGE;
+    }
     outFfxmResourceInternal->internalIndex = effectContext.nextDynamicResource--;
 
     //bool setupDynamicResource = false;
@@ -2022,8 +2026,18 @@ FfxmErrorCode RegisterResourceVK(
         imageViewCreateInfo.subresourceRange.baseArrayLayer = 0;
         imageViewCreateInfo.subresourceRange.layerCount = VK_REMAINING_ARRAY_LAYERS;
 
+        const FfxmUInt32 minAllowedDynamicView = (effectContext.frameIndex == 0)
+            ? effectContext.nextStaticResourceView
+            : getDynamicResourceViewsStartIndex(effectContextId, effectContext.frameIndex - 1);
+
         // create an image view containing all mip levels for use as an srv
-        FFXM_ASSERT(effectContext.nextDynamicResourceView[effectContext.frameIndex] > ((effectContext.frameIndex == 0) ? effectContext.nextStaticResourceView : getDynamicResourceViewsStartIndex(effectContextId, effectContext.frameIndex - 1)));
+        FFXM_ASSERT(effectContext.nextDynamicResourceView[effectContext.frameIndex] > minAllowedDynamicView);
+        if (effectContext.nextDynamicResourceView[effectContext.frameIndex] <= minAllowedDynamicView) {
+            abortDynamicResourceRegistration(backendContext, effectContextId);
+            backendResource->srvViewIndex = -1;
+            backendResource->uavViewIndex = -1;
+            return FFXM_ERROR_OUT_OF_RANGE;
+        }
         backendResource->srvViewIndex = effectContext.nextDynamicResourceView[effectContext.frameIndex]--;
         backendContext->pResourceViews[backendResource->srvViewIndex].imageView = VK_NULL_HANDLE;
 
@@ -2045,7 +2059,16 @@ FfxmErrorCode RegisterResourceVK(
         if (backendResource->resourceDescription.usage & FFXM_RESOURCE_USAGE_UAV)
         {
             const int32_t uavResourceViewCount = backendResource->resourceDescription.mipCount;
-            FFXM_ASSERT(effectContext.nextDynamicResourceView[effectContext.frameIndex] - uavResourceViewCount + 1 > ((effectContext.frameIndex == 0) ? effectContext.nextStaticResourceView : getDynamicResourceViewsStartIndex(effectContextId, effectContext.frameIndex - 1)));
+            FFXM_ASSERT(effectContext.nextDynamicResourceView[effectContext.frameIndex] >= (FfxmUInt32)uavResourceViewCount &&
+                        (effectContext.nextDynamicResourceView[effectContext.frameIndex] - uavResourceViewCount + 1) > minAllowedDynamicView);
+            if (effectContext.nextDynamicResourceView[effectContext.frameIndex] < (FfxmUInt32)uavResourceViewCount ||
+                (effectContext.nextDynamicResourceView[effectContext.frameIndex] - (FfxmUInt32)uavResourceViewCount + 1) <= minAllowedDynamicView)
+            {
+                abortDynamicResourceRegistration(backendContext, effectContextId);
+                backendResource->srvViewIndex = -1;
+                backendResource->uavViewIndex = -1;
+                return FFXM_ERROR_OUT_OF_RANGE;
+            }
             backendResource->uavViewIndex = effectContext.nextDynamicResourceView[effectContext.frameIndex] - uavResourceViewCount + 1;
             backendResource->uavViewCount = uavResourceViewCount;
 
@@ -2060,7 +2083,12 @@ FfxmErrorCode RegisterResourceVK(
 
                 if (backendContext->vkFunctionTable.vkCreateImageView(backendContext->device, &imageViewCreateInfo, NULL, &backendContext->pResourceViews[backendResource->uavViewIndex + mip].imageView) != VK_SUCCESS) {
                     backendContext->pResourceViews[backendResource->uavViewIndex + mip].imageView = VK_NULL_HANDLE;
-                    effectContext.nextDynamicResourceView[effectContext.frameIndex] = backendResource->uavViewIndex - 1;
+                    for (FfxmUInt32 m = 0; m < mip; ++m) {
+                        if (backendContext->pResourceViews[backendResource->uavViewIndex + m].imageView != VK_NULL_HANDLE) {
+                            backendContext->vkFunctionTable.vkDestroyImageView(backendContext->device, backendContext->pResourceViews[backendResource->uavViewIndex + m].imageView, VK_NULL_HANDLE);
+                            backendContext->pResourceViews[backendResource->uavViewIndex + m].imageView = VK_NULL_HANDLE;
+                        }
+                    }
                     abortDynamicResourceRegistration(backendContext, effectContextId);
                     backendResource->srvViewIndex = -1;
                     backendResource->uavViewIndex = -1;
@@ -2249,12 +2277,48 @@ FfxmErrorCode CreateComputePipelineVK(FfxmInterface* backendInterface,
     FfxmShaderBlob shaderBlob = { };
     ffxmGetPermutationBlobByIndex(effect, pass, permutationOptions, &shaderBlob);
     FFXM_ASSERT(shaderBlob.data && shaderBlob.size);
+    if (!shaderBlob.data || !shaderBlob.size) {
+        return FFXM_ERROR_INVALID_ARGUMENT;
+    }
 
     //////////////////////////////////////////////////////////////////////////
     // One root signature (or pipeline layout) per pipeline
     FFXM_ASSERT_MESSAGE(effectContext.nextPipelineLayout < (effectContextId * FFXM_MAX_PASS_COUNT) + FFXM_MAX_PASS_COUNT, "ffxmInterface: Vulkan: Ran out of pipeline layouts. Please increase FFXM_MAX_PASS_COUNT");
-    BackendContext_VK::PipelineLayout* pPipelineLayout = &backendContext->pPipelineLayouts[effectContext.nextPipelineLayout++];
-    memset(pPipelineLayout->samplers, 0, sizeof(pPipelineLayout->samplers));
+    if (effectContext.nextPipelineLayout >= (effectContextId * FFXM_MAX_PASS_COUNT) + FFXM_MAX_PASS_COUNT) {
+        return FFXM_ERROR_OUT_OF_RANGE;
+    }
+    const FfxmUInt32 allocatedPipelineLayoutIndex = effectContext.nextPipelineLayout++;
+    BackendContext_VK::PipelineLayout* pPipelineLayout = &backendContext->pPipelineLayouts[allocatedPipelineLayoutIndex];
+    memset(pPipelineLayout, 0, sizeof(BackendContext_VK::PipelineLayout));
+
+    auto cleanupPartialComputePipeline = [&](VkShaderModule moduleToClean) {
+        if (moduleToClean != VK_NULL_HANDLE) {
+            backendContext->vkFunctionTable.vkDestroyShaderModule(backendContext->device, moduleToClean, nullptr);
+        }
+        if (pPipelineLayout->pipelineLayout != VK_NULL_HANDLE) {
+            backendContext->vkFunctionTable.vkDestroyPipelineLayout(backendContext->device, pPipelineLayout->pipelineLayout, VK_NULL_HANDLE);
+            pPipelineLayout->pipelineLayout = VK_NULL_HANDLE;
+        }
+        for (FfxmUInt32 i = 0; i < MAX_DESCRIPTOR_SETS; i++) {
+            if (pPipelineLayout->descriptorSetLayout[i] != VK_NULL_HANDLE) {
+                backendContext->vkFunctionTable.vkDestroyDescriptorSetLayout(backendContext->device, pPipelineLayout->descriptorSetLayout[i], VK_NULL_HANDLE);
+                pPipelineLayout->descriptorSetLayout[i] = VK_NULL_HANDLE;
+            }
+        }
+        for (FfxmUInt32 i = 0; i < FFXM_MAX_SAMPLERS; ++i) {
+            if (pPipelineLayout->samplers[i] != VK_NULL_HANDLE) {
+                backendContext->vkFunctionTable.vkDestroySampler(backendContext->device, pPipelineLayout->samplers[i], VK_NULL_HANDLE);
+                pPipelineLayout->samplers[i] = VK_NULL_HANDLE;
+            }
+        }
+        if (effectContext.nextPipelineLayout > allocatedPipelineLayoutIndex) {
+            effectContext.nextPipelineLayout = allocatedPipelineLayoutIndex;
+        }
+        memset(pPipelineLayout, 0, sizeof(BackendContext_VK::PipelineLayout));
+        if (outPipeline) {
+            memset(outPipeline, 0, sizeof(FfxmPipelineState));
+        }
+    };
 
     // Start by creating samplers
     FFXM_ASSERT(pipelineDescription->samplerCount <= FFXM_MAX_SAMPLERS);
@@ -2310,6 +2374,7 @@ FfxmErrorCode CreateComputePipelineVK(FfxmInterface* backendInterface,
                 if (curBlobSamplerIdx < FFXM_MAX_SAMPLERS)
                 {
                     if (backendContext->vkFunctionTable.vkCreateSampler(backendContext->device, &createInfo, nullptr, &pPipelineLayout->samplers[curBlobSamplerIdx]) != VK_SUCCESS) {
+                        cleanupPartialComputePipeline(VK_NULL_HANDLE);
                         return FFXM_ERROR_BACKEND_API_ERROR;
                     }
                 }
@@ -2388,6 +2453,7 @@ FfxmErrorCode CreateComputePipelineVK(FfxmInterface* backendInterface,
             layoutInfo.pBindings = layoutBindings[setIndex];
 
             if (backendContext->vkFunctionTable.vkCreateDescriptorSetLayout(backendContext->device, &layoutInfo, nullptr, &pPipelineLayout->descriptorSetLayout[setIndex]) != VK_SUCCESS) {
+                cleanupPartialComputePipeline(VK_NULL_HANDLE);
                 return FFXM_ERROR_BACKEND_API_ERROR;
             }
             numDescriptorSets++;
@@ -2417,6 +2483,7 @@ FfxmErrorCode CreateComputePipelineVK(FfxmInterface* backendInterface,
     pipelineLayoutInfo.pPushConstantRanges = nullptr;
 
     if (backendContext->vkFunctionTable.vkCreatePipelineLayout(backendContext->device, &pipelineLayoutInfo, nullptr, &pPipelineLayout->pipelineLayout) != VK_SUCCESS) {
+        cleanupPartialComputePipeline(VK_NULL_HANDLE);
         return FFXM_ERROR_BACKEND_API_ERROR;
     }
 
@@ -2502,6 +2569,7 @@ FfxmErrorCode CreateComputePipelineVK(FfxmInterface* backendInterface,
     shaderModuleCreateInfo.codeSize = shaderBlob.size;
 
     if (backendContext->vkFunctionTable.vkCreateShaderModule(backendContext->device, &shaderModuleCreateInfo, nullptr, &shaderModule) != VK_SUCCESS) {
+        cleanupPartialComputePipeline(VK_NULL_HANDLE);
         return FFXM_ERROR_BACKEND_API_ERROR;
     }
 
@@ -2531,6 +2599,7 @@ FfxmErrorCode CreateComputePipelineVK(FfxmInterface* backendInterface,
 
     VkPipeline computePipeline = VK_NULL_HANDLE;
     if (backendContext->vkFunctionTable.vkCreateComputePipelines(backendContext->device, VK_NULL_HANDLE, 1, &pipelineCreateInfo, nullptr, &computePipeline) != VK_SUCCESS) {
+        cleanupPartialComputePipeline(shaderModule);
         return FFXM_ERROR_BACKEND_API_ERROR;
     }
 
@@ -2563,12 +2632,53 @@ FfxmErrorCode CreateGraphicsPipelineVK(FfxmInterface* backendInterface,
     ffxmGetPermutationBlobByIndex(effect, pass, permutationOptions, &shaderBlob, &vertShaderBlob);
     FFXM_ASSERT(shaderBlob.data && shaderBlob.size);
     FFXM_ASSERT(vertShaderBlob.data && vertShaderBlob.size);
+    if (!shaderBlob.data || !shaderBlob.size || !vertShaderBlob.data || !vertShaderBlob.size) {
+        return FFXM_ERROR_INVALID_ARGUMENT;
+    }
 
     //////////////////////////////////////////////////////////////////////////
     // One root signature (or pipeline layout) per pipeline
     FFXM_ASSERT_MESSAGE(effectContext.nextPipelineLayout < (effectContextId * FFXM_MAX_PASS_COUNT) + FFXM_MAX_PASS_COUNT, "ffxmInterface: Vulkan: Ran out of pipeline layouts. Please increase FFXM_MAX_PASS_COUNT");
-    BackendContext_VK::PipelineLayout* pPipelineLayout = &backendContext->pPipelineLayouts[effectContext.nextPipelineLayout++];
-    memset(pPipelineLayout->samplers, 0, sizeof(pPipelineLayout->samplers));
+    if (effectContext.nextPipelineLayout >= (effectContextId * FFXM_MAX_PASS_COUNT) + FFXM_MAX_PASS_COUNT) {
+        return FFXM_ERROR_OUT_OF_RANGE;
+    }
+    const FfxmUInt32 allocatedPipelineLayoutIndex = effectContext.nextPipelineLayout++;
+    BackendContext_VK::PipelineLayout* pPipelineLayout = &backendContext->pPipelineLayouts[allocatedPipelineLayoutIndex];
+    memset(pPipelineLayout, 0, sizeof(BackendContext_VK::PipelineLayout));
+
+    auto cleanupPartialGraphicsPipeline = [&]() {
+        if (pPipelineLayout->fragShaderModule != VK_NULL_HANDLE) {
+            backendContext->vkFunctionTable.vkDestroyShaderModule(backendContext->device, pPipelineLayout->fragShaderModule, nullptr);
+            pPipelineLayout->fragShaderModule = VK_NULL_HANDLE;
+        }
+        if (pPipelineLayout->vertShaderModule != VK_NULL_HANDLE) {
+            backendContext->vkFunctionTable.vkDestroyShaderModule(backendContext->device, pPipelineLayout->vertShaderModule, nullptr);
+            pPipelineLayout->vertShaderModule = VK_NULL_HANDLE;
+        }
+        if (pPipelineLayout->pipelineLayout != VK_NULL_HANDLE) {
+            backendContext->vkFunctionTable.vkDestroyPipelineLayout(backendContext->device, pPipelineLayout->pipelineLayout, VK_NULL_HANDLE);
+            pPipelineLayout->pipelineLayout = VK_NULL_HANDLE;
+        }
+        for (FfxmUInt32 i = 0; i < MAX_DESCRIPTOR_SETS; i++) {
+            if (pPipelineLayout->descriptorSetLayout[i] != VK_NULL_HANDLE) {
+                backendContext->vkFunctionTable.vkDestroyDescriptorSetLayout(backendContext->device, pPipelineLayout->descriptorSetLayout[i], VK_NULL_HANDLE);
+                pPipelineLayout->descriptorSetLayout[i] = VK_NULL_HANDLE;
+            }
+        }
+        for (FfxmUInt32 i = 0; i < FFXM_MAX_SAMPLERS; ++i) {
+            if (pPipelineLayout->samplers[i] != VK_NULL_HANDLE) {
+                backendContext->vkFunctionTable.vkDestroySampler(backendContext->device, pPipelineLayout->samplers[i], VK_NULL_HANDLE);
+                pPipelineLayout->samplers[i] = VK_NULL_HANDLE;
+            }
+        }
+        if (effectContext.nextPipelineLayout > allocatedPipelineLayoutIndex) {
+            effectContext.nextPipelineLayout = allocatedPipelineLayoutIndex;
+        }
+        memset(pPipelineLayout, 0, sizeof(BackendContext_VK::PipelineLayout));
+        if (outPipeline) {
+            memset(outPipeline, 0, sizeof(FfxmPipelineState));
+        }
+    };
 
     // Start by creating samplers
     FFXM_ASSERT(pipelineDescription->samplerCount <= FFXM_MAX_SAMPLERS);
@@ -2624,6 +2734,7 @@ FfxmErrorCode CreateGraphicsPipelineVK(FfxmInterface* backendInterface,
                 if (curBlobSamplerIdx < FFXM_MAX_SAMPLERS)
                 {
                     if (backendContext->vkFunctionTable.vkCreateSampler(backendContext->device, &createInfo, nullptr, &pPipelineLayout->samplers[curBlobSamplerIdx]) != VK_SUCCESS) {
+                        cleanupPartialGraphicsPipeline();
                         return FFXM_ERROR_BACKEND_API_ERROR;
                     }
                 }
@@ -2703,6 +2814,7 @@ FfxmErrorCode CreateGraphicsPipelineVK(FfxmInterface* backendInterface,
             layoutInfo.pBindings = layoutBindings[setIndex];
 
             if (backendContext->vkFunctionTable.vkCreateDescriptorSetLayout(backendContext->device, &layoutInfo, nullptr, &pPipelineLayout->descriptorSetLayout[setIndex]) != VK_SUCCESS) {
+                cleanupPartialGraphicsPipeline();
                 return FFXM_ERROR_BACKEND_API_ERROR;
             }
             numDescriptorSets++;
@@ -2732,6 +2844,7 @@ FfxmErrorCode CreateGraphicsPipelineVK(FfxmInterface* backendInterface,
     pipelineLayoutInfo.pPushConstantRanges = nullptr;
 
     if (backendContext->vkFunctionTable.vkCreatePipelineLayout(backendContext->device, &pipelineLayoutInfo, nullptr, &pPipelineLayout->pipelineLayout) != VK_SUCCESS) {
+        cleanupPartialGraphicsPipeline();
         return FFXM_ERROR_BACKEND_API_ERROR;
     }
 
@@ -2822,6 +2935,7 @@ FfxmErrorCode CreateGraphicsPipelineVK(FfxmInterface* backendInterface,
     shaderModuleCreateInfo.codeSize = shaderBlob.size;
 
     if (backendContext->vkFunctionTable.vkCreateShaderModule(backendContext->device, &shaderModuleCreateInfo, nullptr, &pPipelineLayout->fragShaderModule) != VK_SUCCESS) {
+        cleanupPartialGraphicsPipeline();
         return FFXM_ERROR_BACKEND_API_ERROR;
     }
 
@@ -2831,6 +2945,7 @@ FfxmErrorCode CreateGraphicsPipelineVK(FfxmInterface* backendInterface,
     shaderModuleCreateInfo.codeSize = vertShaderBlob.size;
 
     if (backendContext->vkFunctionTable.vkCreateShaderModule(backendContext->device, &shaderModuleCreateInfo, nullptr, &pPipelineLayout->vertShaderModule) != VK_SUCCESS) {
+        cleanupPartialGraphicsPipeline();
         return FFXM_ERROR_BACKEND_API_ERROR;
     }
 
@@ -3370,7 +3485,7 @@ static FfxmErrorCode executeGpuJobCompute(BackendContext_VK* backendContext, Ffx
         {
             // source: UAV of resource to bind
             const int32_t resourceIndex = job->computeJobDescriptor.uavTextures[currentPipelineUavIndex].internalIndex;
-            FFXM_RETURN_ON_ERROR(resourceIndex >= 0 && resourceIndex < FFXM_MAX_RESOURCE_COUNT, FFXM_ERROR_OUT_OF_RANGE);
+            FFXM_RETURN_ON_ERROR(resourceIndex >= 0 && (FfxmUInt32)resourceIndex < s_MaxEffectContexts * FFXM_MAX_RESOURCE_COUNT, FFXM_ERROR_OUT_OF_RANGE);
             const FfxmUInt32 uavViewIndex = backendContext->pResources[resourceIndex].uavViewIndex + job->computeJobDescriptor.uavTextureMips[imageDescriptorIndex];
 
             writeDescriptorSets[descriptorWriteIndex] = {};
@@ -3395,7 +3510,7 @@ static FfxmErrorCode executeGpuJobCompute(BackendContext_VK* backendContext, Ffx
 
         // source: UAV of buffer to bind
         const int32_t resourceIndex = job->computeJobDescriptor.uavBuffers[currentPipelineUavIndex].internalIndex;
-        FFXM_RETURN_ON_ERROR(resourceIndex >= 0 && resourceIndex < FFXM_MAX_RESOURCE_COUNT, FFXM_ERROR_OUT_OF_RANGE);
+        FFXM_RETURN_ON_ERROR(resourceIndex >= 0 && (FfxmUInt32)resourceIndex < s_MaxEffectContexts * FFXM_MAX_RESOURCE_COUNT, FFXM_ERROR_OUT_OF_RANGE);
 
         // where to bind it
         const FfxmUInt32 currentUavResourceIndex = job->computeJobDescriptor.pipeline.uavBufferBindings[currentPipelineUavIndex].slotIndex;
@@ -3437,7 +3552,7 @@ static FfxmErrorCode executeGpuJobCompute(BackendContext_VK* backendContext, Ffx
             addBarrier(backendContext, &job->computeJobDescriptor.srvTextures[currentPipelineSrvIndex + i], FFXM_RESOURCE_STATE_COMPUTE_READ);
 
             const int32_t resourceIndex = job->computeJobDescriptor.srvTextures[currentPipelineSrvIndex + i].internalIndex;
-            FFXM_RETURN_ON_ERROR(resourceIndex >= 0 && resourceIndex < FFXM_MAX_RESOURCE_COUNT, FFXM_ERROR_OUT_OF_RANGE);
+            FFXM_RETURN_ON_ERROR(resourceIndex >= 0 && (FfxmUInt32)resourceIndex < s_MaxEffectContexts * FFXM_MAX_RESOURCE_COUNT, FFXM_ERROR_OUT_OF_RANGE);
             const FfxmUInt32 srvViewIndex  = backendContext->pResources[resourceIndex].srvViewIndex;
 
             imageDescriptorInfos[imageDescriptorIndex]             = {};
@@ -3454,7 +3569,7 @@ static FfxmErrorCode executeGpuJobCompute(BackendContext_VK* backendContext, Ffx
 
         // source: SRV of buffer to bind
         const int32_t resourceIndex = job->computeJobDescriptor.srvBuffers[currentPipelineSrvIndex].internalIndex;
-        FFXM_RETURN_ON_ERROR(resourceIndex >= 0 && resourceIndex < FFXM_MAX_RESOURCE_COUNT, FFXM_ERROR_OUT_OF_RANGE);
+        FFXM_RETURN_ON_ERROR(resourceIndex >= 0 && (FfxmUInt32)resourceIndex < s_MaxEffectContexts * FFXM_MAX_RESOURCE_COUNT, FFXM_ERROR_OUT_OF_RANGE);
 
         // where to bind it
         const FfxmUInt32 currentSrvResourceIndex = job->computeJobDescriptor.pipeline.srvBufferBindings[currentPipelineSrvIndex].slotIndex;
@@ -3609,6 +3724,7 @@ static FfxmErrorCode executeGpuJobFragment(BackendContext_VK* backendContext, Ff
         {
             // source: UAV of resource to bind
             const FfxmUInt32 resourceIndex = job->fragmentJobDescription.uavTextures[currentPipelineUavIndex].internalIndex;
+            FFXM_RETURN_ON_ERROR(resourceIndex < s_MaxEffectContexts * FFXM_MAX_RESOURCE_COUNT, FFXM_ERROR_OUT_OF_RANGE);
             const FfxmUInt32 uavViewIndex = backendContext->pResources[resourceIndex].uavViewIndex + job->fragmentJobDescription.uavTextureMips[imageDescriptorIndex];
 
             writeDescriptorSets[descriptorWriteIndex] = {};
@@ -3648,6 +3764,7 @@ static FfxmErrorCode executeGpuJobFragment(BackendContext_VK* backendContext, Ff
             addBarrier(backendContext, &job->fragmentJobDescription.srvTextures[currentPipelineSrvIndex + i], FFXM_RESOURCE_STATE_PIXEL_READ);
 
             const FfxmUInt32 resourceIndex = job->fragmentJobDescription.srvTextures[currentPipelineSrvIndex + i].internalIndex;
+            FFXM_RETURN_ON_ERROR(resourceIndex < s_MaxEffectContexts * FFXM_MAX_RESOURCE_COUNT, FFXM_ERROR_OUT_OF_RANGE);
             const FfxmUInt32 srvViewIndex  = backendContext->pResources[resourceIndex].srvViewIndex;
 
             imageDescriptorInfos[imageDescriptorIndex]             = {};
@@ -3777,8 +3894,8 @@ static FfxmErrorCode executeGpuJobCopy(BackendContext_VK* backendContext, FfxmGp
 {
     int32_t srcIdx = job->copyJobDescriptor.src.internalIndex;
     int32_t dstIdx = job->copyJobDescriptor.dst.internalIndex;
-    FFXM_RETURN_ON_ERROR(srcIdx >= 0 && srcIdx < FFXM_MAX_RESOURCE_COUNT, FFXM_ERROR_OUT_OF_RANGE);
-    FFXM_RETURN_ON_ERROR(dstIdx >= 0 && dstIdx < FFXM_MAX_RESOURCE_COUNT, FFXM_ERROR_OUT_OF_RANGE);
+    FFXM_RETURN_ON_ERROR(srcIdx >= 0 && (FfxmUInt32)srcIdx < s_MaxEffectContexts * FFXM_MAX_RESOURCE_COUNT, FFXM_ERROR_OUT_OF_RANGE);
+    FFXM_RETURN_ON_ERROR(dstIdx >= 0 && (FfxmUInt32)dstIdx < s_MaxEffectContexts * FFXM_MAX_RESOURCE_COUNT, FFXM_ERROR_OUT_OF_RANGE);
 
     BackendContext_VK::Resource ffxmResourceSrc = backendContext->pResources[job->copyJobDescriptor.src.internalIndex];
     BackendContext_VK::Resource ffxmResourceDst = backendContext->pResources[job->copyJobDescriptor.dst.internalIndex];
@@ -3894,7 +4011,7 @@ static FfxmErrorCode executeGpuJobCopy(BackendContext_VK* backendContext, FfxmGp
 static FfxmErrorCode executeGpuJobClearFloat(BackendContext_VK* backendContext, FfxmGpuJobDescription* job, VkCommandBuffer vkCommandBuffer)
 {
     int32_t idx = job->clearJobDescriptor.target.internalIndex;
-    FFXM_RETURN_ON_ERROR(idx >= 0 && idx < FFXM_MAX_RESOURCE_COUNT, FFXM_ERROR_OUT_OF_RANGE);
+    FFXM_RETURN_ON_ERROR(idx >= 0 && (FfxmUInt32)idx < s_MaxEffectContexts * FFXM_MAX_RESOURCE_COUNT, FFXM_ERROR_OUT_OF_RANGE);
     BackendContext_VK::Resource ffxmResource = backendContext->pResources[idx];
 
     if (ffxmResource.resourceDescription.type == FFXM_RESOURCE_TYPE_BUFFER)
@@ -3948,17 +4065,10 @@ FFXM_API FfxmErrorCode ExecuteGpuJobsVK(FfxmInterface* backendInterface, FfxmCom
     BackendContext_VK* backendContext = (BackendContext_VK*)backendInterface->scratchBuffer;
     FFXM_RETURN_ON_ERROR(backendContext != NULL, FFXM_ERROR_INVALID_POINTER);
 
-    if (backendContext->gpuJobCount > 0 && commandList == NULL)
-    {
-        backendContext->gpuJobCount = 0;
-        return FFXM_ERROR_INVALID_POINTER;
-    }
-
-    FfxmErrorCode firstErrorCode = FFXM_OK;
     const FfxmUInt32 initialRingBufferBase = backendContext->ringBufferBase;
 
     // Identify which effect contexts have jobs participating in this batch
-    bool participatingContexts[64] = {};
+    std::vector<bool> participatingContexts(s_MaxEffectContexts, false);
     for (FfxmUInt32 i = 0; i < backendContext->gpuJobCount; ++i)
     {
         const FfxmGpuJobDescription& job = backendContext->pGpuJobs[i];
@@ -3983,12 +4093,54 @@ FFXM_API FfxmErrorCode ExecuteGpuJobsVK(FfxmInterface* backendInterface, FfxmCom
             }
             break;
         }
+        default:
+            break;
         }
-        if (ctxId < s_MaxEffectContexts && ctxId < 64)
+        if (ctxId < s_MaxEffectContexts)
         {
             participatingContexts[ctxId] = true;
         }
     }
+
+    auto rollbackParticipatingContexts = [&]() {
+        backendContext->ringBufferBase = initialRingBufferBase;
+
+        for (FfxmUInt32 c = 0; c < s_MaxEffectContexts; ++c)
+        {
+            if (!participatingContexts[c])
+                continue;
+
+            const FfxmUInt32 rStart = c * FFXM_MAX_RESOURCE_COUNT;
+            const FfxmUInt32 rEnd = rStart + FFXM_MAX_RESOURCE_COUNT;
+            for (FfxmUInt32 r = rStart; r < rEnd; ++r) {
+                backendContext->pResources[r].currentState = backendContext->pResources[r].committedState;
+                backendContext->pResources[r].undefined = backendContext->pResources[r].committedUndefined;
+            }
+
+            const FfxmUInt32 plStart = c * FFXM_MAX_PASS_COUNT;
+            const FfxmUInt32 plEnd = backendContext->pEffectContexts[c].nextPipelineLayout;
+            for (FfxmUInt32 pl = plStart; pl < plEnd; ++pl) {
+                backendContext->pPipelineLayouts[pl].descriptorSetIndex = backendContext->pPipelineLayouts[pl].committedDescriptorSetIndex;
+            }
+
+            backendContext->pEffectContexts[c].isEndOfUpscaler = false;
+            backendContext->pEffectContexts[c].executionSucceeded = false;
+        }
+
+        backendContext->scheduledImageBarrierCount = 0;
+        backendContext->scheduledBufferBarrierCount = 0;
+        backendContext->srcStageMask = 0;
+        backendContext->dstStageMask = 0;
+        backendContext->gpuJobCount = 0;
+    };
+
+    if (backendContext->gpuJobCount > 0 && commandList == NULL)
+    {
+        rollbackParticipatingContexts();
+        return FFXM_ERROR_INVALID_POINTER;
+    }
+
+    FfxmErrorCode firstErrorCode = FFXM_OK;
 
     // execute all renderjobs
     for (FfxmUInt32 i = 0; i < backendContext->gpuJobCount; ++i)
@@ -4047,35 +4199,7 @@ FFXM_API FfxmErrorCode ExecuteGpuJobsVK(FfxmInterface* backendInterface, FfxmCom
 
     if (firstErrorCode != FFXM_OK)
     {
-        // Transactional Rollback for participating contexts:
-        backendContext->ringBufferBase = initialRingBufferBase;
-
-        for (FfxmUInt32 c = 0; c < s_MaxEffectContexts; ++c)
-        {
-            if (!participatingContexts[c])
-                continue;
-
-            const FfxmUInt32 rStart = c * FFXM_MAX_RESOURCE_COUNT;
-            const FfxmUInt32 rEnd = rStart + FFXM_MAX_RESOURCE_COUNT;
-            for (FfxmUInt32 r = rStart; r < rEnd; ++r) {
-                backendContext->pResources[r].currentState = backendContext->pResources[r].committedState;
-                backendContext->pResources[r].undefined = backendContext->pResources[r].committedUndefined;
-            }
-
-            const FfxmUInt32 plStart = c * FFXM_MAX_PASS_COUNT;
-            const FfxmUInt32 plEnd = backendContext->pEffectContexts[c].nextPipelineLayout;
-            for (FfxmUInt32 pl = plStart; pl < plEnd; ++pl) {
-                backendContext->pPipelineLayouts[pl].descriptorSetIndex = backendContext->pPipelineLayouts[pl].committedDescriptorSetIndex;
-            }
-
-            backendContext->pEffectContexts[c].isEndOfUpscaler = false;
-            backendContext->pEffectContexts[c].executionSucceeded = false;
-        }
-
-        backendContext->scheduledImageBarrierCount = 0;
-        backendContext->scheduledBufferBarrierCount = 0;
-        backendContext->srcStageMask = 0;
-        backendContext->dstStageMask = 0;
+        rollbackParticipatingContexts();
     }
     else
     {
@@ -4100,9 +4224,8 @@ FFXM_API FfxmErrorCode ExecuteGpuJobsVK(FfxmInterface* backendInterface, FfxmCom
 
             backendContext->pEffectContexts[c].executionSucceeded = true;
         }
+        backendContext->gpuJobCount = 0;
     }
-
-    backendContext->gpuJobCount = 0;
 
     return firstErrorCode;
 }
@@ -4320,6 +4443,30 @@ FFXM_API void ffxmTestResetBackendRefCountVK()
     s_TestJobExecutionHook = nullptr;
     s_TestCreateImageViewHook = nullptr;
     s_TestDestroyImageViewHook = nullptr;
+}
+
+FFXM_API void* ffxmTestGetPipelineLayoutVK(FfxmInterface* backendInterface, FfxmUInt32 pipelineIndex)
+{
+    BackendContext_VK* backendContext = reinterpret_cast<BackendContext_VK*>(backendInterface->scratchBuffer);
+    return &backendContext->pPipelineLayouts[pipelineIndex];
+}
+
+FFXM_API void ffxmTestConfigurePipelineLayoutVK(
+    FfxmInterface* backendInterface,
+    FfxmUInt32 pipelineIndex,
+    FfxmUInt32 effectContextId,
+    FfxmEffect effect,
+    FfxmPass pass,
+    const wchar_t* name)
+{
+    BackendContext_VK* backendContext = reinterpret_cast<BackendContext_VK*>(backendInterface->scratchBuffer);
+    BackendContext_VK::PipelineLayout& pl = backendContext->pPipelineLayouts[pipelineIndex];
+    pl.effectContextId = effectContextId;
+    pl.effect = effect;
+    pl.pass = pass;
+    if (name) {
+        wcscpy(pl.name, name);
+    }
 }
 #endif // FFXM_ENABLE_TEST_HOOKS
 

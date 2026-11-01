@@ -178,6 +178,14 @@ FFXM_API void ffxmTestSetResourceStateVK(
     FfxmUInt32 resourceIndex,
     FfxmResourceStates state,
     bool undefined);
+FFXM_API void* ffxmTestGetPipelineLayoutVK(FfxmInterface* backendInterface, FfxmUInt32 pipelineIndex);
+FFXM_API void ffxmTestConfigurePipelineLayoutVK(
+    FfxmInterface* backendInterface,
+    FfxmUInt32 pipelineIndex,
+    FfxmUInt32 effectContextId,
+    FfxmEffect effect,
+    FfxmPass pass,
+    const wchar_t* name);
 FFXM_API void ffxmTestResetBackendRefCountVK();
 #endif // FFXM_ENABLE_TEST_HOOKS
 

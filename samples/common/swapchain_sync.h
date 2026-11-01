@@ -122,53 +122,90 @@ public:
     {
         if (!device_) return false;
         if (fn_.vkDeviceWaitIdle) {
-            fn_.vkDeviceWaitIdle(device_);
+            VkResult idleRes = fn_.vkDeviceWaitIdle(device_);
+            if (idleRes != VK_SUCCESS) {
+                if (idleRes == VK_ERROR_DEVICE_LOST) {
+                    deviceLost_ = true;
+                }
+                return false;
+            }
         }
 
-        // 1. Recover Fence: must be in SIGNALED state for next beginFrame
-        if (fn_.vkCreateFence && fn_.vkDestroyFence) {
-            if (inFlightFences_[frameIndex] != VK_NULL_HANDLE) {
-                fn_.vkDestroyFence(device_, inFlightFences_[frameIndex], nullptr);
-                inFlightFences_[frameIndex] = VK_NULL_HANDLE;
-            }
+        // Transactional replacement of synchronization handles:
+        // 1. Create temporary replacement objects without destroying old objects.
+        VkFence newFence = VK_NULL_HANDLE;
+        if (fn_.vkCreateFence) {
             VkFenceCreateInfo fenceInfo = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
             fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-            if (fn_.vkCreateFence(device_, &fenceInfo, nullptr, &inFlightFences_[frameIndex]) != VK_SUCCESS) {
-                deviceLost_ = true;
+            VkResult res = fn_.vkCreateFence(device_, &fenceInfo, nullptr, &newFence);
+            if (res != VK_SUCCESS) {
+                if (res == VK_ERROR_DEVICE_LOST) {
+                    deviceLost_ = true;
+                }
                 return false;
-            }
-            if (pCallerInFlightFences_) {
-                pCallerInFlightFences_[frameIndex] = inFlightFences_[frameIndex];
             }
         }
 
-        // 2. Recover Acquire Semaphore: must be fresh and UNSIGNALED
-        if (fn_.vkCreateSemaphore && fn_.vkDestroySemaphore) {
-            if (acquireSemaphores_[frameIndex] != VK_NULL_HANDLE) {
-                fn_.vkDestroySemaphore(device_, acquireSemaphores_[frameIndex], nullptr);
-                acquireSemaphores_[frameIndex] = VK_NULL_HANDLE;
-            }
+        VkSemaphore newAcquireSem = VK_NULL_HANDLE;
+        VkSemaphore newReleaseSem = VK_NULL_HANDLE;
+        if (fn_.vkCreateSemaphore) {
             VkSemaphoreCreateInfo semInfo = {VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
-            if (fn_.vkCreateSemaphore(device_, &semInfo, nullptr, &acquireSemaphores_[frameIndex]) != VK_SUCCESS) {
-                deviceLost_ = true;
+            VkResult res = fn_.vkCreateSemaphore(device_, &semInfo, nullptr, &newAcquireSem);
+            if (res != VK_SUCCESS) {
+                if (res == VK_ERROR_DEVICE_LOST) {
+                    deviceLost_ = true;
+                }
+                if (newFence != VK_NULL_HANDLE && fn_.vkDestroyFence) {
+                    fn_.vkDestroyFence(device_, newFence, nullptr);
+                }
                 return false;
-            }
-            if (pCallerAcquireSemaphores_) {
-                pCallerAcquireSemaphores_[frameIndex] = acquireSemaphores_[frameIndex];
             }
 
-            // 3. Recover Release Semaphore: must be fresh and UNSIGNALED
-            if (releaseSemaphores_[frameIndex] != VK_NULL_HANDLE) {
-                fn_.vkDestroySemaphore(device_, releaseSemaphores_[frameIndex], nullptr);
-                releaseSemaphores_[frameIndex] = VK_NULL_HANDLE;
-            }
-            if (fn_.vkCreateSemaphore(device_, &semInfo, nullptr, &releaseSemaphores_[frameIndex]) != VK_SUCCESS) {
-                deviceLost_ = true;
+            res = fn_.vkCreateSemaphore(device_, &semInfo, nullptr, &newReleaseSem);
+            if (res != VK_SUCCESS) {
+                if (res == VK_ERROR_DEVICE_LOST) {
+                    deviceLost_ = true;
+                }
+                if (newAcquireSem != VK_NULL_HANDLE && fn_.vkDestroySemaphore) {
+                    fn_.vkDestroySemaphore(device_, newAcquireSem, nullptr);
+                }
+                if (newFence != VK_NULL_HANDLE && fn_.vkDestroyFence) {
+                    fn_.vkDestroyFence(device_, newFence, nullptr);
+                }
                 return false;
             }
-            if (pCallerReleaseSemaphores_) {
-                pCallerReleaseSemaphores_[frameIndex] = releaseSemaphores_[frameIndex];
-            }
+        }
+
+        // 2. All temporary objects created successfully.
+        // Save old handles for safe destruction.
+        VkFence oldFence = inFlightFences_[frameIndex];
+        VkSemaphore oldAcquire = acquireSemaphores_[frameIndex];
+        VkSemaphore oldRelease = releaseSemaphores_[frameIndex];
+
+        // Atomically replace internal and caller-owned handles in lockstep
+        inFlightFences_[frameIndex] = newFence;
+        acquireSemaphores_[frameIndex] = newAcquireSem;
+        releaseSemaphores_[frameIndex] = newReleaseSem;
+
+        if (pCallerInFlightFences_) {
+            pCallerInFlightFences_[frameIndex] = newFence;
+        }
+        if (pCallerAcquireSemaphores_) {
+            pCallerAcquireSemaphores_[frameIndex] = newAcquireSem;
+        }
+        if (pCallerReleaseSemaphores_) {
+            pCallerReleaseSemaphores_[frameIndex] = newReleaseSem;
+        }
+
+        // 3. Destroy old objects only now that new ones are in place.
+        if (oldFence != VK_NULL_HANDLE && fn_.vkDestroyFence) {
+            fn_.vkDestroyFence(device_, oldFence, nullptr);
+        }
+        if (oldAcquire != VK_NULL_HANDLE && fn_.vkDestroySemaphore) {
+            fn_.vkDestroySemaphore(device_, oldAcquire, nullptr);
+        }
+        if (oldRelease != VK_NULL_HANDLE && fn_.vkDestroySemaphore) {
+            fn_.vkDestroySemaphore(device_, oldRelease, nullptr);
         }
 
         fenceReset_ = false;
@@ -180,6 +217,10 @@ public:
 
     bool beginFrame(uint32_t* outImageIndex)
     {
+        if (isTerminalError()) {
+            return false;
+        }
+
         imageAcquired_ = false;
         acquireSemaphoreConsumed_ = false;
         submissionQueued_ = false;
@@ -249,6 +290,16 @@ public:
 
     bool endFrame(uint32_t imageIndex)
     {
+        if (isTerminalError()) {
+            return false;
+        }
+        if (!imageAcquired_) {
+            return false;
+        }
+        if (!swapchainImages_.empty() && imageIndex >= swapchainImages_.size()) {
+            return false;
+        }
+
         VkResult endCmdRes = fn_.vkEndCommandBuffer(commandBuffers_[frame_]);
         if (endCmdRes != VK_SUCCESS) {
             if (endCmdRes == VK_ERROR_DEVICE_LOST) {
@@ -309,15 +360,33 @@ public:
 
     bool abortFrame(uint32_t imageIndex)
     {
+        if (isTerminalError()) {
+            return false;
+        }
+        if (!imageAcquired_) {
+            return false;
+        }
+        if (!swapchainImages_.empty() && imageIndex >= swapchainImages_.size()) {
+            return false;
+        }
+
         // Discard any partial command recording by resetting the command buffer.
-        if (fn_.vkResetCommandBuffer(commandBuffers_[frame_], 0) != VK_SUCCESS) {
+        VkResult resetRes = fn_.vkResetCommandBuffer(commandBuffers_[frame_], 0);
+        if (resetRes != VK_SUCCESS) {
+            if (resetRes == VK_ERROR_DEVICE_LOST) {
+                deviceLost_ = true;
+            }
             resetFrameSyncObjects(frame_);
             return false;
         }
 
         VkCommandBufferBeginInfo beginInfo = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        if (fn_.vkBeginCommandBuffer(commandBuffers_[frame_], &beginInfo) != VK_SUCCESS) {
+        VkResult beginRes = fn_.vkBeginCommandBuffer(commandBuffers_[frame_], &beginInfo);
+        if (beginRes != VK_SUCCESS) {
+            if (beginRes == VK_ERROR_DEVICE_LOST) {
+                deviceLost_ = true;
+            }
             resetFrameSyncObjects(frame_);
             return false;
         }
@@ -361,7 +430,11 @@ public:
                                  VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
                                  0, 0, nullptr, 0, nullptr, 1, &toPresent);
 
-        if (fn_.vkEndCommandBuffer(commandBuffers_[frame_]) != VK_SUCCESS) {
+        VkResult endRes = fn_.vkEndCommandBuffer(commandBuffers_[frame_]);
+        if (endRes != VK_SUCCESS) {
+            if (endRes == VK_ERROR_DEVICE_LOST) {
+                deviceLost_ = true;
+            }
             resetFrameSyncObjects(frame_);
             return false;
         }
@@ -376,7 +449,11 @@ public:
         submit.pCommandBuffers      = &commandBuffers_[frame_];
         submit.signalSemaphoreCount = 1;
         submit.pSignalSemaphores    = &releaseSemaphores_[frame_];
-        if (fn_.vkQueueSubmit(queue_, 1, &submit, inFlightFences_[frame_]) != VK_SUCCESS) {
+        VkResult submitRes = fn_.vkQueueSubmit(queue_, 1, &submit, inFlightFences_[frame_]);
+        if (submitRes != VK_SUCCESS) {
+            if (submitRes == VK_ERROR_DEVICE_LOST) {
+                deviceLost_ = true;
+            }
             resetFrameSyncObjects(frame_);
             return false;
         }

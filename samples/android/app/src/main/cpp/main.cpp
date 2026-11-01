@@ -83,6 +83,10 @@ SwapchainRebuildResult rebuildSwapchainResources(App& app)
     if (!app.window) {
         return SwapchainRebuildResult::Minimized;
     }
+    if (app.ctx.sync().isTerminalError()) {
+        LOGE("Terminal Vulkan error (device lost); cannot rebuild Android swapchain");
+        return SwapchainRebuildResult::Failed;
+    }
 
     destroySizedResources(app);
     app.renderReady = false;
@@ -178,6 +182,12 @@ void drawFrame(App& app)
 
     uint32_t imageIndex = 0;
     if (!app.ctx.beginFrame(&imageIndex)) {
+        if (app.ctx.sync().isTerminalError()) {
+            LOGE("Terminal Vulkan error (device lost) during Android beginFrame; aborting rendering loop");
+            app.renderReady = false;
+            app.renderingTerminated = true;
+            return;
+        }
         app.swapchainDirty = true;
         return;
     }
@@ -209,6 +219,12 @@ void drawFrame(App& app)
     if (!dispatchOk) {
         LOGE("FSR 3.1.4 dispatch failed at frame %d; recovering via abortFrame", app.frameIndex);
         if (!app.ctx.abortFrame(imageIndex)) {
+            if (app.ctx.sync().isTerminalError()) {
+                LOGE("Terminal Vulkan error (device lost) during Android abortFrame; aborting rendering loop");
+                app.renderReady = false;
+                app.renderingTerminated = true;
+                return;
+            }
             app.swapchainDirty = true;
         }
         return;
@@ -218,6 +234,12 @@ void drawFrame(App& app)
                          app.ctx.swapchainExtent());
 
     if (!app.ctx.endFrame(imageIndex)) {
+        if (app.ctx.sync().isTerminalError()) {
+            LOGE("Terminal Vulkan error (device lost) during Android endFrame; aborting rendering loop");
+            app.renderReady = false;
+            app.renderingTerminated = true;
+            return;
+        }
         app.swapchainDirty = true;
     }
 

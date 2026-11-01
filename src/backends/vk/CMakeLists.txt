@@ -189,7 +189,9 @@ set_source_files_properties(${PRIVATE_SHADERS} PROPERTIES HEADER_FILE_ONLY TRUE)
 set_source_files_properties(${PUBLIC_SHADERS} PROPERTIES HEADER_FILE_ONLY TRUE)
 
 target_compile_definitions(Arm_ASR_backend PRIVATE FFXM_FSR)
-target_compile_definitions(Arm_ASR_backend PRIVATE FFXM_ENABLE_TEST_HOOKS=1)
+if(BUILD_TESTING)
+	target_compile_definitions(Arm_ASR_backend PRIVATE FFXM_ENABLE_TEST_HOOKS=1)
+endif()
 
 if(FFXM_USE_PREBUILT_SHADERS)
 
