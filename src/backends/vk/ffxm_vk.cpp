@@ -1487,12 +1487,12 @@ FfxmErrorCode DestroyBackendContextVK(FfxmInterface* backendInterface, FfxmUInt3
 
     // Delete any resources allocated by this context
     BackendContext_VK::EffectContext& effectContext = backendContext->pEffectContexts[effectContextId];
-	for(FfxmInt32 currentStaticResourceIndex = FfxmInt32(effectContextId * FFXM_MAX_RESOURCE_COUNT); currentStaticResourceIndex < effectContext.nextStaticResource; ++currentStaticResourceIndex)
+	for(FfxmUInt32 currentStaticResourceIndex = effectContextId * FFXM_MAX_RESOURCE_COUNT; currentStaticResourceIndex < effectContext.nextStaticResource; ++currentStaticResourceIndex)
 	{
 
         if (backendContext->pResources[currentStaticResourceIndex].imageResource != VK_NULL_HANDLE) {
             FFXM_ASSERT_MESSAGE(false, "ffxmInterface: Vulkan: SDK Resource was not destroyed prior to destroying the backend context. There is a resource leak.");
-            FfxmResourceInternal internalResource = { currentStaticResourceIndex };
+            FfxmResourceInternal internalResource = { (FfxmInt32)currentStaticResourceIndex };
             DestroyResourceVK(backendInterface, internalResource);
         }
     }

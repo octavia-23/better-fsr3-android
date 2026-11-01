@@ -9,6 +9,8 @@ if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
     project(Arm_ASR LANGUAGES CXX)
 endif()
 
+include(CTest)
+
 # Remove standalone VK backend.
 # On Android the standalone backend is the whole point of the port, so default it in.
 if(ANDROID)
@@ -131,7 +133,6 @@ endif()
 
 # ------------------------------------------------------
 # Tests
-include(CTest)
 if(BUILD_TESTING)
     add_executable(test_milestone2 tests/test_milestone2.cpp)
     target_link_libraries(test_milestone2 PRIVATE Arm_ASR_api)
