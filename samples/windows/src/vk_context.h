@@ -57,6 +57,7 @@ public:
     VkImage          swapchainImage(uint32_t i)     const { return swapchainImages_[i]; }
     VkImageView      swapchainImageView(uint32_t i) const { return swapchainImageViews_[i]; }
     uint32_t         swapchainImageCount()          const { return (uint32_t)swapchainImages_.size(); }
+    bool             swapchainSuboptimal()          const { return swapchainSuboptimal_; }
     const DeviceCapabilities& caps() const { return caps_; }
 
     uint32_t findMemoryType(uint32_t typeBits, VkMemoryPropertyFlags props) const;
@@ -95,6 +96,7 @@ private:
     VkSemaphore     releaseSemaphores_[kFramesInFlight] = {};
     VkFence         inFlightFences_[kFramesInFlight] = {};
     uint32_t        frame_ = 0;
+    bool            swapchainSuboptimal_ = false;
 
     DeviceCapabilities caps_;
 };

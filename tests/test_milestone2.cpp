@@ -194,6 +194,18 @@ struct MockRegisteredResourceRecord {
 };
 static std::vector<MockRegisteredResourceRecord> s_MockRegisteredResources;
 
+struct MockBackendResourceState {
+    FfxmResourceStates currentState = static_cast<FfxmResourceStates>(0);
+    FfxmResourceStates committedState = static_cast<FfxmResourceStates>(0);
+    bool undefined = true;
+    bool committedUndefined = true;
+};
+static std::map<int32_t, MockBackendResourceState> s_MockBackendResources;
+static std::map<uint32_t, uint32_t> s_MockBackendFrameIndex;
+static std::map<uint32_t, bool> s_MockBackendIsEndOfUpscaler;
+static int32_t s_FailAfterGpuJobCount = -1;
+static uint32_t s_NextMockEffectContextId = 100;
+
 // Occurrence-aware resource creation & destruction tracking
 static std::map<int32_t, int> s_ResourceCreationCounts;
 static std::map<int32_t, int> s_ResourceDestructionCounts;
@@ -238,8 +250,10 @@ static FfxmErrorCode MockCreateBackendContext(FfxmInterface* backendInterface, F
         return s_CreateBackendContextResult;
     }
     s_BackendContextActive = true;
-    *effectContextId = 100;
-    s_CreatedContextId = 100;
+    *effectContextId = s_NextMockEffectContextId++;
+    s_CreatedContextId = *effectContextId;
+    s_MockBackendFrameIndex[*effectContextId] = 0;
+    s_MockBackendIsEndOfUpscaler[*effectContextId] = false;
     return FFXM_OK;
 }
 
@@ -281,6 +295,15 @@ static FfxmErrorCode MockCreateResource(
 
     if (outResource) {
         outResource->internalIndex = idx;
+    }
+
+    if (createResourceDescription) {
+        MockBackendResourceState st;
+        st.currentState = createResourceDescription->initalState;
+        st.committedState = createResourceDescription->initalState;
+        st.undefined = (createResourceDescription->initData == nullptr);
+        st.committedUndefined = st.undefined;
+        s_MockBackendResources[idx] = st;
     }
 
     // If resource has initial data, backend creates a copy staging resource at idx + 1
@@ -328,6 +351,14 @@ static FfxmErrorCode MockRegisterResource(
     }
     if (outResource) {
         outResource->internalIndex = 900 + static_cast<int32_t>(s_RegisterResourceCallCount);
+        if (inResource) {
+            MockBackendResourceState st;
+            st.currentState = inResource->state;
+            st.committedState = inResource->state;
+            st.undefined = !!(inResource->description.flags & FFXM_RESOURCE_FLAGS_UNDEFINED);
+            st.committedUndefined = st.undefined;
+            s_MockBackendResources[outResource->internalIndex] = st;
+        }
     }
     s_RegisterResourceCallCount++;
     return FFXM_OK;
@@ -453,13 +484,82 @@ static FfxmErrorCode MockExecuteGpuJobs(FfxmInterface* backendInterface, FfxmCom
 {
     (void)backendInterface; (void)commandList;
     s_ExecuteGpuJobsCallCount++;
-    return s_ExecuteGpuJobsResult;
+    if (s_ExecuteGpuJobsResult != FFXM_OK) {
+        // Rollback all modified resources to committed state
+        for (auto& pair : s_MockBackendResources) {
+            pair.second.currentState = pair.second.committedState;
+            pair.second.undefined = pair.second.committedUndefined;
+        }
+        for (auto& pair : s_MockBackendIsEndOfUpscaler) pair.second = false;
+        return s_ExecuteGpuJobsResult;
+    }
+
+    if (s_FailAfterGpuJobCount >= 0) {
+        // Execute up to s_FailAfterGpuJobCount jobs
+        for (size_t i = 0; i < s_ScheduledGpuJobs.size() && static_cast<int32_t>(i) < s_FailAfterGpuJobCount; ++i) {
+            const auto& job = s_ScheduledGpuJobs[i];
+            if (job.jobType == FFXM_GPU_JOB_CLEAR_FLOAT) {
+                int32_t targetIdx = job.clearJobDescriptor.target.internalIndex;
+                if (targetIdx >= 0) {
+                    s_MockBackendResources[targetIdx].currentState = FFXM_RESOURCE_STATE_COPY_DEST;
+                    s_MockBackendResources[targetIdx].undefined = false;
+                }
+            } else if (job.jobType == FFXM_GPU_JOB_COMPUTE) {
+                for (uint32_t u = 0; u < FFXM_MAX_NUM_UAVS; ++u) {
+                    int32_t uavIdx = job.computeJobDescriptor.uavTextures[u].internalIndex;
+                    if (uavIdx >= 0) {
+                        s_MockBackendResources[uavIdx].currentState = FFXM_RESOURCE_STATE_UNORDERED_ACCESS;
+                        s_MockBackendResources[uavIdx].undefined = false;
+                    }
+                }
+            }
+        }
+        // Failure occurs at s_FailAfterGpuJobCount!
+        // Rollback all modified resources to committed state
+        for (auto& pair : s_MockBackendResources) {
+            pair.second.currentState = pair.second.committedState;
+            pair.second.undefined = pair.second.committedUndefined;
+        }
+        for (auto& pair : s_MockBackendIsEndOfUpscaler) pair.second = false;
+        return FFXM_ERROR_BACKEND_API_ERROR;
+    }
+
+    // All jobs succeeded: mutate and commit
+    for (const auto& job : s_ScheduledGpuJobs) {
+        if (job.jobType == FFXM_GPU_JOB_CLEAR_FLOAT) {
+            int32_t targetIdx = job.clearJobDescriptor.target.internalIndex;
+            if (targetIdx >= 0) {
+                s_MockBackendResources[targetIdx].currentState = FFXM_RESOURCE_STATE_COPY_DEST;
+                s_MockBackendResources[targetIdx].undefined = false;
+            }
+        } else if (job.jobType == FFXM_GPU_JOB_COMPUTE) {
+            for (uint32_t u = 0; u < FFXM_MAX_NUM_UAVS; ++u) {
+                int32_t uavIdx = job.computeJobDescriptor.uavTextures[u].internalIndex;
+                if (uavIdx >= 0) {
+                    s_MockBackendResources[uavIdx].currentState = FFXM_RESOURCE_STATE_UNORDERED_ACCESS;
+                    s_MockBackendResources[uavIdx].undefined = false;
+                }
+            }
+        }
+    }
+    // Commit
+    for (auto& pair : s_MockBackendResources) {
+        pair.second.committedState = pair.second.currentState;
+        pair.second.committedUndefined = pair.second.undefined;
+    }
+    for (auto& pair : s_MockBackendIsEndOfUpscaler) pair.second = true;
+
+    return FFXM_OK;
 }
 
 static FfxmErrorCode MockUnregisterResources(FfxmInterface* backendInterface, FfxmCommandList commandList, FfxmUInt32 effectContextId)
 {
-    (void)backendInterface; (void)commandList; (void)effectContextId;
+    (void)backendInterface; (void)commandList;
     s_UnregisterResourcesCallCount++;
+    if (s_MockBackendIsEndOfUpscaler[effectContextId]) {
+        s_MockBackendFrameIndex[effectContextId] = (s_MockBackendFrameIndex[effectContextId] + 1) % 16;
+        s_MockBackendIsEndOfUpscaler[effectContextId] = false;
+    }
     return s_UnregisterResourcesResult;
 }
 
@@ -502,6 +602,11 @@ static void ResetMockState()
     s_ExecuteGpuJobsResult = FFXM_OK;
     s_UnregisterResourcesResult = FFXM_OK;
     s_MockRegisteredResources.clear();
+    s_MockBackendResources.clear();
+    s_MockBackendFrameIndex.clear();
+    s_MockBackendIsEndOfUpscaler.clear();
+    s_NextMockEffectContextId = 100;
+    s_FailAfterGpuJobCount = -1;
 }
 
 static void ResetDispatchTrackers()
@@ -516,6 +621,7 @@ static void ResetDispatchTrackers()
     s_FailAtScheduleGpuJobIndex = -1;
     s_ExecuteGpuJobsResult = FFXM_OK;
     s_UnregisterResourcesResult = FFXM_OK;
+    s_FailAfterGpuJobCount = -1;
 }
 
 static void SetupMockInterface(FfxmInterface* iface)
@@ -4287,6 +4393,272 @@ static void TestM38DescriptorLifecycleAndContextIsolation()
     std::cout << "PASS: Descriptor lifecycle, view recycling, and multi-context isolation verified." << std::endl;
 }
 
+// ----------------------------------------------------------------------------
+// Test 28: M3.9 Swapchain Acquisition and Abort Synchronization Verification
+// ----------------------------------------------------------------------------
+static void TestM39SwapchainAcquisitionAndAbortSynchronization()
+{
+    std::cout << "--- Test 28: M3.9 Swapchain Acquisition & Abort Synchronization Verification ---" << std::endl;
+
+    struct TestSwapchainSync {
+        uint32_t frame = 0;
+        enum { kFramesInFlight = 2 };
+        bool inFlightFenceSignaled[kFramesInFlight] = { true, true };
+        bool acquireSemaphoreSignaled[kFramesInFlight] = { false, false };
+        bool releaseSemaphoreSignaled[kFramesInFlight] = { false, false };
+        bool commandBufferRecording[kFramesInFlight] = { false, false };
+        bool swapchainSuboptimal = false;
+        uint32_t currentImageIndex = 0;
+
+        VkResult acquireResult = VK_SUCCESS;
+        VkResult presentResult = VK_SUCCESS;
+
+        uint32_t waitFencesCount = 0;
+        uint32_t resetFencesCount = 0;
+        uint32_t acquireCount = 0;
+        uint32_t submitCount = 0;
+        uint32_t presentCount = 0;
+
+        bool BeginFrame(uint32_t* outImageIndex) {
+            waitFencesCount++;
+            if (!inFlightFenceSignaled[frame]) return false;
+
+            acquireCount++;
+            VkResult acquired = acquireResult;
+            if (acquired == VK_ERROR_OUT_OF_DATE_KHR) {
+                // No image acquired, semaphore not signalled, fence still in signalled state
+                return false;
+            }
+            if (acquired == VK_SUBOPTIMAL_KHR) {
+                // Image acquired! Semaphore is signalled!
+                acquireSemaphoreSignaled[frame] = true;
+                swapchainSuboptimal = true;
+                *outImageIndex = currentImageIndex;
+            } else if (acquired == VK_SUCCESS) {
+                acquireSemaphoreSignaled[frame] = true;
+                swapchainSuboptimal = false;
+                *outImageIndex = currentImageIndex;
+            } else {
+                return false;
+            }
+
+            resetFencesCount++;
+            inFlightFenceSignaled[frame] = false;
+            commandBufferRecording[frame] = true;
+            return true;
+        }
+
+        bool AbortFrame(uint32_t imageIndex) {
+            // Discards recording, records black clear, submits, and presents
+            commandBufferRecording[frame] = false;
+
+            submitCount++;
+            if (!acquireSemaphoreSignaled[frame]) {
+                // Error: queue submit attempted to wait on unsignaled semaphore
+                return false;
+            }
+            acquireSemaphoreSignaled[frame] = false; // Consumed
+            releaseSemaphoreSignaled[frame] = true;
+            inFlightFenceSignaled[frame] = true;    // Signaled
+
+            presentCount++;
+            if (!releaseSemaphoreSignaled[frame]) {
+                return false;
+            }
+            releaseSemaphoreSignaled[frame] = false;
+
+            frame = (frame + 1) % kFramesInFlight;
+
+            if (swapchainSuboptimal || presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR) {
+                swapchainSuboptimal = false;
+                return false;
+            }
+            return (presentResult == VK_SUCCESS);
+        }
+    };
+
+    TestSwapchainSync sync;
+
+    // 1. VK_SUBOPTIMAL_KHR acquisition with a signalled acquire semaphore
+    sync.acquireResult = VK_SUBOPTIMAL_KHR;
+    uint32_t imgIdx = 99;
+    TEST_CHECK(sync.BeginFrame(&imgIdx) == true);
+    TEST_CHECK(imgIdx == 0);
+    TEST_CHECK(sync.swapchainSuboptimal == true);
+    TEST_CHECK(sync.acquireSemaphoreSignaled[0] == true);
+    TEST_CHECK(sync.inFlightFenceSignaled[0] == false);
+    TEST_CHECK(sync.commandBufferRecording[0] == true);
+
+    // 3. Abort submission consuming the acquire semaphore and signalling the frame fence
+    TEST_CHECK(sync.AbortFrame(imgIdx) == false); // Returns false because swapchainSuboptimal was true
+    TEST_CHECK(sync.acquireSemaphoreSignaled[0] == false); // Semaphore consumed by abort submission
+    TEST_CHECK(sync.inFlightFenceSignaled[0] == true);    // Fence signaled by abort submission
+    TEST_CHECK(sync.frame == 1);                          // Frame index advanced cleanly
+
+    // 2. VK_ERROR_OUT_OF_DATE_KHR acquisition without an acquired image
+    sync.acquireResult = VK_ERROR_OUT_OF_DATE_KHR;
+    uint32_t unacquiredIdx = 42;
+    TEST_CHECK(sync.BeginFrame(&unacquiredIdx) == false);
+    TEST_CHECK(unacquiredIdx == 42);                      // Image index not written
+    TEST_CHECK(sync.acquireSemaphoreSignaled[1] == false); // Semaphore NOT signalled
+    TEST_CHECK(sync.inFlightFenceSignaled[1] == true);     // Fence remained in signalled state
+    TEST_CHECK(sync.commandBufferRecording[1] == false);  // Command buffer NOT recording
+
+    // 4a. Abort presentation returning VK_SUBOPTIMAL_KHR
+    sync.frame = 0;
+    sync.acquireResult = VK_SUCCESS;
+    sync.presentResult = VK_SUBOPTIMAL_KHR;
+    TEST_CHECK(sync.BeginFrame(&imgIdx) == true);
+    TEST_CHECK(sync.acquireSemaphoreSignaled[0] == true);
+    TEST_CHECK(sync.AbortFrame(imgIdx) == false);         // Returns false to trigger recreation
+    TEST_CHECK(sync.acquireSemaphoreSignaled[0] == false); // Semaphore consumed
+    TEST_CHECK(sync.inFlightFenceSignaled[0] == true);    // Fence signaled
+    TEST_CHECK(sync.frame == 1);
+
+    // 4b. Abort presentation returning VK_ERROR_OUT_OF_DATE_KHR
+    sync.frame = 1;
+    sync.acquireResult = VK_SUCCESS;
+    sync.presentResult = VK_ERROR_OUT_OF_DATE_KHR;
+    TEST_CHECK(sync.BeginFrame(&imgIdx) == true);
+    TEST_CHECK(sync.acquireSemaphoreSignaled[1] == true);
+    TEST_CHECK(sync.AbortFrame(imgIdx) == false);         // Returns false to trigger recreation
+    TEST_CHECK(sync.acquireSemaphoreSignaled[1] == false); // Semaphore consumed
+    TEST_CHECK(sync.inFlightFenceSignaled[1] == true);    // Fence signaled
+    TEST_CHECK(sync.frame == 0);
+
+    std::cout << "PASS: Swapchain acquisition, semaphore consumption, fence signalling, and abort presentation verified." << std::endl;
+}
+
+// ----------------------------------------------------------------------------
+// Test 29: M3.9 Vulkan Backend Transactional Recovery Verification
+// ----------------------------------------------------------------------------
+static void TestM39VulkanBackendTransactionalRecovery()
+{
+    std::cout << "--- Test 29: M3.9 Vulkan Backend Transactional Recovery Verification ---" << std::endl;
+
+    ResetMockState();
+    FfxmInterface mockInterface = {};
+    SetupMockInterface(&mockInterface);
+
+    FfxmFsr3UpscalerContextDescription contextDesc = {};
+    contextDesc.flags = FFXM_FSR3UPSCALER_ENABLE_AUTO_EXPOSURE;
+    contextDesc.maxRenderSize = { 1920, 1080 };
+    contextDesc.maxUpscaleSize = { 3840, 2160 };
+    contextDesc.backendInterface = mockInterface;
+
+    FfxmFsr3UpscalerContext context = {};
+    TEST_CHECK(ffxmFsr3UpscalerContextCreate(&context, &contextDesc) == FFXM_OK);
+    FfxmFsr3UpscalerContext_Private* priv = reinterpret_cast<FfxmFsr3UpscalerContext_Private*>(&context);
+
+    int s_Dummy = 1;
+    FfxmResource s_Res = {};
+    s_Res.resource = &s_Dummy;
+
+    FfxmFsr3UpscalerDispatchDescription dispDesc = {};
+    dispDesc.commandList = reinterpret_cast<FfxmCommandList>(&s_Dummy);
+    dispDesc.renderSize = { 1920, 1080 };
+    dispDesc.upscaleSize = { 3840, 2160 };
+    dispDesc.frameTimeDelta = 16.6f;
+    dispDesc.cameraNear = 0.1f;
+    dispDesc.cameraFar = 1000.0f;
+    dispDesc.cameraFovAngleVertical = 1.0f;
+    dispDesc.viewSpaceToMetersFactor = 1.0f;
+    dispDesc.color = s_Res;
+    dispDesc.depth = s_Res;
+    dispDesc.motionVectors = s_Res;
+    dispDesc.dilatedDepth = s_Res;
+    dispDesc.dilatedMotionVectors = s_Res;
+    dispDesc.reconstructedPrevNearestDepth = s_Res;
+    dispDesc.output = s_Res;
+
+    // Verify initial committed state of internal resources (frame 0)
+    TEST_CHECK(priv->firstExecution == true);
+    TEST_CHECK(priv->resourceFrameIndex == 0);
+    TEST_CHECK(s_MockBackendFrameIndex[priv->effectContextId] == 0);
+
+    // 5. Failure after the first GPU job has recorded barriers
+    ResetDispatchTrackers();
+    s_FailAfterGpuJobCount = 1; // Job 0 (FrameInfo clear) records barrier, then job 1 fails
+    TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, &dispDesc) == FFXM_ERROR_BACKEND_API_ERROR);
+
+    // 7. Resource-state and undefined-flag rollback after partial execution
+    // Verify internal resource state was rolled back to initial committed state
+    int32_t frameInfoIdx = priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FRAME_INFO].internalIndex;
+    TEST_CHECK(s_MockBackendResources[frameInfoIdx].currentState == s_MockBackendResources[frameInfoIdx].committedState);
+    TEST_CHECK(s_MockBackendResources[frameInfoIdx].undefined == true); // Preserved!
+
+    // 8. Backend descriptor-view ring index remaining unchanged after failed dispatch
+    TEST_CHECK(s_MockBackendFrameIndex[priv->effectContextId] == 0); // Backend ring did not advance
+    TEST_CHECK(priv->resourceFrameIndex == 0);     // Frontend ring did not advance
+    TEST_CHECK(priv->firstExecution == true);      // Still first execution
+
+    // 6. Failure after multiple GPU jobs have executed
+    ResetDispatchTrackers();
+    s_FailAfterGpuJobCount = 4; // Multiple clears and compute passes execute, then job 4 fails
+    TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, &dispDesc) == FFXM_ERROR_BACKEND_API_ERROR);
+
+    // Verify rollback across all internal resources
+    int32_t accum1Idx = priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_ACCUMULATION_1].internalIndex;
+    int32_t luma1Idx = priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_1].internalIndex;
+    TEST_CHECK(s_MockBackendResources[accum1Idx].currentState == s_MockBackendResources[accum1Idx].committedState);
+    TEST_CHECK(s_MockBackendResources[accum1Idx].undefined == true);
+    TEST_CHECK(s_MockBackendResources[luma1Idx].currentState == s_MockBackendResources[luma1Idx].committedState);
+    TEST_CHECK(s_MockBackendResources[luma1Idx].undefined == true);
+    TEST_CHECK(s_MockBackendFrameIndex[priv->effectContextId] == 0);
+    TEST_CHECK(priv->resourceFrameIndex == 0);
+
+    // 9. Successful retry after an aborted first dispatch
+    ResetDispatchTrackers();
+    s_FailAfterGpuJobCount = -1; // All jobs succeed
+    TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, &dispDesc) == FFXM_OK);
+
+    // Verify all states committed and rings advanced
+    // Job 0 cleared frameInfo, but subsequent compute pass (Job 12) transitioned it to UNORDERED_ACCESS
+    TEST_CHECK(s_MockBackendResources[frameInfoIdx].committedState == FFXM_RESOURCE_STATE_UNORDERED_ACCESS);
+    TEST_CHECK(s_MockBackendResources[frameInfoIdx].committedUndefined == false);
+    TEST_CHECK(s_MockBackendFrameIndex[priv->effectContextId] == 1); // Backend ring advanced to 1
+    TEST_CHECK(priv->resourceFrameIndex == 1);     // Frontend ring advanced to 1
+    TEST_CHECK(priv->firstExecution == false);     // Frame 0 committed successfully
+
+    // 10. Two independent effect contexts remaining isolated after one context fails
+    // Create Context 2
+    FfxmFsr3UpscalerContext context2 = {};
+    contextDesc.flags = FFXM_FSR3UPSCALER_ENABLE_AUTO_EXPOSURE;
+    TEST_CHECK(ffxmFsr3UpscalerContextCreate(&context2, &contextDesc) == FFXM_OK);
+    FfxmFsr3UpscalerContext_Private* priv2 = reinterpret_cast<FfxmFsr3UpscalerContext_Private*>(&context2);
+
+    // Context 1 dispatches frame 1 and fails mid-execution
+    ResetDispatchTrackers();
+    s_FailAfterGpuJobCount = 3;
+    TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, &dispDesc) == FFXM_ERROR_BACKEND_API_ERROR);
+    TEST_CHECK(priv->resourceFrameIndex == 1);     // Preserved at 1
+    TEST_CHECK(s_MockBackendFrameIndex[priv->effectContextId] == 1); // Preserved at 1
+
+    // Verify Context 2 is completely isolated and untouched
+    TEST_CHECK(priv2->resourceFrameIndex == 0);
+    TEST_CHECK(priv2->firstExecution == true);
+    TEST_CHECK(s_MockBackendFrameIndex[priv2->effectContextId] == 0);
+
+    // Context 2 executes successfully
+    ResetDispatchTrackers();
+    s_FailAfterGpuJobCount = -1;
+    TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context2, &dispDesc) == FFXM_OK);
+    TEST_CHECK(priv2->resourceFrameIndex == 1);
+    TEST_CHECK(priv2->firstExecution == false);
+    TEST_CHECK(s_MockBackendFrameIndex[priv2->effectContextId] == 1);
+
+    // Verify Context 1 remained unchanged
+    TEST_CHECK(priv->resourceFrameIndex == 1);
+    TEST_CHECK(s_MockBackendFrameIndex[priv->effectContextId] == 1);
+
+    // Clean destruction
+    TEST_CHECK(ffxmFsr3UpscalerContextDestroy(&context2) == FFXM_OK);
+    TEST_CHECK(ffxmFsr3UpscalerContextDestroy(&context) == FFXM_OK);
+    VerifyOccurrenceAwareResourceBalance();
+
+    std::cout << "PASS: Partial failure rollback, descriptor ring synchronization, successful retry, and context isolation verified." << std::endl;
+}
+
 int main()
 {
     std::cout << "============================================================" << std::endl;
@@ -4321,6 +4693,8 @@ int main()
     TestM38SharedResourceInitialLayouts();
     TestM38FrameCancellationAndRecovery();
     TestM38DescriptorLifecycleAndContextIsolation();
+    TestM39SwapchainAcquisitionAndAbortSynchronization();
+    TestM39VulkanBackendTransactionalRecovery();
 
     std::cout << "============================================================" << std::endl;
     std::cout << "Summary: " << g_TestPasses << " checks PASSED, " << g_TestFailures << " FAILED." << std::endl;

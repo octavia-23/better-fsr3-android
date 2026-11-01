@@ -24,6 +24,8 @@ struct App {
 
     bool     vulkanReady = false;
     bool     renderReady = false;
+    bool     swapchainDirty = false;
+    uint32_t consecutiveRecreateFailures = 0;
     int32_t  frameIndex  = 0;
 
     VkExtent2D renderExtent  = {0, 0};
@@ -32,6 +34,7 @@ struct App {
     float camZ     = 0.0f;
     float camZPrev = 0.0f;
     double lastTimeSeconds = 0.0;
+    ANativeWindow* window = nullptr;
 };
 
 double nowSeconds()
@@ -41,8 +44,60 @@ double nowSeconds()
     return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
 }
 
+bool createSizedResources(App& app)
+{
+    app.displayExtent = app.ctx.swapchainExtent();
+
+    // 2x per-dimension upscaling: a 1080p panel is fed from 960x540.
+    const float ratio = arm::ffxmFsr3UpscalerGetUpscaleRatioFromQualityMode(arm::FFXM_FSR3UPSCALER_QUALITY_MODE_PERFORMANCE);
+    app.renderExtent  = {(uint32_t)(app.displayExtent.width / ratio),
+                         (uint32_t)(app.displayExtent.height / ratio)};
+    LOGI("FSR 3.1.4: Rendering at %ux%u, presenting at %ux%u (ratio %.2f)", app.renderExtent.width,
+         app.renderExtent.height, app.displayExtent.width, app.displayExtent.height, ratio);
+
+    if (!app.scene.init(app.ctx, app.renderExtent, app.displayExtent)) {
+        LOGE("Scene initialisation failed");
+        return false;
+    }
+    if (!app.upscaler.init(app.ctx, app.renderExtent, app.displayExtent,
+                           arm::FFXM_FSR3UPSCALER_QUALITY_MODE_PERFORMANCE)) {
+        LOGE("FSR 3.1.4 initialisation failed");
+        return false;
+    }
+
+    app.frameIndex = 0; // Ensures next dispatch triggers clean temporal reset
+    return true;
+}
+
+void destroySizedResources(App& app)
+{
+    app.ctx.waitIdle();
+    app.upscaler.destroy();
+    app.scene.destroy(app.ctx);
+}
+
+bool rebuildSwapchainResources(App& app)
+{
+    destroySizedResources(app);
+    app.renderReady = false;
+
+    if (!app.ctx.recreateSwapchain(app.window)) {
+        LOGE("Android swapchain recreation failed");
+        return false;
+    }
+    if (!createSizedResources(app)) {
+        LOGE("Could not rebuild Android resources after swapchain recreation");
+        return false;
+    }
+    app.swapchainDirty = false;
+    app.lastTimeSeconds = nowSeconds();
+    app.renderReady     = true;
+    return true;
+}
+
 bool initRendering(App& app, ANativeWindow* window)
 {
+    app.window = window;
     if (!app.ctx.init(window)) {
         LOGE("Vulkan initialisation failed");
         return false;
@@ -65,27 +120,12 @@ bool initRendering(App& app, ANativeWindow* window)
         return false;
     }
 
-    app.displayExtent = app.ctx.swapchainExtent();
-
-    // 2x per-dimension upscaling: a 1080p panel is fed from 960x540.
-    const float ratio = arm::ffxmFsr3UpscalerGetUpscaleRatioFromQualityMode(arm::FFXM_FSR3UPSCALER_QUALITY_MODE_PERFORMANCE);
-    app.renderExtent  = {(uint32_t)(app.displayExtent.width / ratio),
-                         (uint32_t)(app.displayExtent.height / ratio)};
-    LOGI("FSR 3.1.4: Rendering at %ux%u, presenting at %ux%u (ratio %.2f)", app.renderExtent.width,
-         app.renderExtent.height, app.displayExtent.width, app.displayExtent.height, ratio);
-
-    if (!app.scene.init(app.ctx, app.renderExtent, app.displayExtent)) {
-        LOGE("Scene initialisation failed");
+    if (!createSizedResources(app))
         return false;
-    }
-    if (!app.upscaler.init(app.ctx, app.renderExtent, app.displayExtent,
-                           arm::FFXM_FSR3UPSCALER_QUALITY_MODE_PERFORMANCE)) {
-        LOGE("FSR 3.1.4 initialisation failed");
-        return false;
-    }
 
     app.lastTimeSeconds = nowSeconds();
     app.renderReady     = true;
+    app.swapchainDirty  = false;
     LOGI("FSR 3.1.4 sample ready");
     return true;
 }
@@ -100,10 +140,23 @@ void teardownRendering(App& app)
     app.ctx.destroy();
     app.vulkanReady = false;
     app.renderReady = false;
+    app.window = nullptr;
 }
 
 void drawFrame(App& app)
 {
+    if (app.swapchainDirty) {
+        if (!rebuildSwapchainResources(app)) {
+            app.consecutiveRecreateFailures++;
+            if (app.consecutiveRecreateFailures > 10) {
+                LOGE("Repeated swapchain recreation failure on Android; aborting rendering loop");
+                app.renderReady = false;
+            }
+            return;
+        }
+        app.consecutiveRecreateFailures = 0;
+    }
+
     if (!app.renderReady)
         return;
 
@@ -116,8 +169,10 @@ void drawFrame(App& app)
     app.camZ -= 6.0f * delta;   // fly forward
 
     uint32_t imageIndex = 0;
-    if (!app.ctx.beginFrame(&imageIndex))
+    if (!app.ctx.beginFrame(&imageIndex)) {
+        app.swapchainDirty = true;
         return;
+    }
 
     VkCommandBuffer cmd = app.ctx.commandBuffer();
 
@@ -145,14 +200,18 @@ void drawFrame(App& app)
                                                   app.frameIndex == 0);
     if (!dispatchOk) {
         LOGE("FSR 3.1.4 dispatch failed at frame %d; recovering via abortFrame", app.frameIndex);
-        app.ctx.abortFrame(imageIndex);
+        if (!app.ctx.abortFrame(imageIndex)) {
+            app.swapchainDirty = true;
+        }
         return;
     }
 
     app.scene.recordBlit(cmd, app.ctx.swapchainImageView(imageIndex),
                          app.ctx.swapchainExtent());
 
-    app.ctx.endFrame(imageIndex);
+    if (!app.ctx.endFrame(imageIndex)) {
+        app.swapchainDirty = true;
+    }
 
     if (app.frameIndex == 0)
         LOGI("First FSR 3.1.4 frame dispatched successfully");
@@ -165,13 +224,22 @@ void handleCommand(android_app* androidApp, int32_t cmd)
 
     switch (cmd) {
     case APP_CMD_INIT_WINDOW:
-        if (androidApp->window && !app.vulkanReady) {
-            if (!initRendering(app, androidApp->window))
-                teardownRendering(app);
+        if (androidApp->window) {
+            app.window = androidApp->window;
+            if (!app.vulkanReady) {
+                if (!initRendering(app, androidApp->window))
+                    teardownRendering(app);
+            } else {
+                app.swapchainDirty = true;
+            }
         }
         break;
     case APP_CMD_TERM_WINDOW:
         teardownRendering(app);
+        break;
+    case APP_CMD_WINDOW_RESIZED:
+    case APP_CMD_CONFIG_CHANGED:
+        app.swapchainDirty = true;
         break;
     default:
         break;

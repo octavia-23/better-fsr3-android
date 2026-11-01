@@ -39,6 +39,7 @@ struct App {
     bool     validation    = false;
     bool     quit          = false;
     bool     swapchainDirty = false;
+    uint32_t consecutiveRecreateFailures = 0;
     int32_t  frameIndex    = 0;
 
     VkExtent2D renderExtent  = {0, 0};
@@ -402,8 +403,19 @@ int main(int argc, char** argv)
         if (app.quit)
             break;
 
-        if (app.swapchainDirty)
+        if (app.swapchainDirty) {
             rebuildSwapchainResources(app);
+            if (app.swapchainDirty) {
+                app.consecutiveRecreateFailures++;
+                if (app.consecutiveRecreateFailures > 10) {
+                    LOGE("Repeated swapchain recreation failure on Windows; quitting");
+                    app.quit = true;
+                    break;
+                }
+            } else {
+                app.consecutiveRecreateFailures = 0;
+            }
+        }
 
         const VkExtent2D client = clientExtent(app.hwnd);
         if (client.width == 0 || client.height == 0) {

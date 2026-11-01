@@ -391,6 +391,7 @@ bool VkContext::recreateSwapchain(ANativeWindow*)
 {
     VK_CHECK(vkDeviceWaitIdle(device_));
     destroySwapchain();
+    swapchainSuboptimal_ = false;
     return createSwapchain();
 }
 
@@ -401,9 +402,17 @@ bool VkContext::beginFrame(uint32_t* outImageIndex)
     VkResult acquired = vkAcquireNextImageKHR(device_, swapchain_, UINT64_MAX,
                                               acquireSemaphores_[frame_], VK_NULL_HANDLE,
                                               outImageIndex);
-    if (acquired == VK_ERROR_OUT_OF_DATE_KHR || acquired == VK_SUBOPTIMAL_KHR)
+    if (acquired == VK_ERROR_OUT_OF_DATE_KHR) {
+        // No image acquired, semaphore not signalled, fence remains in signalled state.
         return false;
-    if (acquired != VK_SUCCESS) {
+    }
+    if (acquired == VK_SUBOPTIMAL_KHR) {
+        // An image was successfully acquired and acquire semaphore will be signalled.
+        // We must process this image and present it, but mark swapchain for recreation afterward.
+        swapchainSuboptimal_ = true;
+    } else if (acquired == VK_SUCCESS) {
+        swapchainSuboptimal_ = false;
+    } else {
         LOGE("vkAcquireNextImageKHR failed: %d", (int)acquired);
         return false;
     }
@@ -442,8 +451,10 @@ bool VkContext::endFrame(uint32_t imageIndex)
     VkResult presented = vkQueuePresentKHR(queue_, &present);
     frame_ = (frame_ + 1) % kFramesInFlight;
 
-    if (presented == VK_ERROR_OUT_OF_DATE_KHR || presented == VK_SUBOPTIMAL_KHR)
+    if (swapchainSuboptimal_ || presented == VK_ERROR_OUT_OF_DATE_KHR || presented == VK_SUBOPTIMAL_KHR) {
+        swapchainSuboptimal_ = false;
         return false;
+    }
     if (presented != VK_SUCCESS) {
         LOGE("vkQueuePresentKHR failed: %d", (int)presented);
         return false;
@@ -523,8 +534,10 @@ bool VkContext::abortFrame(uint32_t imageIndex)
     VkResult presented = vkQueuePresentKHR(queue_, &present);
     frame_ = (frame_ + 1) % kFramesInFlight;
 
-    if (presented == VK_ERROR_OUT_OF_DATE_KHR || presented == VK_SUBOPTIMAL_KHR)
+    if (swapchainSuboptimal_ || presented == VK_ERROR_OUT_OF_DATE_KHR || presented == VK_SUBOPTIMAL_KHR) {
+        swapchainSuboptimal_ = false;
         return false;
+    }
     if (presented != VK_SUCCESS) {
         LOGE("vkQueuePresentKHR failed in abortFrame: %d", (int)presented);
         return false;

@@ -141,6 +141,7 @@ typedef struct BackendContext_VK {
         FfxmResourceDescription  resourceDescription;
         FfxmResourceStates       initialState;
         FfxmResourceStates       currentState;
+        FfxmResourceStates       committedState;
         int32_t                 srvViewIndex;
         int32_t                 uavViewIndex;
         FfxmUInt32                uavViewCount;
@@ -149,6 +150,7 @@ typedef struct BackendContext_VK {
         VkMemoryPropertyFlags   memoryProperties;
 
         bool                    undefined;
+        bool                    committedUndefined;
         bool                    dynamic;
 
     } Resource;
@@ -908,7 +910,9 @@ void copyResourceState(BackendContext_VK::Resource* backendResource, const FfxmR
     // copy the new states
     backendResource->initialState = state;
     backendResource->currentState = state;
+    backendResource->committedState = state;
     backendResource->undefined    = false;
+    backendResource->committedUndefined = false;
     backendResource->dynamic      = true;
 
     // If the internal resource state is undefined, that means we are importing a resource that
@@ -916,6 +920,7 @@ void copyResourceState(BackendContext_VK::Resource* backendResource, const FfxmR
     if (backendResource->resourceDescription.flags & FFXM_RESOURCE_FLAGS_UNDEFINED)
     {
         backendResource->undefined                 = true;
+        backendResource->committedUndefined        = true;
         backendResource->resourceDescription.flags = (FfxmResourceFlags)((int)backendResource->resourceDescription.flags & ~FFXM_RESOURCE_FLAGS_UNDEFINED);
     }
 }
@@ -1513,12 +1518,14 @@ FfxmErrorCode CreateResourceVK(
     outResource->internalIndex = effectContext.nextStaticResource++;
     BackendContext_VK::Resource* backendResource = &backendContext->pResources[outResource->internalIndex];
     backendResource->undefined = true;  // A flag to make sure the first barrier for this image resource always uses an src layout of undefined
+    backendResource->committedUndefined = true;
     backendResource->dynamic = false;   // Not a dynamic resource (need to track them separately for image views)
     backendResource->resourceDescription = resourceDesc;
 
     const FfxmResourceStates resourceState = (createResourceDescription->initData && (createResourceDescription->heapType != FFXM_HEAP_TYPE_UPLOAD)) ? FFXM_RESOURCE_STATE_COPY_DEST : createResourceDescription->initalState;
     backendResource->initialState = resourceState;
     backendResource->currentState = resourceState;
+    backendResource->committedState = resourceState;
 
 #ifdef _DEBUG
     ffxmNarrowAscii(backendResource->resourceName, createResourceDescription->name);
@@ -1807,6 +1814,10 @@ FfxmErrorCode DestroyResourceVK(FfxmInterface* backendInterface, FfxmResourceInt
              // Reset indices to resource views
              backgroundResource.uavViewIndex = backgroundResource.srvViewIndex = -1;
              backgroundResource.uavViewCount = 0;
+             backgroundResource.currentState = static_cast<FfxmResourceStates>(0);
+             backgroundResource.committedState = static_cast<FfxmResourceStates>(0);
+             backgroundResource.undefined = false;
+             backgroundResource.committedUndefined = false;
 
              // Destroy the resource
              if (backgroundResource.imageResource != VK_NULL_HANDLE)
@@ -2058,6 +2069,9 @@ FfxmErrorCode UnregisterResourcesVK(FfxmInterface* backendInterface, FfxmCommand
 
         // Add the barrier
         addBarrier(backendContext, &internalResource, backendResource->initialState);
+
+        backendResource->committedState = backendResource->initialState;
+        backendResource->committedUndefined = backendResource->undefined;
     }
 
     FFXM_ASSERT(nullptr != commandList);
@@ -3456,9 +3470,9 @@ static FfxmErrorCode executeGpuJobCompute(BackendContext_VK* backendContext, Ffx
 
 static FfxmErrorCode executeGpuJobFragment(BackendContext_VK* backendContext, FfxmGpuJobDescription* job, VkCommandBuffer vkCommandBuffer)
 {
+    FFXM_RETURN_ON_ERROR(job->fragmentJobDescription.pipeline != nullptr, FFXM_ERROR_INVALID_ARGUMENT);
     BackendContext_VK::PipelineLayout* pipelineLayout = reinterpret_cast<BackendContext_VK::PipelineLayout*>(job->fragmentJobDescription.pipeline->rootSignature);
     FFXM_RETURN_ON_ERROR(pipelineLayout != nullptr, FFXM_ERROR_INVALID_ARGUMENT);
-    FFXM_RETURN_ON_ERROR(job->fragmentJobDescription.pipeline->pipeline != 0, FFXM_ERROR_INVALID_ARGUMENT);
 
     // bind texture & buffer UAVs (note the binding order here MUST match the root signature mapping order from CreatePipeline!)
     FfxmUInt32               descriptorWriteIndex = 0;
@@ -3594,11 +3608,9 @@ static FfxmErrorCode executeGpuJobFragment(BackendContext_VK* backendContext, Ff
     // update all uavs and srvs
     backendContext->vkFunctionTable.vkUpdateDescriptorSets(backendContext->device, descriptorWriteIndex, writeDescriptorSets, 0, nullptr);
 
-    getOrCreateRenderPass(backendContext, job);
-
-    getOrCreateFrameBuffer(backendContext, job);
-
-    getOrCreateGraphicsPipeline(backendContext, job);
+    FFXM_RETURN_ON_ERROR(getOrCreateRenderPass(backendContext, job) == FFXM_OK, FFXM_ERROR_BACKEND_API_ERROR);
+    FFXM_RETURN_ON_ERROR(getOrCreateFrameBuffer(backendContext, job) == FFXM_OK, FFXM_ERROR_BACKEND_API_ERROR);
+    FFXM_RETURN_ON_ERROR(getOrCreateGraphicsPipeline(backendContext, job) == FFXM_OK, FFXM_ERROR_BACKEND_API_ERROR);
 
     VkClearValue clearColor = { { 0.0f, 0.0f, 0.0f, 1.0f } };
     VkExtent2D extent = { job->fragmentJobDescription.viewport[0], job->fragmentJobDescription.viewport[1] };
@@ -3866,6 +3878,35 @@ FFXM_API FfxmErrorCode ExecuteGpuJobsVK(FfxmInterface* backendInterface, FfxmCom
         {
             firstErrorCode = jobError;
             break;
+        }
+    }
+
+    if (firstErrorCode != FFXM_OK)
+    {
+        // Transactional Rollback:
+        // A job failed during command recording. The command buffer will be discarded / aborted.
+        // Restore all resource states and undefined flags to their last committed state.
+        for (FfxmUInt32 r = 0; r < s_MaxEffectContexts * FFXM_MAX_RESOURCE_COUNT; ++r) {
+            backendContext->pResources[r].currentState = backendContext->pResources[r].committedState;
+            backendContext->pResources[r].undefined = backendContext->pResources[r].committedUndefined;
+        }
+        backendContext->scheduledImageBarrierCount = 0;
+        backendContext->scheduledBufferBarrierCount = 0;
+        backendContext->srcStageMask = 0;
+        backendContext->dstStageMask = 0;
+
+        // Disarm isEndOfUpscaler on all effect contexts so UnregisterResourcesVK does not advance the ring
+        for (FfxmUInt32 c = 0; c < s_MaxEffectContexts; ++c) {
+            backendContext->pEffectContexts[c].isEndOfUpscaler = false;
+        }
+    }
+    else
+    {
+        // Transactional Commit:
+        // All scheduled GPU jobs succeeded. Commit the new resource states and undefined flags.
+        for (FfxmUInt32 r = 0; r < s_MaxEffectContexts * FFXM_MAX_RESOURCE_COUNT; ++r) {
+            backendContext->pResources[r].committedState = backendContext->pResources[r].currentState;
+            backendContext->pResources[r].committedUndefined = backendContext->pResources[r].undefined;
         }
     }
 

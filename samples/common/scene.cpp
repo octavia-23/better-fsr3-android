@@ -403,9 +403,9 @@ bool Scene::init(VkContext& ctx, VkExtent2D renderExtent, VkExtent2D displayExte
                       VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                       VK_IMAGE_ASPECT_DEPTH_BIT))
         return false;
-    // Arm ASR writes its result through a UAV, hence STORAGE.
+    // Arm ASR (FSR2) writes via render-pass color attachment (or FSR3 via compute storage UAV).
     if (!createTarget(ctx, output_, kOutputFormat, displayExtent,
-                      VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                       VK_IMAGE_ASPECT_COLOR_BIT))
         return false;
 
