@@ -3,6 +3,7 @@
 #pragma once
 
 #include "common.h"
+#include "swapchain_sync.h"
 
 #include <cstdint>
 #include <vector>
@@ -51,17 +52,20 @@ public:
     VkDevice         device()         const { return device_; }
     VkQueue          queue()          const { return queue_; }
     uint32_t         queueFamily()    const { return queueFamily_; }
-    VkCommandBuffer  commandBuffer()  const { return commandBuffers_[frame_]; }
+    VkCommandBuffer  commandBuffer()  const { return commandBuffers_[sync_.frame()]; }
     VkExtent2D       swapchainExtent()const { return swapchainExtent_; }
     VkFormat         swapchainFormat()const { return swapchainFormat_; }
     VkImage          swapchainImage(uint32_t i)     const { return swapchainImages_[i]; }
     VkImageView      swapchainImageView(uint32_t i) const { return swapchainImageViews_[i]; }
     uint32_t         swapchainImageCount()          const { return (uint32_t)swapchainImages_.size(); }
-    bool             swapchainSuboptimal()          const { return swapchainSuboptimal_; }
+    bool             swapchainSuboptimal()          const { return sync_.swapchainSuboptimal(); }
     const DeviceCapabilities& caps() const { return caps_; }
 
     uint32_t findMemoryType(uint32_t typeBits, VkMemoryPropertyFlags props) const;
     bool     waitIdle() const;
+
+    arm::SwapchainSync& sync() { return sync_; }
+    const arm::SwapchainSync& sync() const { return sync_; }
 
 private:
     bool createInstance();
@@ -90,8 +94,7 @@ private:
     VkSemaphore     acquireSemaphores_[kFramesInFlight] = {};
     VkSemaphore     releaseSemaphores_[kFramesInFlight] = {};
     VkFence         inFlightFences_[kFramesInFlight] = {};
-    uint32_t        frame_ = 0;
-    bool            swapchainSuboptimal_ = false;
 
+    arm::SwapchainSync sync_;
     DeviceCapabilities caps_;
 };

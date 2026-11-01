@@ -8,6 +8,7 @@
 #include "common.h"
 #include "fsr3_upscaler.h"
 #include "scene.h"
+#include "swapchain_recovery.h"
 #include "vk_context.h"
 
 #include <android_native_app_glue.h>
@@ -76,23 +77,27 @@ void destroySizedResources(App& app)
     app.scene.destroy(app.ctx);
 }
 
-bool rebuildSwapchainResources(App& app)
+SwapchainRebuildResult rebuildSwapchainResources(App& app)
 {
+    if (!app.window) {
+        return SwapchainRebuildResult::Minimized;
+    }
+
     destroySizedResources(app);
     app.renderReady = false;
 
     if (!app.ctx.recreateSwapchain(app.window)) {
         LOGE("Android swapchain recreation failed");
-        return false;
+        return SwapchainRebuildResult::Failed;
     }
     if (!createSizedResources(app)) {
         LOGE("Could not rebuild Android resources after swapchain recreation");
-        return false;
+        return SwapchainRebuildResult::Failed;
     }
-    app.swapchainDirty = false;
     app.lastTimeSeconds = nowSeconds();
     app.renderReady     = true;
-    return true;
+    app.swapchainDirty  = false;
+    return SwapchainRebuildResult::Success;
 }
 
 bool initRendering(App& app, ANativeWindow* window)
@@ -146,15 +151,16 @@ void teardownRendering(App& app)
 void drawFrame(App& app)
 {
     if (app.swapchainDirty) {
-        if (!rebuildSwapchainResources(app)) {
-            app.consecutiveRecreateFailures++;
-            if (app.consecutiveRecreateFailures > 10) {
-                LOGE("Repeated swapchain recreation failure on Android; aborting rendering loop");
-                app.renderReady = false;
-            }
+        SwapchainRebuildResult res = rebuildSwapchainResources(app);
+        if (!SwapchainRecoveryPolicy::handleRebuildResult(res, app.swapchainDirty, app.consecutiveRecreateFailures)) {
+            LOGE("Repeated swapchain recreation failure on Android (%u consecutive failures); aborting rendering loop",
+                 app.consecutiveRecreateFailures);
+            app.renderReady = false;
             return;
         }
-        app.consecutiveRecreateFailures = 0;
+        if (res == SwapchainRebuildResult::Failed || res == SwapchainRebuildResult::Minimized) {
+            return;
+        }
     }
 
     if (!app.renderReady)

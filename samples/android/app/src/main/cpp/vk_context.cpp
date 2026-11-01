@@ -378,6 +378,9 @@ bool VkContext::createFrameResources()
         fenceCi.flags = VK_FENCE_CREATE_SIGNALED_BIT;
         VK_CHECK(vkCreateFence(device_, &fenceCi, nullptr, &inFlightFences_[i]));
     }
+
+    sync_.init(device_, queue_, swapchain_, swapchainImages_, commandBuffers_, acquireSemaphores_, releaseSemaphores_, inFlightFences_);
+    sync_.initStandardFunctions();
     return true;
 }
 
@@ -391,158 +394,27 @@ bool VkContext::recreateSwapchain(ANativeWindow*)
 {
     VK_CHECK(vkDeviceWaitIdle(device_));
     destroySwapchain();
-    swapchainSuboptimal_ = false;
-    return createSwapchain();
+    bool ok = createSwapchain();
+    if (ok) {
+        sync_.init(device_, queue_, swapchain_, swapchainImages_, commandBuffers_, acquireSemaphores_, releaseSemaphores_, inFlightFences_);
+        sync_.onSwapchainRecreated();
+    }
+    return ok;
 }
 
 bool VkContext::beginFrame(uint32_t* outImageIndex)
 {
-    VK_CHECK(vkWaitForFences(device_, 1, &inFlightFences_[frame_], VK_TRUE, UINT64_MAX));
-
-    VkResult acquired = vkAcquireNextImageKHR(device_, swapchain_, UINT64_MAX,
-                                              acquireSemaphores_[frame_], VK_NULL_HANDLE,
-                                              outImageIndex);
-    if (acquired == VK_ERROR_OUT_OF_DATE_KHR) {
-        // No image acquired, semaphore not signalled, fence remains in signalled state.
-        return false;
-    }
-    if (acquired == VK_SUBOPTIMAL_KHR) {
-        // An image was successfully acquired and acquire semaphore will be signalled.
-        // We must process this image and present it, but mark swapchain for recreation afterward.
-        swapchainSuboptimal_ = true;
-    } else if (acquired == VK_SUCCESS) {
-        swapchainSuboptimal_ = false;
-    } else {
-        LOGE("vkAcquireNextImageKHR failed: %d", (int)acquired);
-        return false;
-    }
-
-    VK_CHECK(vkResetFences(device_, 1, &inFlightFences_[frame_]));
-    VK_CHECK(vkResetCommandBuffer(commandBuffers_[frame_], 0));
-
-    VkCommandBufferBeginInfo beginInfo = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    VK_CHECK(vkBeginCommandBuffer(commandBuffers_[frame_], &beginInfo));
-    return true;
+    return sync_.beginFrame(outImageIndex);
 }
 
 bool VkContext::endFrame(uint32_t imageIndex)
 {
-    VK_CHECK(vkEndCommandBuffer(commandBuffers_[frame_]));
-
-    const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    VkSubmitInfo submit = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
-    submit.waitSemaphoreCount   = 1;
-    submit.pWaitSemaphores      = &acquireSemaphores_[frame_];
-    submit.pWaitDstStageMask    = &waitStage;
-    submit.commandBufferCount   = 1;
-    submit.pCommandBuffers      = &commandBuffers_[frame_];
-    submit.signalSemaphoreCount = 1;
-    submit.pSignalSemaphores    = &releaseSemaphores_[frame_];
-    VK_CHECK(vkQueueSubmit(queue_, 1, &submit, inFlightFences_[frame_]));
-
-    VkPresentInfoKHR present = {VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
-    present.waitSemaphoreCount = 1;
-    present.pWaitSemaphores    = &releaseSemaphores_[frame_];
-    present.swapchainCount     = 1;
-    present.pSwapchains        = &swapchain_;
-    present.pImageIndices      = &imageIndex;
-
-    VkResult presented = vkQueuePresentKHR(queue_, &present);
-    frame_ = (frame_ + 1) % kFramesInFlight;
-
-    if (swapchainSuboptimal_ || presented == VK_ERROR_OUT_OF_DATE_KHR || presented == VK_SUBOPTIMAL_KHR) {
-        swapchainSuboptimal_ = false;
-        return false;
-    }
-    if (presented != VK_SUCCESS) {
-        LOGE("vkQueuePresentKHR failed: %d", (int)presented);
-        return false;
-    }
-    return true;
+    return sync_.endFrame(imageIndex);
 }
 
 bool VkContext::abortFrame(uint32_t imageIndex)
 {
-    // Discard any partial command recording by resetting the command buffer.
-    VK_CHECK(vkResetCommandBuffer(commandBuffers_[frame_], 0));
-
-    VkCommandBufferBeginInfo beginInfo = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    VK_CHECK(vkBeginCommandBuffer(commandBuffers_[frame_], &beginInfo));
-
-    // Transition swapchain image from UNDEFINED to TRANSFER_DST_OPTIMAL
-    VkImageMemoryBarrier toTransfer = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-    toTransfer.srcAccessMask       = 0;
-    toTransfer.dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT;
-    toTransfer.oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED;
-    toTransfer.newLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    toTransfer.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    toTransfer.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    toTransfer.image               = swapchainImages_[imageIndex];
-    toTransfer.subresourceRange    = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-
-    vkCmdPipelineBarrier(commandBuffers_[frame_],
-                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                         VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &toTransfer);
-
-    // Clear swapchain image to solid black so no uninitialized contents appear
-    VkClearColorValue blackColor = {};
-    VkImageSubresourceRange clearRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    vkCmdClearColorImage(commandBuffers_[frame_], swapchainImages_[imageIndex],
-                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &blackColor, 1, &clearRange);
-
-    // Transition swapchain image from TRANSFER_DST_OPTIMAL to PRESENT_SRC_KHR
-    VkImageMemoryBarrier toPresent = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-    toPresent.srcAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT;
-    toPresent.dstAccessMask       = 0;
-    toPresent.oldLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    toPresent.newLayout           = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    toPresent.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    toPresent.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    toPresent.image               = swapchainImages_[imageIndex];
-    toPresent.subresourceRange    = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-
-    vkCmdPipelineBarrier(commandBuffers_[frame_],
-                         VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &toPresent);
-
-    VK_CHECK(vkEndCommandBuffer(commandBuffers_[frame_]));
-
-    // Submit and signal release semaphore + inFlight fence so synchronization remains intact
-    const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-    VkSubmitInfo submit = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
-    submit.waitSemaphoreCount   = 1;
-    submit.pWaitSemaphores      = &acquireSemaphores_[frame_];
-    submit.pWaitDstStageMask    = &waitStage;
-    submit.commandBufferCount   = 1;
-    submit.pCommandBuffers      = &commandBuffers_[frame_];
-    submit.signalSemaphoreCount = 1;
-    submit.pSignalSemaphores    = &releaseSemaphores_[frame_];
-    VK_CHECK(vkQueueSubmit(queue_, 1, &submit, inFlightFences_[frame_]));
-
-    // Present image to return ownership to the swapchain presentation engine
-    VkPresentInfoKHR present = {VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
-    present.waitSemaphoreCount = 1;
-    present.pWaitSemaphores    = &releaseSemaphores_[frame_];
-    present.swapchainCount     = 1;
-    present.pSwapchains        = &swapchain_;
-    present.pImageIndices      = &imageIndex;
-
-    VkResult presented = vkQueuePresentKHR(queue_, &present);
-    frame_ = (frame_ + 1) % kFramesInFlight;
-
-    if (swapchainSuboptimal_ || presented == VK_ERROR_OUT_OF_DATE_KHR || presented == VK_SUBOPTIMAL_KHR) {
-        swapchainSuboptimal_ = false;
-        return false;
-    }
-    if (presented != VK_SUCCESS) {
-        LOGE("vkQueuePresentKHR failed in abortFrame: %d", (int)presented);
-        return false;
-    }
-    return true;
+    return sync_.abortFrame(imageIndex);
 }
 
 uint32_t VkContext::findMemoryType(uint32_t typeBits, VkMemoryPropertyFlags props) const

@@ -8,6 +8,7 @@
 #include "common.h"
 #include "fsr3_upscaler.h"
 #include "scene.h"
+#include "swapchain_recovery.h"
 #include "vk_context.h"
 
 #include <algorithm>
@@ -174,27 +175,27 @@ void teardownRendering(App& app)
 // rect against the current extent. Skipping on "same size" would stall forever
 // when the driver reports OUT_OF_DATE without a size change, and could loop
 // every frame if the surface clamps currentExtent away from the client rect.
-void rebuildSwapchainResources(App& app)
+SwapchainRebuildResult rebuildSwapchainResources(App& app)
 {
     const VkExtent2D client = clientExtent(app.hwnd);
     if (client.width == 0 || client.height == 0)
-        return;   // minimised: stay dirty and retry once the window is restored
-
-    app.swapchainDirty = false;
+        return SwapchainRebuildResult::Minimized;   // minimised: stay dirty and retry once the window is restored
 
     destroySizedResources(app);
     app.renderReady = false;
 
     if (!app.ctx.recreateSwapchain(app.hwnd)) {
         LOGE("Swapchain recreation failed");
-        return;
+        return SwapchainRebuildResult::Failed;
     }
     if (!createSizedResources(app)) {
         LOGE("Could not rebuild resources after resize");
-        return;
+        return SwapchainRebuildResult::Failed;
     }
     app.lastTimeSeconds = nowSeconds();
     app.renderReady     = true;
+    app.swapchainDirty  = false;
+    return SwapchainRebuildResult::Success;
 }
 
 void drawFrame(App& app)
@@ -404,16 +405,18 @@ int main(int argc, char** argv)
             break;
 
         if (app.swapchainDirty) {
-            rebuildSwapchainResources(app);
-            if (app.swapchainDirty) {
-                app.consecutiveRecreateFailures++;
-                if (app.consecutiveRecreateFailures > 10) {
-                    LOGE("Repeated swapchain recreation failure on Windows; quitting");
-                    app.quit = true;
-                    break;
-                }
-            } else {
-                app.consecutiveRecreateFailures = 0;
+            SwapchainRebuildResult res = rebuildSwapchainResources(app);
+            if (!SwapchainRecoveryPolicy::handleRebuildResult(res, app.swapchainDirty, app.consecutiveRecreateFailures)) {
+                LOGE("Repeated swapchain recreation failure on Windows (%u consecutive failures); quitting",
+                     app.consecutiveRecreateFailures);
+                app.quit = true;
+                break;
+            }
+            if (res == SwapchainRebuildResult::Failed) {
+                Sleep(16); // Throttle retry after failure
+            } else if (res == SwapchainRebuildResult::Minimized) {
+                Sleep(16); // Idle while minimized
+                continue;
             }
         }
 

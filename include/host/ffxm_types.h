@@ -280,6 +280,7 @@ typedef enum FfxmResourceUsage {
 /// @ingroup SDKTypes
 typedef enum FfxmResourceStates {
 
+    FFXM_RESOURCE_STATE_UNMAPPED = 0,                ///< Indicates an uninitialized or unmapped resource state.
     FFXM_RESOURCE_STATE_UNORDERED_ACCESS = (1<<0),   ///< Indicates a resource is in the state to be used as UAV.
     FFXM_RESOURCE_STATE_COMPUTE_READ = (1 << 1),     ///< Indicates a resource is in the state to be read by compute shaders.
     FFXM_RESOURCE_STATE_PIXEL_READ = (1 << 2),       ///< Indicates a resource is in the state to be read by pixel shaders.

@@ -141,6 +141,39 @@ FFXM_API FfxmResource ffxmGetResourceVK(void*  vkResource,
 /// @ingroup VKBackend
 FFXM_API FfxmErrorCode ExecuteGpuJobsVK(FfxmInterface* backendInterface, FfxmCommandList commandList);
 
+/// Unregister dynamic resources and recycle descriptor rings for an effect context.
+///
+/// @param [in] backendInterface           A pointer to a <c><i>FfxmInterface</i></c> structure.
+/// @param [in] commandList                The Vulkan command buffer wrapped in a <c><i>FfxmCommandList</i></c>.
+/// @param [in] effectContextId            The ID of the effect context.
+///
+/// @returns
+/// FFXM_OK on success.
+///
+/// @ingroup VKBackend
+FFXM_API FfxmErrorCode UnregisterResourcesVK(FfxmInterface* backendInterface, FfxmCommandList commandList, FfxmUInt32 effectContextId);
+
+// Test inspection and injection helpers
+typedef FfxmErrorCode (*FfxmTestJobExecutionHook)(FfxmUInt32 jobIndex, const FfxmGpuJobDescription* job);
+FFXM_API void ffxmSetTestJobExecutionHookVK(FfxmTestJobExecutionHook hook);
+FFXM_API FfxmResourceStates ffxmTestGetResourceCurrentStateVK(FfxmInterface* backendInterface, FfxmUInt32 resourceIndex);
+FFXM_API FfxmResourceStates ffxmTestGetResourceCommittedStateVK(FfxmInterface* backendInterface, FfxmUInt32 resourceIndex);
+FFXM_API bool ffxmTestGetResourceUndefinedVK(FfxmInterface* backendInterface, FfxmUInt32 resourceIndex);
+FFXM_API bool ffxmTestGetResourceCommittedUndefinedVK(FfxmInterface* backendInterface, FfxmUInt32 resourceIndex);
+FFXM_API FfxmUInt32 ffxmTestGetEffectContextFrameIndexVK(FfxmInterface* backendInterface, FfxmUInt32 effectContextId);
+FFXM_API FfxmErrorCode ffxmTestSetupBackendContextVK(
+    FfxmInterface* backendInterface,
+    void* scratchBuffer,
+    size_t scratchBufferSize,
+    FfxmUInt32 maxContexts,
+    FfxmUInt32* outEffectContextId);
+FFXM_API void ffxmTestSetResourceStateVK(
+    FfxmInterface* backendInterface,
+    FfxmUInt32 resourceIndex,
+    FfxmResourceStates state,
+    bool undefined);
+FFXM_API void ffxmTestResetBackendRefCountVK();
+
 #if defined(__cplusplus)
 }
 #endif // #if defined(__cplusplus)

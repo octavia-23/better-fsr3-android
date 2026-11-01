@@ -292,6 +292,7 @@ typedef struct BackendContext_VK {
         bool                  active;
 
         bool                  isEndOfUpscaler;
+        bool                  executionSucceeded;
     } EffectContext;
 
     Resource*               pResources;
@@ -838,6 +839,8 @@ VkAccessFlags getVKAccessFlagsFromResourceState(FfxmResourceStates state)
         return VK_ACCESS_TRANSFER_WRITE_BIT;
     case FFXM_RESOURCE_STATE_INDIRECT_ARGUMENT:
         return VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+    case FFXM_RESOURCE_STATE_UNMAPPED:
+        return 0;
     default:
         FFXM_ASSERT_MESSAGE(false, "State flag not yet supported");
         return VK_ACCESS_SHADER_READ_BIT;
@@ -861,6 +864,8 @@ VkPipelineStageFlags getVKPipelineStageFlagsFromResourceState(FfxmResourceStates
         return VK_PIPELINE_STAGE_TRANSFER_BIT;
     case FFXM_RESOURCE_STATE_PIXEL_WRITE:
         return VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    case FFXM_RESOURCE_STATE_UNMAPPED:
+        return VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
     default:
         FFXM_ASSERT_MESSAGE(false, "Pipeline stage flag not yet supported");
         return VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
@@ -885,6 +890,8 @@ VkImageLayout getVKImageLayoutFromResourceState(FfxmResourceStates state)
         return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
     case FFXM_RESOURCE_STATE_COPY_DEST:
         return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    case FFXM_RESOURCE_STATE_UNMAPPED:
+        return VK_IMAGE_LAYOUT_UNDEFINED;
     default:
         FFXM_ASSERT_MESSAGE(false, "Image layout flag not yet supported");
         return VK_IMAGE_LAYOUT_GENERAL;
@@ -1352,6 +1359,8 @@ FfxmErrorCode CreateBackendContextVK(FfxmInterface* backendInterface, FfxmUInt32
             }
             effectContext.nextPipelineLayout = (i * FFXM_MAX_PASS_COUNT);
             effectContext.frameIndex = 0;
+            effectContext.isEndOfUpscaler = false;
+            effectContext.executionSucceeded = false;
             break;
         }
     }
@@ -1847,6 +1856,7 @@ FfxmErrorCode RegisterResourceVK(
     FFXM_ASSERT(NULL != backendInterface);
     BackendContext_VK* backendContext = (BackendContext_VK*)(backendInterface->scratchBuffer);
     BackendContext_VK::EffectContext& effectContext = backendContext->pEffectContexts[effectContextId];
+    effectContext.executionSucceeded = false;
 
     if (inFfxmResource->resource == nullptr) {
 
@@ -2053,44 +2063,73 @@ FfxmErrorCode UnregisterResourcesVK(FfxmInterface* backendInterface, FfxmCommand
     FFXM_ASSERT(NULL != backendInterface);
     BackendContext_VK* backendContext = (BackendContext_VK*)(backendInterface->scratchBuffer);
     BackendContext_VK::EffectContext& effectContext = backendContext->pEffectContexts[effectContextId];
+    const bool executionSucceeded = effectContext.executionSucceeded;
 
-    // Walk back all the resources that don't belong to us and reset them to their initial state
     const FfxmUInt32 dynamicResourceIndexStart = getDynamicResourcesStartIndex(effectContextId);
-    for (FfxmUInt32 resourceIndex = ++effectContext.nextDynamicResource; resourceIndex <= dynamicResourceIndexStart; ++resourceIndex)
+
+    if (executionSucceeded)
     {
-        FfxmResourceInternal internalResource;
-        internalResource.internalIndex = resourceIndex;
+        // Normal success path: record restoration barriers into the active command buffer
+        for (FfxmUInt32 resourceIndex = ++effectContext.nextDynamicResource; resourceIndex <= dynamicResourceIndexStart; ++resourceIndex)
+        {
+            FfxmResourceInternal internalResource;
+            internalResource.internalIndex = resourceIndex;
 
-        BackendContext_VK::Resource* backendResource = &backendContext->pResources[resourceIndex];
+            BackendContext_VK::Resource* backendResource = &backendContext->pResources[resourceIndex];
 
-        // Also clear out their srv/uav indices so they are regenerated each frame
-        backendResource->uavViewIndex = -1;
-        backendResource->srvViewIndex = -1;
+            // Also clear out their srv/uav indices so they are regenerated each frame
+            backendResource->uavViewIndex = -1;
+            backendResource->srvViewIndex = -1;
 
-        // Add the barrier
-        addBarrier(backendContext, &internalResource, backendResource->initialState);
+            // Add the barrier
+            addBarrier(backendContext, &internalResource, backendResource->initialState);
 
-        backendResource->committedState = backendResource->initialState;
-        backendResource->committedUndefined = backendResource->undefined;
+            backendResource->committedState = backendResource->initialState;
+            backendResource->committedUndefined = backendResource->undefined;
+        }
+
+        FFXM_ASSERT(nullptr != commandList);
+        VkCommandBuffer pCmdList = reinterpret_cast<VkCommandBuffer>(commandList);
+
+        flushBarriers(backendContext, pCmdList);
+
+        // destroy the views of the next frame
+        if (effectContext.isEndOfUpscaler)
+        {
+            effectContext.frameIndex = (effectContext.frameIndex + 1) % FFXM_MAX_QUEUED_FRAMES;
+            destroyDynamicViews(backendContext, effectContextId, effectContext.frameIndex);
+            effectContext.isEndOfUpscaler = false;
+        }
     }
-
-    FFXM_ASSERT(nullptr != commandList);
-    VkCommandBuffer pCmdList = reinterpret_cast<VkCommandBuffer>(commandList);
-
-    flushBarriers(backendContext, pCmdList);
-
-    // Just reset the dynamic resource index, but leave the images views.
-    // They will be deleted in the first pipeline destroy call as they need to live until then
-    effectContext.nextDynamicResource = dynamicResourceIndexStart;
-    backendContext->gpuJobCount = 0;
-
-    // destroy the views of the next frame
-    if (effectContext.isEndOfUpscaler)
+    else
     {
-        effectContext.frameIndex = (effectContext.frameIndex + 1) % FFXM_MAX_QUEUED_FRAMES;
-        destroyDynamicViews(backendContext, effectContextId, effectContext.frameIndex);
+        // Failure or aborted dispatch: do NOT record or commit discarded transitions!
+        for (FfxmUInt32 resourceIndex = ++effectContext.nextDynamicResource; resourceIndex <= dynamicResourceIndexStart; ++resourceIndex)
+        {
+            BackendContext_VK::Resource* backendResource = &backendContext->pResources[resourceIndex];
+
+            // Clear view indices so they are regenerated cleanly on retry
+            backendResource->uavViewIndex = -1;
+            backendResource->srvViewIndex = -1;
+
+            // Restore current state to last committed state
+            backendResource->currentState = backendResource->committedState;
+            backendResource->undefined = backendResource->committedUndefined;
+        }
+
+        // Discard any barriers queued in backendContext
+        backendContext->scheduledImageBarrierCount = 0;
+        backendContext->scheduledBufferBarrierCount = 0;
+        backendContext->srcStageMask = 0;
+        backendContext->dstStageMask = 0;
+
+        // Do not advance descriptor ring
         effectContext.isEndOfUpscaler = false;
     }
+
+    effectContext.executionSucceeded = false;
+    effectContext.nextDynamicResource = dynamicResourceIndexStart;
+    backendContext->gpuJobCount = 0;
 
     return FFXM_OK;
 }
@@ -3826,6 +3865,13 @@ static FfxmErrorCode executeGpuJobClearFloat(BackendContext_VK* backendContext, 
     return FFXM_OK;
 }
 
+static FfxmTestJobExecutionHook s_TestJobExecutionHook = nullptr;
+
+FFXM_API void ffxmSetTestJobExecutionHookVK(FfxmTestJobExecutionHook hook)
+{
+    s_TestJobExecutionHook = hook;
+}
+
 FFXM_API FfxmErrorCode ExecuteGpuJobsVK(FfxmInterface* backendInterface, FfxmCommandList commandList)
 {
     FFXM_RETURN_ON_ERROR(backendInterface != NULL, FFXM_ERROR_INVALID_POINTER);
@@ -3847,31 +3893,43 @@ FFXM_API FfxmErrorCode ExecuteGpuJobsVK(FfxmInterface* backendInterface, FfxmCom
         VkCommandBuffer vkCommandBuffer = reinterpret_cast<VkCommandBuffer>(commandList);
         FfxmErrorCode jobError = FFXM_OK;
 
-        switch (gpuJob->jobType)
+        if (s_TestJobExecutionHook != nullptr)
         {
-        case FFXM_GPU_JOB_CLEAR_FLOAT:
-        {
-            jobError = executeGpuJobClearFloat(backendContext, gpuJob, vkCommandBuffer);
-            break;
+            FfxmErrorCode hookErr = s_TestJobExecutionHook(i, gpuJob);
+            if (hookErr != FFXM_OK)
+            {
+                jobError = hookErr;
+            }
         }
-        case FFXM_GPU_JOB_COPY:
+
+        if (jobError == FFXM_OK)
         {
-            jobError = executeGpuJobCopy(backendContext, gpuJob, vkCommandBuffer);
-            break;
-        }
-        case FFXM_GPU_JOB_COMPUTE:
-        {
-            jobError = executeGpuJobCompute(backendContext, gpuJob, vkCommandBuffer);
-            break;
-        }
-        case FFXM_GPU_JOB_FRAGMENT:
-        {
-            jobError = executeGpuJobFragment(backendContext, gpuJob, vkCommandBuffer);
-            break;
-        }
-        default:
-            jobError = FFXM_ERROR_INVALID_ENUM;
-            break;
+            switch (gpuJob->jobType)
+            {
+            case FFXM_GPU_JOB_CLEAR_FLOAT:
+            {
+                jobError = executeGpuJobClearFloat(backendContext, gpuJob, vkCommandBuffer);
+                break;
+            }
+            case FFXM_GPU_JOB_COPY:
+            {
+                jobError = executeGpuJobCopy(backendContext, gpuJob, vkCommandBuffer);
+                break;
+            }
+            case FFXM_GPU_JOB_COMPUTE:
+            {
+                jobError = executeGpuJobCompute(backendContext, gpuJob, vkCommandBuffer);
+                break;
+            }
+            case FFXM_GPU_JOB_FRAGMENT:
+            {
+                jobError = executeGpuJobFragment(backendContext, gpuJob, vkCommandBuffer);
+                break;
+            }
+            default:
+                jobError = FFXM_ERROR_INVALID_ENUM;
+                break;
+            }
         }
 
         if (jobError != FFXM_OK)
@@ -3895,9 +3953,10 @@ FFXM_API FfxmErrorCode ExecuteGpuJobsVK(FfxmInterface* backendInterface, FfxmCom
         backendContext->srcStageMask = 0;
         backendContext->dstStageMask = 0;
 
-        // Disarm isEndOfUpscaler on all effect contexts so UnregisterResourcesVK does not advance the ring
+        // Disarm isEndOfUpscaler and mark execution failed on all effect contexts
         for (FfxmUInt32 c = 0; c < s_MaxEffectContexts; ++c) {
             backendContext->pEffectContexts[c].isEndOfUpscaler = false;
+            backendContext->pEffectContexts[c].executionSucceeded = false;
         }
     }
     else
@@ -3908,11 +3967,203 @@ FFXM_API FfxmErrorCode ExecuteGpuJobsVK(FfxmInterface* backendInterface, FfxmCom
             backendContext->pResources[r].committedState = backendContext->pResources[r].currentState;
             backendContext->pResources[r].committedUndefined = backendContext->pResources[r].undefined;
         }
+
+        for (FfxmUInt32 c = 0; c < s_MaxEffectContexts; ++c) {
+            backendContext->pEffectContexts[c].executionSucceeded = true;
+        }
     }
 
     backendContext->gpuJobCount = 0;
 
     return firstErrorCode;
+}
+
+FFXM_API FfxmResourceStates ffxmTestGetResourceCurrentStateVK(FfxmInterface* backendInterface, FfxmUInt32 resourceIndex)
+{
+    BackendContext_VK* backendContext = (BackendContext_VK*)backendInterface->scratchBuffer;
+    return backendContext->pResources[resourceIndex].currentState;
+}
+
+FFXM_API FfxmResourceStates ffxmTestGetResourceCommittedStateVK(FfxmInterface* backendInterface, FfxmUInt32 resourceIndex)
+{
+    BackendContext_VK* backendContext = (BackendContext_VK*)backendInterface->scratchBuffer;
+    return backendContext->pResources[resourceIndex].committedState;
+}
+
+FFXM_API bool ffxmTestGetResourceUndefinedVK(FfxmInterface* backendInterface, FfxmUInt32 resourceIndex)
+{
+    BackendContext_VK* backendContext = (BackendContext_VK*)backendInterface->scratchBuffer;
+    return backendContext->pResources[resourceIndex].undefined;
+}
+
+FFXM_API bool ffxmTestGetResourceCommittedUndefinedVK(FfxmInterface* backendInterface, FfxmUInt32 resourceIndex)
+{
+    BackendContext_VK* backendContext = (BackendContext_VK*)backendInterface->scratchBuffer;
+    return backendContext->pResources[resourceIndex].committedUndefined;
+}
+
+FFXM_API FfxmUInt32 ffxmTestGetEffectContextFrameIndexVK(FfxmInterface* backendInterface, FfxmUInt32 effectContextId)
+{
+    BackendContext_VK* backendContext = (BackendContext_VK*)backendInterface->scratchBuffer;
+    return backendContext->pEffectContexts[effectContextId].frameIndex;
+}
+
+static void VKAPI_PTR testStubVkCmdPipelineBarrier(VkCommandBuffer, VkPipelineStageFlags, VkPipelineStageFlags, VkDependencyFlags, uint32_t, const VkMemoryBarrier*, uint32_t, const VkBufferMemoryBarrier*, uint32_t, const VkImageMemoryBarrier*) {}
+static void VKAPI_PTR testStubVkCmdClearColorImage(VkCommandBuffer, VkImage, VkImageLayout, const VkClearColorValue*, uint32_t, const VkImageSubresourceRange*) {}
+static void VKAPI_PTR testStubVkCmdFillBuffer(VkCommandBuffer, VkBuffer, VkDeviceSize, VkDeviceSize, uint32_t) {}
+static void VKAPI_PTR testStubVkCmdBindPipeline(VkCommandBuffer, VkPipelineBindPoint, VkPipeline) {}
+static void VKAPI_PTR testStubVkCmdBindDescriptorSets(VkCommandBuffer, VkPipelineBindPoint, VkPipelineLayout, uint32_t, uint32_t, const VkDescriptorSet*, uint32_t, const uint32_t*) {}
+static void VKAPI_PTR testStubVkCmdDispatch(VkCommandBuffer, uint32_t, uint32_t, uint32_t) {}
+static void VKAPI_PTR testStubVkUpdateDescriptorSets(VkDevice, uint32_t, const VkWriteDescriptorSet*, uint32_t, const VkCopyDescriptorSet*) {}
+static VkResult VKAPI_PTR testStubVkCreateImageView(VkDevice, const VkImageViewCreateInfo*, const VkAllocationCallbacks*, VkImageView* pView) {
+    if (pView) *pView = (VkImageView)(uintptr_t)0x1234;
+    return VK_SUCCESS;
+}
+static void VKAPI_PTR testStubVkDestroyImageView(VkDevice, VkImageView, const VkAllocationCallbacks*) {}
+
+FFXM_API FfxmErrorCode ffxmTestSetupBackendContextVK(
+    FfxmInterface* backendInterface,
+    void* scratchBuffer,
+    size_t scratchBufferSize,
+    FfxmUInt32 maxContexts,
+    FfxmUInt32* outEffectContextId)
+{
+    FFXM_RETURN_ON_ERROR(backendInterface != nullptr, FFXM_ERROR_INVALID_POINTER);
+    FFXM_RETURN_ON_ERROR(scratchBuffer != nullptr, FFXM_ERROR_INVALID_POINTER);
+    FFXM_RETURN_ON_ERROR(maxContexts > 0, FFXM_ERROR_INVALID_ARGUMENT);
+
+    backendInterface->fpGetSDKVersion = GetSDKVersionVK;
+    backendInterface->fpCreateBackendContext = CreateBackendContextVK;
+    backendInterface->fpGetDeviceCapabilities = GetDeviceCapabilitiesVK;
+    backendInterface->fpDestroyBackendContext = DestroyBackendContextVK;
+    backendInterface->fpCreateResource = CreateResourceVK;
+    backendInterface->fpDestroyResource = DestroyResourceVK;
+    backendInterface->fpRegisterResource = RegisterResourceVK;
+    backendInterface->fpGetResource = GetResourceVK;
+    backendInterface->fpUnregisterResources = UnregisterResourcesVK;
+    backendInterface->fpGetResourceDescription = GetResourceDescriptionVK;
+    backendInterface->fpCreateComputePipeline = CreateComputePipelineVK;
+    backendInterface->fpCreateGraphicsPipeline = CreateGraphicsPipelineVK;
+    backendInterface->fpDestroyPipeline = DestroyPipelineVK;
+    backendInterface->fpScheduleGpuJob = ScheduleGpuJobVK;
+    backendInterface->fpExecuteGpuJobs = ExecuteGpuJobsVK;
+
+    backendInterface->scratchBuffer = scratchBuffer;
+    backendInterface->scratchBufferSize = scratchBufferSize;
+    s_MaxEffectContexts = maxContexts;
+
+    BackendContext_VK* backendContext = reinterpret_cast<BackendContext_VK*>(scratchBuffer);
+    if (!s_BackendRefCount) {
+        memset(backendContext, 0, sizeof(BackendContext_VK));
+
+        size_t gpuJobDescArraySize = 0;
+        size_t resourceViewArraySize = 0;
+        size_t ringBufferArraySize = 0;
+        size_t pipelineArraySize = 0;
+        size_t resourceArraySize = 0;
+        size_t contextArraySize = 0;
+
+        if (!ffxmCheckMulSize(s_MaxEffectContexts, FFXM_MAX_GPU_JOBS * sizeof(FfxmGpuJobDescription), &gpuJobDescArraySize) ||
+            !ffxmCheckAlignUpSize(gpuJobDescArraySize, sizeof(FfxmUInt32), &gpuJobDescArraySize) ||
+            !ffxmCheckMulSize(s_MaxEffectContexts, FFXM_MAX_QUEUED_FRAMES * FFXM_MAX_RESOURCE_COUNT * 2 * sizeof(BackendContext_VK::VkResourceView), &resourceViewArraySize) ||
+            !ffxmCheckAlignUpSize(resourceViewArraySize, sizeof(FfxmUInt32), &resourceViewArraySize) ||
+            !ffxmCheckMulSize(s_MaxEffectContexts, FFXM_RING_BUFFER_SIZE * sizeof(BackendContext_VK::UniformBuffer), &ringBufferArraySize) ||
+            !ffxmCheckAlignUpSize(ringBufferArraySize, sizeof(FfxmUInt32), &ringBufferArraySize) ||
+            !ffxmCheckMulSize(s_MaxEffectContexts, FFXM_MAX_PASS_COUNT * sizeof(BackendContext_VK::PipelineLayout), &pipelineArraySize) ||
+            !ffxmCheckAlignUpSize(pipelineArraySize, sizeof(FfxmUInt32), &pipelineArraySize) ||
+            !ffxmCheckMulSize(s_MaxEffectContexts, FFXM_MAX_RESOURCE_COUNT * sizeof(BackendContext_VK::Resource), &resourceArraySize) ||
+            !ffxmCheckAlignUpSize(resourceArraySize, sizeof(FfxmUInt32), &resourceArraySize) ||
+            !ffxmCheckMulSize(s_MaxEffectContexts, sizeof(BackendContext_VK::EffectContext), &contextArraySize) ||
+            !ffxmCheckAlignUpSize(contextArraySize, sizeof(FfxmUInt32), &contextArraySize)) {
+            return FFXM_ERROR_INVALID_ARGUMENT;
+        }
+
+        uint8_t* pMem = reinterpret_cast<uint8_t*>(backendContext + 1);
+
+        backendContext->pGpuJobs = reinterpret_cast<FfxmGpuJobDescription*>(pMem);
+        memset(backendContext->pGpuJobs, 0, gpuJobDescArraySize);
+        pMem += gpuJobDescArraySize;
+
+        backendContext->pResourceViews = reinterpret_cast<BackendContext_VK::VkResourceView*>(pMem);
+        memset(backendContext->pResourceViews, 0, resourceViewArraySize);
+        pMem += resourceViewArraySize;
+
+        backendContext->pRingBuffer = reinterpret_cast<BackendContext_VK::UniformBuffer*>(pMem);
+        memset(backendContext->pRingBuffer, 0, ringBufferArraySize);
+        pMem += ringBufferArraySize;
+
+        backendContext->pPipelineLayouts = reinterpret_cast<BackendContext_VK::PipelineLayout*>(pMem);
+        memset(backendContext->pPipelineLayouts, 0, pipelineArraySize);
+        pMem += pipelineArraySize;
+
+        backendContext->pResources = reinterpret_cast<BackendContext_VK::Resource*>(pMem);
+        memset(backendContext->pResources, 0, resourceArraySize);
+        pMem += resourceArraySize;
+
+        for (FfxmUInt32 i = 0; i < s_MaxEffectContexts * FFXM_MAX_RESOURCE_COUNT; ++i) {
+            backendContext->pResources[i].uavViewIndex = backendContext->pResources[i].srvViewIndex = -1;
+            backendContext->pResources[i].undefined = true;
+            backendContext->pResources[i].committedUndefined = true;
+            backendContext->pResources[i].currentState = FFXM_RESOURCE_STATE_UNMAPPED;
+            backendContext->pResources[i].committedState = FFXM_RESOURCE_STATE_UNMAPPED;
+        }
+
+        backendContext->pEffectContexts = reinterpret_cast<BackendContext_VK::EffectContext*>(pMem);
+        memset(backendContext->pEffectContexts, 0, contextArraySize);
+        pMem += contextArraySize;
+
+        backendContext->vkFunctionTable.vkCmdPipelineBarrier = testStubVkCmdPipelineBarrier;
+        backendContext->vkFunctionTable.vkCmdClearColorImage = testStubVkCmdClearColorImage;
+        backendContext->vkFunctionTable.vkCmdFillBuffer = testStubVkCmdFillBuffer;
+        backendContext->vkFunctionTable.vkCmdBindPipeline = testStubVkCmdBindPipeline;
+        backendContext->vkFunctionTable.vkCmdBindDescriptorSets = testStubVkCmdBindDescriptorSets;
+        backendContext->vkFunctionTable.vkCmdDispatch = testStubVkCmdDispatch;
+        backendContext->vkFunctionTable.vkUpdateDescriptorSets = testStubVkUpdateDescriptorSets;
+        backendContext->vkFunctionTable.vkCreateImageView = testStubVkCreateImageView;
+        backendContext->vkFunctionTable.vkDestroyImageView = testStubVkDestroyImageView;
+    }
+
+    ++s_BackendRefCount;
+
+    for (FfxmUInt32 i = 0; i < s_MaxEffectContexts; ++i) {
+        if (!backendContext->pEffectContexts[i].active) {
+            if (outEffectContextId) *outEffectContextId = i;
+            BackendContext_VK::EffectContext& effectContext = backendContext->pEffectContexts[i];
+            effectContext.active = true;
+            effectContext.nextStaticResource = i * FFXM_MAX_RESOURCE_COUNT;
+            effectContext.nextDynamicResource = getDynamicResourcesStartIndex(i);
+            effectContext.nextStaticResourceView = i * FFXM_MAX_QUEUED_FRAMES * FFXM_MAX_RESOURCE_COUNT * 2;
+            for (FfxmUInt32 frameIndex = 0; frameIndex < FFXM_MAX_QUEUED_FRAMES; ++frameIndex) {
+                effectContext.nextDynamicResourceView[frameIndex] = getDynamicResourceViewsStartIndex(i, frameIndex);
+            }
+            effectContext.nextPipelineLayout = i * FFXM_MAX_PASS_COUNT;
+            effectContext.frameIndex = 0;
+            effectContext.isEndOfUpscaler = false;
+            effectContext.executionSucceeded = false;
+            return FFXM_OK;
+        }
+    }
+
+    return FFXM_ERROR_OUT_OF_MEMORY;
+}
+
+FFXM_API void ffxmTestSetResourceStateVK(
+    FfxmInterface* backendInterface,
+    FfxmUInt32 resourceIndex,
+    FfxmResourceStates state,
+    bool undefined)
+{
+    BackendContext_VK* backendContext = reinterpret_cast<BackendContext_VK*>(backendInterface->scratchBuffer);
+    backendContext->pResources[resourceIndex].currentState = state;
+    backendContext->pResources[resourceIndex].committedState = state;
+    backendContext->pResources[resourceIndex].undefined = undefined;
+    backendContext->pResources[resourceIndex].committedUndefined = undefined;
+}
+
+FFXM_API void ffxmTestResetBackendRefCountVK()
+{
+    s_BackendRefCount = 0;
+    s_MaxEffectContexts = 0;
 }
 
 } // namespace arm

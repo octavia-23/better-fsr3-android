@@ -151,6 +151,7 @@ if(BUILD_TESTING)
     endif()
     target_include_directories(test_milestone2 PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/samples/common
         ${FFXM_INCLUDE_PATH}
         ${FFXM_HOST_PATH}
         ${FFXM_GPU_PATH}
