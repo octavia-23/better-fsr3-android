@@ -15,6 +15,7 @@
 
 #include <cmath>
 #include <ctime>
+#include <memory>
 
 namespace {
 
@@ -292,6 +293,13 @@ void handleCommand(android_app* androidApp, int32_t cmd)
         break;
     case APP_CMD_WINDOW_RESIZED:
     case APP_CMD_CONFIG_CHANGED:
+        if (app.vulkanReady && app.window) {
+            int32_t w = ANativeWindow_getWidth(app.window);
+            int32_t h = ANativeWindow_getHeight(app.window);
+            if (w > 0 && h > 0 && (uint32_t)w == app.displayExtent.width && (uint32_t)h == app.displayExtent.height) {
+                break;
+            }
+        }
         app.swapchainDirty = true;
         break;
     default:
@@ -303,37 +311,31 @@ void handleCommand(android_app* androidApp, int32_t cmd)
 
 void android_main(android_app* androidApp)
 {
-    App app;
-    androidApp->userData     = &app;
+    auto app = std::make_unique<App>();
+    androidApp->userData     = app.get();
     androidApp->onAppCmd     = handleCommand;
 
     while (true) {
         int                   events = 0;
         android_poll_source*  source = nullptr;
 
-        int timeoutMs = -1;
-        if (app.renderingTerminated || !app.window) {
-            timeoutMs = -1; // Waiting for native window or permanently stopped after threshold
-        } else if (app.swapchainDirty) {
-            timeoutMs = 16; // Sensible backoff (~16ms) to retry swapchain rebuild without tight CPU spinning
-        } else if (app.renderReady) {
-            timeoutMs = 0;  // Normal rendering: non-blocking
-        } else {
-            timeoutMs = -1;
-        }
+        int timeoutMs = (app->renderReady && !app->swapchainDirty && !app->renderingTerminated && app->window) ? 0 :
+                        (app->swapchainDirty ? 16 : -1);
 
         while (ALooper_pollOnce(timeoutMs, nullptr, &events,
                                 reinterpret_cast<void**>(&source)) >= 0) {
             if (source)
                 source->process(androidApp, source);
             if (androidApp->destroyRequested) {
-                teardownRendering(app);
+                teardownRendering(*app);
                 return;
             }
+            // Once an event is processed, drain remaining pending events without blocking.
+            timeoutMs = 0;
         }
 
-        if (!app.renderingTerminated && app.window) {
-            drawFrame(app);
+        if (!app->renderingTerminated && app->window && app->renderReady) {
+            drawFrame(*app);
         }
     }
 }

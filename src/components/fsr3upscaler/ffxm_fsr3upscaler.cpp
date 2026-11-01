@@ -24,6 +24,9 @@
 #include <cstring>
 #include <cfloat>
 #include <cwchar>
+#if defined(__ANDROID__)
+#include <android/log.h>
+#endif
 
 #define FFXM_CPU
 #include "ffxm_core.h"
@@ -797,6 +800,12 @@ FfxmErrorCode fsr3UpscalerCreate(
             context->effectContextId,
             &context->srvResources[currentSurfaceDescription->id]);
         if (res != FFXM_OK) {
+#if defined(__ANDROID__)
+            __android_log_print(ANDROID_LOG_ERROR, "ArmASR", "Internal surface allocation failed at index %u (%ls), id %u, format %d, %ux%u, usage 0x%x -> err 0x%08X",
+                currentSurfaceIndex, currentSurfaceDescription->name, currentSurfaceDescription->id,
+                currentSurfaceDescription->format, currentSurfaceDescription->width, currentSurfaceDescription->height,
+                currentSurfaceDescription->usage, (unsigned)res);
+#endif
             // Partial initialization failure: return immediately to trigger transactional rollback
             return res;
         }
@@ -844,11 +853,17 @@ FfxmErrorCode fsr3UpscalerCreate(
         context->effectContextId,
         &context->pipelinePrepareInputs);
     if (pipelineErr != FFXM_OK) {
+#if defined(__ANDROID__)
+        __android_log_print(ANDROID_LOG_ERROR, "ArmASR", "Compute pipeline creation failed for PREPARE_INPUTS: err 0x%08X", (unsigned)pipelineErr);
+#endif
         return pipelineErr;
     }
 
     pipelineErr = patchResourceBindings(&context->pipelinePrepareInputs);
     if (pipelineErr != FFXM_OK) {
+#if defined(__ANDROID__)
+        __android_log_print(ANDROID_LOG_ERROR, "ArmASR", "Compute pipeline creation failed for PREPARE_INPUTS: err 0x%08X", (unsigned)pipelineErr);
+#endif
         return pipelineErr;
     }
 
@@ -864,11 +879,17 @@ FfxmErrorCode fsr3UpscalerCreate(
         context->effectContextId,
         &context->pipelineLumaPyramid);
     if (pipelineErr != FFXM_OK) {
+#if defined(__ANDROID__)
+        __android_log_print(ANDROID_LOG_ERROR, "ArmASR", "Compute pipeline creation failed for LUMA_PYRAMID: err 0x%08X", (unsigned)pipelineErr);
+#endif
         return pipelineErr;
     }
 
     pipelineErr = patchResourceBindings(&context->pipelineLumaPyramid);
     if (pipelineErr != FFXM_OK) {
+#if defined(__ANDROID__)
+        __android_log_print(ANDROID_LOG_ERROR, "ArmASR", "Patch resource bindings failed for LUMA_PYRAMID: err 0x%08X", (unsigned)pipelineErr);
+#endif
         return pipelineErr;
     }
 
@@ -884,11 +905,17 @@ FfxmErrorCode fsr3UpscalerCreate(
         context->effectContextId,
         &context->pipelineShadingChangePyramid);
     if (pipelineErr != FFXM_OK) {
+#if defined(__ANDROID__)
+        __android_log_print(ANDROID_LOG_ERROR, "ArmASR", "Compute pipeline creation failed for SHADING_CHANGE_PYRAMID: err 0x%08X", (unsigned)pipelineErr);
+#endif
         return pipelineErr;
     }
 
     pipelineErr = patchResourceBindings(&context->pipelineShadingChangePyramid);
     if (pipelineErr != FFXM_OK) {
+#if defined(__ANDROID__)
+        __android_log_print(ANDROID_LOG_ERROR, "ArmASR", "Patch resource bindings failed for SHADING_CHANGE_PYRAMID: err 0x%08X", (unsigned)pipelineErr);
+#endif
         return pipelineErr;
     }
 
@@ -904,11 +931,17 @@ FfxmErrorCode fsr3UpscalerCreate(
         context->effectContextId,
         &context->pipelineShadingChange);
     if (pipelineErr != FFXM_OK) {
+#if defined(__ANDROID__)
+        __android_log_print(ANDROID_LOG_ERROR, "ArmASR", "Compute pipeline creation failed for SHADING_CHANGE: err 0x%08X", (unsigned)pipelineErr);
+#endif
         return pipelineErr;
     }
 
     pipelineErr = patchResourceBindings(&context->pipelineShadingChange);
     if (pipelineErr != FFXM_OK) {
+#if defined(__ANDROID__)
+        __android_log_print(ANDROID_LOG_ERROR, "ArmASR", "Patch resource bindings failed for SHADING_CHANGE: err 0x%08X", (unsigned)pipelineErr);
+#endif
         return pipelineErr;
     }
 
@@ -924,11 +957,17 @@ FfxmErrorCode fsr3UpscalerCreate(
         context->effectContextId,
         &context->pipelinePrepareReactivity);
     if (pipelineErr != FFXM_OK) {
+#if defined(__ANDROID__)
+        __android_log_print(ANDROID_LOG_ERROR, "ArmASR", "Compute pipeline creation failed for PREPARE_REACTIVITY: err 0x%08X", (unsigned)pipelineErr);
+#endif
         return pipelineErr;
     }
 
     pipelineErr = patchResourceBindings(&context->pipelinePrepareReactivity);
     if (pipelineErr != FFXM_OK) {
+#if defined(__ANDROID__)
+        __android_log_print(ANDROID_LOG_ERROR, "ArmASR", "Patch resource bindings failed for PREPARE_REACTIVITY: err 0x%08X", (unsigned)pipelineErr);
+#endif
         return pipelineErr;
     }
 
@@ -944,11 +983,17 @@ FfxmErrorCode fsr3UpscalerCreate(
         context->effectContextId,
         &context->pipelineLumaInstability);
     if (pipelineErr != FFXM_OK) {
+#if defined(__ANDROID__)
+        __android_log_print(ANDROID_LOG_ERROR, "ArmASR", "Compute pipeline creation failed for LUMA_INSTABILITY: err 0x%08X", (unsigned)pipelineErr);
+#endif
         return pipelineErr;
     }
 
     pipelineErr = patchResourceBindings(&context->pipelineLumaInstability);
     if (pipelineErr != FFXM_OK) {
+#if defined(__ANDROID__)
+        __android_log_print(ANDROID_LOG_ERROR, "ArmASR", "Patch resource bindings failed for LUMA_INSTABILITY: err 0x%08X", (unsigned)pipelineErr);
+#endif
         return pipelineErr;
     }
 
@@ -964,11 +1009,17 @@ FfxmErrorCode fsr3UpscalerCreate(
         context->effectContextId,
         &context->pipelineAccumulate);
     if (pipelineErr != FFXM_OK) {
+#if defined(__ANDROID__)
+        __android_log_print(ANDROID_LOG_ERROR, "ArmASR", "Compute pipeline creation failed for ACCUMULATE: err 0x%08X", (unsigned)pipelineErr);
+#endif
         return pipelineErr;
     }
 
     pipelineErr = patchResourceBindings(&context->pipelineAccumulate);
     if (pipelineErr != FFXM_OK) {
+#if defined(__ANDROID__)
+        __android_log_print(ANDROID_LOG_ERROR, "ArmASR", "Patch resource bindings failed for ACCUMULATE: err 0x%08X", (unsigned)pipelineErr);
+#endif
         return pipelineErr;
     }
 

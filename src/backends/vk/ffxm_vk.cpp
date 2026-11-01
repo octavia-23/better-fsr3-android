@@ -33,6 +33,13 @@
 #include <ffxm_hash.h>
 #include <wchar.h>
 
+#if defined(__ANDROID__)
+#include <android/log.h>
+#define FFXM_VK_LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "ArmASR_VK", __VA_ARGS__)
+#else
+#define FFXM_VK_LOGE(...) do {} while (0)
+#endif
+
 namespace arm
 {
 
@@ -1674,7 +1681,9 @@ FfxmErrorCode CreateResourceVK(
             imageInfo.format = ffxmGetVKSurfaceFormatFromSurfaceFormat(ffxmGetSurfaceFormatFromGamma(createResourceDescription->resourceDescription.format));
         }
 
-        if (backendContext->vkFunctionTable.vkCreateImage(backendContext->device, &imageInfo, nullptr, &backendResource->imageResource) != VK_SUCCESS) {
+        VkResult imgRes = backendContext->vkFunctionTable.vkCreateImage(backendContext->device, &imageInfo, nullptr, &backendResource->imageResource);
+        if (imgRes != VK_SUCCESS) {
+            FFXM_VK_LOGE("vkCreateImage failed: %d, format %d, extent %ux%u", (int)imgRes, (int)imageInfo.format, imageInfo.extent.width, imageInfo.extent.height);
             return FFXM_ERROR_BACKEND_API_ERROR;
         }
 
@@ -1686,10 +1695,14 @@ FfxmErrorCode CreateResourceVK(
 
         // allocate the memory
         FfxmErrorCode errorCode = allocateDeviceMemory(backendContext, memRequirements, requiredMemoryProperties, backendResource);
-        if (FFXM_OK != errorCode)
+        if (FFXM_OK != errorCode) {
+            FFXM_VK_LOGE("allocateDeviceMemory failed: 0x%08X", (unsigned)errorCode);
             return errorCode;
+        }
 
-        if (backendContext->vkFunctionTable.vkBindImageMemory(backendContext->device, backendResource->imageResource, backendResource->deviceMemory, 0) != VK_SUCCESS) {
+        VkResult bindRes = backendContext->vkFunctionTable.vkBindImageMemory(backendContext->device, backendResource->imageResource, backendResource->deviceMemory, 0);
+        if (bindRes != VK_SUCCESS) {
+            FFXM_VK_LOGE("vkBindImageMemory failed: %d", (int)bindRes);
             return FFXM_ERROR_BACKEND_API_ERROR;
         }
 
@@ -1755,7 +1768,9 @@ FfxmErrorCode CreateResourceVK(
         addMutableViewForSRV(imageViewCreateInfo, imageViewUsageCreateInfo, backendResource->resourceDescription);
 
         // create an image view containing all mip levels for use as an srv
-        if (backendContext->vkFunctionTable.vkCreateImageView(backendContext->device, &imageViewCreateInfo, NULL, &backendContext->pResourceViews[backendResource->srvViewIndex].imageView) != VK_SUCCESS) {
+        VkResult srvRes = backendContext->vkFunctionTable.vkCreateImageView(backendContext->device, &imageViewCreateInfo, NULL, &backendContext->pResourceViews[backendResource->srvViewIndex].imageView);
+        if (srvRes != VK_SUCCESS) {
+            FFXM_VK_LOGE("vkCreateImageView (SRV) failed: %d, format %d", (int)srvRes, (int)imageViewCreateInfo.format);
             return FFXM_ERROR_BACKEND_API_ERROR;
         }
 #ifdef _DEBUG
@@ -1778,7 +1793,9 @@ FfxmErrorCode CreateResourceVK(
                 imageViewCreateInfo.subresourceRange.levelCount = 1;
                 imageViewCreateInfo.subresourceRange.baseMipLevel = mip;
 
-                if (backendContext->vkFunctionTable.vkCreateImageView(backendContext->device, &imageViewCreateInfo, NULL, &backendContext->pResourceViews[backendResource->uavViewIndex + mip].imageView) != VK_SUCCESS) {
+                VkResult uavRes = backendContext->vkFunctionTable.vkCreateImageView(backendContext->device, &imageViewCreateInfo, NULL, &backendContext->pResourceViews[backendResource->uavViewIndex + mip].imageView);
+                if (uavRes != VK_SUCCESS) {
+                    FFXM_VK_LOGE("vkCreateImageView (UAV mip %u/%u) failed: %d, format %d", mip, backendResource->resourceDescription.mipCount, (int)uavRes, (int)imageViewCreateInfo.format);
                     return FFXM_ERROR_BACKEND_API_ERROR;
                 }
 #ifdef _DEBUG
@@ -2568,7 +2585,9 @@ FfxmErrorCode CreateComputePipelineVK(FfxmInterface* backendInterface,
     shaderModuleCreateInfo.pCode = (FfxmUInt32*)shaderBlob.data;
     shaderModuleCreateInfo.codeSize = shaderBlob.size;
 
-    if (backendContext->vkFunctionTable.vkCreateShaderModule(backendContext->device, &shaderModuleCreateInfo, nullptr, &shaderModule) != VK_SUCCESS) {
+    VkResult smRes = backendContext->vkFunctionTable.vkCreateShaderModule(backendContext->device, &shaderModuleCreateInfo, nullptr, &shaderModule);
+    if (smRes != VK_SUCCESS) {
+        FFXM_VK_LOGE("vkCreateShaderModule failed: %d, pass %d, blob size %zu", (int)smRes, (int)pass, shaderBlob.size);
         cleanupPartialComputePipeline(VK_NULL_HANDLE);
         return FFXM_ERROR_BACKEND_API_ERROR;
     }
@@ -2598,7 +2617,9 @@ FfxmErrorCode CreateComputePipelineVK(FfxmInterface* backendInterface,
     pipelineCreateInfo.layout = pPipelineLayout->pipelineLayout;
 
     VkPipeline computePipeline = VK_NULL_HANDLE;
-    if (backendContext->vkFunctionTable.vkCreateComputePipelines(backendContext->device, VK_NULL_HANDLE, 1, &pipelineCreateInfo, nullptr, &computePipeline) != VK_SUCCESS) {
+    VkResult cpRes = backendContext->vkFunctionTable.vkCreateComputePipelines(backendContext->device, VK_NULL_HANDLE, 1, &pipelineCreateInfo, nullptr, &computePipeline);
+    if (cpRes != VK_SUCCESS) {
+        FFXM_VK_LOGE("vkCreateComputePipelines failed: %d, pass %d, isWave64=%d", (int)cpRes, (int)pass, (int)isWave64);
         cleanupPartialComputePipeline(shaderModule);
         return FFXM_ERROR_BACKEND_API_ERROR;
     }

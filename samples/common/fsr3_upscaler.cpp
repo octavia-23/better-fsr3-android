@@ -128,7 +128,7 @@ bool Fsr3Upscaler::createTarget(VkContext& ctx, RenderTarget& rt, VkFormat forma
 bool Fsr3Upscaler::createSharedResources(VkContext& ctx)
 {
     FfxmFsr3UpscalerSharedResourceDescriptions sharedDescs = {};
-    FfxmErrorCode err = ffxmFsr3UpscalerGetSharedResourceDescriptions(&context_, &sharedDescs);
+    FfxmErrorCode err = ffxmFsr3UpscalerGetSharedResourceDescriptions(context_.get(), &sharedDescs);
     if (err != FFXM_OK) {
         LOGE("ffxmFsr3UpscalerGetSharedResourceDescriptions failed: 0x%08X", (unsigned)err);
         return false;
@@ -226,9 +226,13 @@ bool Fsr3Upscaler::init(VkContext& ctx, VkExtent2D renderExtent, VkExtent2D disp
     contextDesc.backendInterface = interface_;
     contextDesc.fpMessage        = messageCallback;
 
-    err = ffxmFsr3UpscalerContextCreate(&context_, &contextDesc);
+    context_ = std::make_unique<arm::FfxmFsr3UpscalerContext>();
+    memset(context_.get(), 0, sizeof(arm::FfxmFsr3UpscalerContext));
+
+    err = ffxmFsr3UpscalerContextCreate(context_.get(), &contextDesc);
     if (err != FFXM_OK) {
         LOGE("ffxmFsr3UpscalerContextCreate failed: 0x%08X", (unsigned)err);
+        context_.reset();
         return false;
     }
     contextCreated_ = true;
@@ -322,7 +326,7 @@ bool Fsr3Upscaler::dispatch(VkCommandBuffer cmd, const Scene& scene, VkExtent2D 
     desc.viewSpaceToMetersFactor    = 1.0f;
     desc.flags                      = 0;
 
-    FfxmErrorCode err = ffxmFsr3UpscalerContextDispatch(&context_, &desc);
+    FfxmErrorCode err = ffxmFsr3UpscalerContextDispatch(context_.get(), &desc);
     if (err != FFXM_OK) {
         LOGE("ffxmFsr3UpscalerContextDispatch failed: 0x%08X", (unsigned)err);
         return false;
@@ -333,15 +337,16 @@ bool Fsr3Upscaler::dispatch(VkCommandBuffer cmd, const Scene& scene, VkExtent2D 
 
 void Fsr3Upscaler::destroy()
 {
-    if (contextCreated_) {
+    if (contextCreated_ && context_) {
         if (device_ != VK_NULL_HANDLE)
             vkDeviceWaitIdle(device_);
         destroySharedResources(device_);
-        ffxmFsr3UpscalerContextDestroy(&context_);
+        ffxmFsr3UpscalerContextDestroy(context_.get());
         contextCreated_ = false;
     } else if (device_ != VK_NULL_HANDLE) {
         destroySharedResources(device_);
     }
+    context_.reset();
     scratchBuffer_.clear();
     pVkCtx_ = nullptr;
     device_ = VK_NULL_HANDLE;

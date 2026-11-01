@@ -8,6 +8,7 @@
 #include <host/ffxm_fsr3upscaler.h>
 
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 class VkContext;
@@ -134,7 +135,7 @@ private:
     VkDevice                 device_        = VK_NULL_HANDLE;
     VkContext*               pVkCtx_        = nullptr;
     arm::FfxmInterface       interface_     = {};
-    arm::FfxmFsr3UpscalerContext context_   = {};
+    std::unique_ptr<arm::FfxmFsr3UpscalerContext> context_;
     std::vector<uint8_t>     scratchBuffer_;
     bool                     contextCreated_= false;
     int32_t                  jitterPhaseCount_ = 1;
