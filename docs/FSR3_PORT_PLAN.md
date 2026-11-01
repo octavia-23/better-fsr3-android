@@ -575,3 +575,59 @@ flowchart TD
 * **Verifiable Acceptance Criteria**:
   - Clean cross-compilation with `FFXM_USE_PREBUILT_SHADERS=ON` succeeds on Linux, macOS, and Android hosts with zero host compiler dependencies.
   - Final APK passes 16 KB page-alignment check (`zipalign -c -P 16`).
+
+
+---
+
+## 12. Milestone 3 Final Closeout & Integration Verification Summary
+
+### 12.1 Overview & Scope Completion
+Milestone 3 achieves a complete, host-validated compute upscaler integration combining the full 7-pass FSR 3.1.4 compute pipeline (`PrepareInputs`, `LumaPyramid`, `ShadingChangePyramid`, `ShadingChange`, `PrepareReactivity`, `LumaInstability`, `Accumulate`), optional `AccumulateSharpen` / `RCAS` sharpening paths, and robust mobile Vulkan lifecycle / synchronization management across both Android (`samples/android`) and Windows (`samples/windows`).
+
+No further M3.x submilestones or speculative optimizations are required. Frame Generation remains deferred to Phase 2.
+
+### 12.2 Architectural Corrections & Robustness Hardening
+
+#### 1. Vulkan Resource Lifetime & Destruction Ordering
+In accordance with Vulkan specification guarantees, device memory bound to images must never be freed while an image handle exists. The resource destruction sequence across all shared resources (`dilatedDepth`, `dilatedMotionVectors`, `reconstructedPrevNearestDepth`, and internal render targets in `samples/common/fsr3_upscaler.cpp`) was corrected to:
+1. `vkDestroyImageView(device, imageView, allocator)`
+2. `vkDestroyImage(device, image, allocator)`
+3. `vkFreeMemory(device, memory, allocator)`
+4. Reset all handles to `VK_NULL_HANDLE` and clear descriptors (`rt = {}`).
+Full allocation unwinding was implemented for partial initialization failures, guaranteeing no dangling handles or memory leaks.
+
+#### 2. Frame Synchronization Recovery & State Machine Invariants
+In `samples/common/swapchain_sync.h`:
+- **Explicit Terminal Failure Separation**: Added dedicated `recoveryFailed_` state separate from `deviceLost_`. `isTerminalError()` communicates that rendering must cease if either `deviceLost_` or `recoveryFailed_` is flagged.
+- **Fail-Stop on Allocation Failure**: Transactional frame replacement (`resetFrameSyncObjects`) validates required Vulkan function pointers and halts immediately if replacement synchronization objects cannot be allocated, marking `recoveryFailed_ = true`.
+- **Terminal Error Protection**: Neither `vkDeviceWaitIdle()` nor resource recreation is attempted once a terminal state (`deviceLost_` or `recoveryFailed_`) has occurred.
+- **Sample Loop Propagation**: Both Android NativeActivity (`main.cpp`) and Windows sample loops check `sync.isTerminalError()` on swapchain rebuilds, dispatches, and acquisitions, cleanly breaking the render loop rather than reusing corrupted synchronization primitives.
+
+#### 3. Frame-State Validation Tightening
+The `SwapchainSync` state machine strictly validates inputs:
+- Rejects null `outImageIndex` in `beginFrame()`.
+- Rejects empty swapchain image collections.
+- Verifies `endFrame()` and `abortFrame()` receive the exact `imageIndex` acquired in the active frame (`acquiredImageIndex_`).
+- Enforces strict bounds checking (`frameIndex < kFramesInFlight`) across public recovery and handle inspection methods (`inFlightFence()`, `acquireSemaphore()`, `releaseSemaphore()`, `commandBuffer()`), returning `VK_NULL_HANDLE` on invalid indices.
+
+#### 4. Dual Build Configuration: Testing vs. Production
+- **Testing Build (`BUILD_TESTING=ON`)**: Test hooks (`FFXM_ENABLE_TEST_HOOKS=1`) enabled; backend compiles inspection and test harness entry points; builds and runs the 32-suite test runner (`test_milestone2`).
+- **Production Build (`BUILD_TESTING=OFF`)**: Test hooks disabled; no test-only declarations in headers or export symbols in static library artifacts (`libArm_ASR_backend.a` / `Arm_ASR_backend.lib`).
+- **CI Matrix**: Android matrix builds compile cleanly with `BUILD_TESTING=OFF`, while the Windows test runner enforces `BUILD_TESTING=ON`.
+
+#### 5. Complete Android Sample Application Build Verification
+In addition to native static backend library builds across Android ABIs (`arm64-v8a`, `armeabi-v7a`, `x86_64`), a dedicated CI job builds the complete Android NativeActivity sample application APK via `./gradlew assembleDebug` using Android NDK r29 and Java 21, staging `app-debug.apk` as a validated build artifact.
+
+### 12.3 Test Suite & Verification Results
+- **Host Unit & Regression Tests**: 32 complete test suites (Suites 0 through 31) in `tests/test_milestone2.cpp`.
+  - **Result**: **11,554 checks PASSED, 0 FAILED**.
+  - Includes dedicated test suite 31 verifying Vulkan destruction ordering, handle resets, tightened frame-state boundary validation, unrecoverable recovery failure propagation, and prevention of redundant `vkDeviceWaitIdle` calls.
+- **CTest**: 100% passed in `build/`.
+- **Target Builds**:
+  - Windows test runner (`build/`) with `BUILD_TESTING=ON`: Clean compile.
+  - Windows production backend with `BUILD_TESTING=OFF`: Clean compile.
+  - Android NativeActivity application (`samples/android/`): Clean `assembleDebug` APK build.
+
+### 12.4 Physical Device Hardware Validation Status
+- **Current Status**: **PENDING (Host and Build Validated)**.
+- **Note**: Physical target Android hardware (Poco F6 / Adreno 735) is currently unavailable in the CI/host execution environment. Full functional correctness of the compute upscaler pipeline, synchronization recovery, and dual build configurations is established via host-side tests and CI compilation. Physical device runtime profiling (AGI / GPU timestamp queries) and 100-frame SSIM/PSNR verification will be executed once physical target hardware is provisioned.

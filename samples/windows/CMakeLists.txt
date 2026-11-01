@@ -36,6 +36,7 @@ message(STATUS "Vulkan library: ${Vulkan_LIBRARIES}")
 set(FFXM_REMOVE_ARM_ASR_VK_STANDALONE_BACKEND OFF CACHE BOOL "" FORCE)
 set(FFXM_VKLOADER_VOLK                        OFF CACHE BOOL "" FORCE)
 set(FFXM_USE_PREBUILT_SHADERS                 ON  CACHE BOOL "" FORCE)
+set(BUILD_TESTING                             OFF CACHE BOOL "" FORCE)
 # The backend uses directory-scoped include_directories(), so its include paths
 # do not propagate to this target - it needs FFXM_VULKAN_PATH set explicitly.
 set(FFXM_VULKAN_PATH "${Vulkan_INCLUDE_DIRS}" CACHE STRING "" FORCE)

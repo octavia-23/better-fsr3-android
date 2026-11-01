@@ -62,6 +62,7 @@ uint32_t Fsr3Upscaler::initializationFlags()
 bool Fsr3Upscaler::createTarget(VkContext& ctx, RenderTarget& rt, VkFormat format, VkExtent2D extent,
                                 VkImageUsageFlags usage, VkImageAspectFlags aspect)
 {
+    rt = {};
     rt.format = format;
     rt.extent = extent;
 
@@ -76,7 +77,10 @@ bool Fsr3Upscaler::createTarget(VkContext& ctx, RenderTarget& rt, VkFormat forma
     ci.usage         = usage;
     ci.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
     ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    VK_CHECK(vkCreateImage(ctx.device(), &ci, nullptr, &rt.image));
+    if (vkCreateImage(ctx.device(), &ci, nullptr, &rt.image) != VK_SUCCESS) {
+        rt = {};
+        return false;
+    }
 
     VkMemoryRequirements req = {};
     vkGetImageMemoryRequirements(ctx.device(), rt.image, &req);
@@ -87,10 +91,21 @@ bool Fsr3Upscaler::createTarget(VkContext& ctx, RenderTarget& rt, VkFormat forma
                                                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if (alloc.memoryTypeIndex == UINT32_MAX) {
         LOGE("No device-local memory type for shared resource");
+        vkDestroyImage(ctx.device(), rt.image, nullptr);
+        rt = {};
         return false;
     }
-    VK_CHECK(vkAllocateMemory(ctx.device(), &alloc, nullptr, &rt.memory));
-    VK_CHECK(vkBindImageMemory(ctx.device(), rt.image, rt.memory, 0));
+    if (vkAllocateMemory(ctx.device(), &alloc, nullptr, &rt.memory) != VK_SUCCESS) {
+        vkDestroyImage(ctx.device(), rt.image, nullptr);
+        rt = {};
+        return false;
+    }
+    if (vkBindImageMemory(ctx.device(), rt.image, rt.memory, 0) != VK_SUCCESS) {
+        vkDestroyImage(ctx.device(), rt.image, nullptr);
+        vkFreeMemory(ctx.device(), rt.memory, nullptr);
+        rt = {};
+        return false;
+    }
 
     VkImageViewCreateInfo viewCi = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
     viewCi.image                       = rt.image;
@@ -99,7 +114,12 @@ bool Fsr3Upscaler::createTarget(VkContext& ctx, RenderTarget& rt, VkFormat forma
     viewCi.subresourceRange.aspectMask = aspect;
     viewCi.subresourceRange.levelCount = 1;
     viewCi.subresourceRange.layerCount = 1;
-    VK_CHECK(vkCreateImageView(ctx.device(), &viewCi, nullptr, &rt.view));
+    if (vkCreateImageView(ctx.device(), &viewCi, nullptr, &rt.view) != VK_SUCCESS) {
+        vkDestroyImage(ctx.device(), rt.image, nullptr);
+        vkFreeMemory(ctx.device(), rt.memory, nullptr);
+        rt = {};
+        return false;
+    }
     return true;
 }
 
@@ -124,6 +144,7 @@ bool Fsr3Upscaler::createSharedResources(VkContext& ctx)
     if (!createTarget(ctx, dilatedDepth_, VK_FORMAT_R32_SFLOAT, dilatedDepthExtent,
                       uavUsage, VK_IMAGE_ASPECT_COLOR_BIT)) {
         LOGE("Failed to allocate dilated depth shared resource");
+        destroySharedResources(ctx);
         return false;
     }
 
@@ -135,6 +156,7 @@ bool Fsr3Upscaler::createSharedResources(VkContext& ctx)
     if (!createTarget(ctx, dilatedMotionVectors_, VK_FORMAT_R16G16_SFLOAT, dilatedMvExtent,
                       uavUsage, VK_IMAGE_ASPECT_COLOR_BIT)) {
         LOGE("Failed to allocate dilated motion vectors shared resource");
+        destroySharedResources(ctx);
         return false;
     }
 
@@ -146,6 +168,7 @@ bool Fsr3Upscaler::createSharedResources(VkContext& ctx)
     if (!createTarget(ctx, reconstructedPrevNearestDepth_, VK_FORMAT_R32_UINT, reconDepthExtent,
                       uavUsage, VK_IMAGE_ASPECT_COLOR_BIT)) {
         LOGE("Failed to allocate reconstructed prev nearest depth shared resource");
+        destroySharedResources(ctx);
         return false;
     }
 
@@ -160,19 +183,28 @@ bool Fsr3Upscaler::createSharedResources(VkContext& ctx)
 
 void Fsr3Upscaler::destroySharedResources(VkContext& ctx)
 {
+    if (ctx.device() == VK_NULL_HANDLE) {
+        dilatedDepth_ = {};
+        dilatedMotionVectors_ = {};
+        reconstructedPrevNearestDepth_ = {};
+        sharedResourcesInitialized_ = false;
+        return;
+    }
+
     auto destroyTarget = [&](RenderTarget& rt) {
         if (rt.view != VK_NULL_HANDLE) {
             vkDestroyImageView(ctx.device(), rt.view, nullptr);
             rt.view = VK_NULL_HANDLE;
         }
-        if (rt.memory != VK_NULL_HANDLE) {
-            vkFreeMemory(ctx.device(), rt.memory, nullptr);
-            rt.memory = VK_NULL_HANDLE;
-        }
         if (rt.image != VK_NULL_HANDLE) {
             vkDestroyImage(ctx.device(), rt.image, nullptr);
             rt.image = VK_NULL_HANDLE;
         }
+        if (rt.memory != VK_NULL_HANDLE) {
+            vkFreeMemory(ctx.device(), rt.memory, nullptr);
+            rt.memory = VK_NULL_HANDLE;
+        }
+        rt = {};
     };
     destroyTarget(dilatedDepth_);
     destroyTarget(dilatedMotionVectors_);

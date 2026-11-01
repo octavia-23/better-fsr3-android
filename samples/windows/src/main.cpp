@@ -182,7 +182,8 @@ SwapchainRebuildResult rebuildSwapchainResources(App& app)
         return SwapchainRebuildResult::Minimized;   // minimised: stay dirty and retry once the window is restored
 
     if (app.ctx.sync().isTerminalError()) {
-        LOGE("Terminal Vulkan error (device lost); cannot rebuild Windows swapchain");
+        LOGE("Terminal Vulkan error (%s); cannot rebuild Windows swapchain",
+             app.ctx.sync().isDeviceLost() ? "device lost" : "sync recovery failed");
         return SwapchainRebuildResult::Failed;
     }
 
@@ -219,7 +220,8 @@ void drawFrame(App& app)
     uint32_t imageIndex = 0;
     if (!app.ctx.beginFrame(&imageIndex)) {
         if (app.ctx.sync().isTerminalError()) {
-            LOGE("Terminal Vulkan error (device lost) during Windows beginFrame; quitting");
+            LOGE("Terminal Vulkan error (%s) during Windows beginFrame; quitting",
+                 app.ctx.sync().isDeviceLost() ? "device lost" : "sync recovery failed");
             app.quit = true;
             return;
         }
@@ -266,7 +268,8 @@ void drawFrame(App& app)
         LOGE("Upscaler dispatch failed on frame %d; recovering via abortFrame", app.frameIndex);
         if (!app.ctx.abortFrame(imageIndex)) {
             if (app.ctx.sync().isTerminalError()) {
-                LOGE("Terminal Vulkan error (device lost) during Windows abortFrame; quitting");
+                LOGE("Terminal Vulkan error (%s) during Windows abortFrame; quitting",
+                     app.ctx.sync().isDeviceLost() ? "device lost" : "sync recovery failed");
                 app.quit = true;
                 return;
             }
@@ -280,7 +283,8 @@ void drawFrame(App& app)
 
     if (!app.ctx.endFrame(imageIndex)) {
         if (app.ctx.sync().isTerminalError()) {
-            LOGE("Terminal Vulkan error (device lost) during Windows endFrame; quitting");
+            LOGE("Terminal Vulkan error (%s) during Windows endFrame; quitting",
+                 app.ctx.sync().isDeviceLost() ? "device lost" : "sync recovery failed");
             app.quit = true;
             return;
         }
