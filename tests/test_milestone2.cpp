@@ -3743,7 +3743,7 @@ static void TestM3PrepareInputsRealVulkanExecution()
     TEST_CHECK(CreateRealVkTestImage(device, memProperties, pfnCreateImage, pfnGetImageMemoryRequirements, pfnAllocateMemory, pfnBindImageMemory, renderW, renderH, VK_FORMAT_R16G16_SFLOAT, srvUsage, &mvImg));
     TEST_CHECK(CreateRealVkTestImage(device, memProperties, pfnCreateImage, pfnGetImageMemoryRequirements, pfnAllocateMemory, pfnBindImageMemory, renderW, renderH, VK_FORMAT_R16G16_SFLOAT, uavUsage, &dilMvImg));
     TEST_CHECK(CreateRealVkTestImage(device, memProperties, pfnCreateImage, pfnGetImageMemoryRequirements, pfnAllocateMemory, pfnBindImageMemory, renderW, renderH, VK_FORMAT_R32_SFLOAT, uavUsage, &dilDepthImg));
-    TEST_CHECK(CreateRealVkTestImage(device, memProperties, pfnCreateImage, pfnGetImageMemoryRequirements, pfnAllocateMemory, pfnBindImageMemory, renderW, renderH, VK_FORMAT_R32_SFLOAT, uavUsage, &reconDepthImg));
+    TEST_CHECK(CreateRealVkTestImage(device, memProperties, pfnCreateImage, pfnGetImageMemoryRequirements, pfnAllocateMemory, pfnBindImageMemory, renderW, renderH, VK_FORMAT_R32_UINT, uavUsage, &reconDepthImg));
     TEST_CHECK(CreateRealVkTestImage(device, memProperties, pfnCreateImage, pfnGetImageMemoryRequirements, pfnAllocateMemory, pfnBindImageMemory, 3840, 2160, VK_FORMAT_R8G8B8A8_UNORM, uavUsage, &outputImg));
 
     VkDeviceContext devContext = {};
@@ -3802,12 +3802,15 @@ static void TestM3PrepareInputsRealVulkanExecution()
 
     FfxmResourceDescription rUavOutput = { FFXM_RESOURCE_TYPE_TEXTURE2D, FFXM_SURFACE_FORMAT_R8G8B8A8_UNORM, 3840, 2160, 1, 1, FFXM_RESOURCE_FLAGS_NONE, FFXM_RESOURCE_USAGE_UAV };
 
+    FfxmFsr3UpscalerSharedResourceDescriptions sharedDescs = {};
+    TEST_CHECK(ffxmFsr3UpscalerGetSharedResourceDescriptions(&realContext, &sharedDescs) == FFXM_OK);
+
     dispDesc.color = ffxmGetResourceVK(colorImg.image, rR8G8B8A8, nullptr, FFXM_RESOURCE_STATE_COMPUTE_READ);
     dispDesc.depth = ffxmGetResourceVK(depthImg.image, rR32F, nullptr, FFXM_RESOURCE_STATE_COMPUTE_READ);
     dispDesc.motionVectors = ffxmGetResourceVK(mvImg.image, rRG16F, nullptr, FFXM_RESOURCE_STATE_COMPUTE_READ);
-    dispDesc.dilatedMotionVectors = ffxmGetResourceVK(dilMvImg.image, rUavRG16F, nullptr, FFXM_RESOURCE_STATE_UNORDERED_ACCESS);
-    dispDesc.dilatedDepth = ffxmGetResourceVK(dilDepthImg.image, rUavR32F, nullptr, FFXM_RESOURCE_STATE_UNORDERED_ACCESS);
-    dispDesc.reconstructedPrevNearestDepth = ffxmGetResourceVK(reconDepthImg.image, rUavR32F, nullptr, FFXM_RESOURCE_STATE_UNORDERED_ACCESS);
+    dispDesc.dilatedMotionVectors = ffxmGetResourceVK(dilMvImg.image, sharedDescs.dilatedMotionVectors.resourceDescription, nullptr, FFXM_RESOURCE_STATE_UNORDERED_ACCESS);
+    dispDesc.dilatedDepth = ffxmGetResourceVK(dilDepthImg.image, sharedDescs.dilatedDepth.resourceDescription, nullptr, FFXM_RESOURCE_STATE_UNORDERED_ACCESS);
+    dispDesc.reconstructedPrevNearestDepth = ffxmGetResourceVK(reconDepthImg.image, sharedDescs.reconstructedPrevNearestDepth.resourceDescription, nullptr, FFXM_RESOURCE_STATE_UNORDERED_ACCESS);
     dispDesc.output = ffxmGetResourceVK(outputImg.image, rUavOutput, nullptr, FFXM_RESOURCE_STATE_UNORDERED_ACCESS);
 
     FfxmErrorCode dispErr = ffxmFsr3UpscalerContextDispatch(&realContext, &dispDesc);

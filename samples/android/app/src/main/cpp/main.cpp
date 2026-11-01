@@ -5,8 +5,8 @@
 // procedural scene at a reduced resolution, upscales it with Arm ASR, and
 // presents the result.
 
-#include "asr_upscaler.h"
 #include "common.h"
+#include "fsr3_upscaler.h"
 #include "scene.h"
 #include "vk_context.h"
 
@@ -18,9 +18,9 @@
 namespace {
 
 struct App {
-    VkContext   ctx;
-    Scene       scene;
-    AsrUpscaler upscaler;
+    VkContext    ctx;
+    Scene        scene;
+    Fsr3Upscaler upscaler;
 
     bool     vulkanReady = false;
     bool     renderReady = false;
@@ -51,12 +51,16 @@ bool initRendering(App& app, ANativeWindow* window)
 
     const DeviceCapabilities& caps = app.ctx.caps();
     if (!caps.sufficientForArmAsr()) {
-        LOGE("This device cannot run Arm ASR's prebuilt shaders.");
-        LOGE("  They are SPIR-V 1.4 with explicit 16-bit types, and there is no");
-        LOGE("  fp32 permutation set. Missing:%s%s%s",
+        LOGE("This device cannot run FSR 3.1.4's prebuilt shaders.");
+        LOGE("  They are SPIR-V 1.4 with explicit 16-bit types and require extended storage image formats.");
+        LOGE("  Missing:%s%s%s%s%s%s%s",
              caps.spirv14 ? "" : " [SPIR-V 1.4 / Vulkan 1.2]",
              caps.shaderFloat16 ? "" : " [shaderFloat16]",
-             caps.storage16bit ? "" : " [16-bit storage]");
+             caps.storage16bit ? "" : " [16-bit storage]",
+             caps.storageExtendedFormats ? "" : " [shaderStorageImageExtendedFormats]",
+             caps.storageWriteWithoutFormat ? "" : " [shaderStorageImageWriteWithoutFormat]",
+             caps.storageFormatsSupported ? "" : " [storage format support]",
+             caps.sampledFormatsSupported ? "" : " [sampled format support]");
         LOGE("  The x86_64 emulator (SwiftShader) is expected to fail here.");
         return false;
     }
@@ -64,10 +68,10 @@ bool initRendering(App& app, ANativeWindow* window)
     app.displayExtent = app.ctx.swapchainExtent();
 
     // 2x per-dimension upscaling: a 1080p panel is fed from 960x540.
-    const float ratio = arm::ffxmFsr2GetUpscaleRatioFactor(arm::FFXM_FSR2_UPSCALING_RATIO_X2);
+    const float ratio = arm::ffxmFsr3UpscalerGetUpscaleRatioFromQualityMode(arm::FFXM_FSR3UPSCALER_QUALITY_MODE_PERFORMANCE);
     app.renderExtent  = {(uint32_t)(app.displayExtent.width / ratio),
                          (uint32_t)(app.displayExtent.height / ratio)};
-    LOGI("Rendering at %ux%u, presenting at %ux%u (ratio %.2f)", app.renderExtent.width,
+    LOGI("FSR 3.1.4: Rendering at %ux%u, presenting at %ux%u (ratio %.2f)", app.renderExtent.width,
          app.renderExtent.height, app.displayExtent.width, app.displayExtent.height, ratio);
 
     if (!app.scene.init(app.ctx, app.renderExtent, app.displayExtent)) {
@@ -75,14 +79,14 @@ bool initRendering(App& app, ANativeWindow* window)
         return false;
     }
     if (!app.upscaler.init(app.ctx, app.renderExtent, app.displayExtent,
-                           arm::FFXM_FSR2_SHADER_QUALITY_MODE_QUALITY)) {
-        LOGE("Arm ASR initialisation failed");
+                           arm::FFXM_FSR3UPSCALER_QUALITY_MODE_PERFORMANCE)) {
+        LOGE("FSR 3.1.4 initialisation failed");
         return false;
     }
 
     app.lastTimeSeconds = nowSeconds();
     app.renderReady     = true;
-    LOGI("Arm ASR sample ready");
+    LOGI("FSR 3.1.4 sample ready");
     return true;
 }
 
@@ -137,8 +141,12 @@ void drawFrame(App& app)
     app.scene.record(cmd, pc);
     app.scene.barrierForUpscale(cmd);
 
-    app.upscaler.dispatch(cmd, app.scene, app.renderExtent, delta * 1000.0f, app.frameIndex,
-                          app.frameIndex == 0);
+    const bool dispatchOk = app.upscaler.dispatch(cmd, app.scene, app.renderExtent, delta * 1000.0f, app.frameIndex,
+                                                  app.frameIndex == 0);
+    if (!dispatchOk) {
+        LOGE("FSR 3.1.4 dispatch failed at frame %d", app.frameIndex);
+        return;
+    }
 
     app.scene.recordBlit(cmd, app.ctx.swapchainImageView(imageIndex),
                          app.ctx.swapchainExtent());
@@ -146,7 +154,7 @@ void drawFrame(App& app)
     app.ctx.endFrame(imageIndex);
 
     if (app.frameIndex == 0)
-        LOGI("First frame dispatched successfully");
+        LOGI("First FSR 3.1.4 frame dispatched successfully");
     ++app.frameIndex;
 }
 

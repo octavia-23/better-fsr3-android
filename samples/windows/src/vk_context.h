@@ -12,13 +12,21 @@
 // library are SPIR-V 1.4 with explicit 16-bit types and there is no fp32
 // fallback permutation set.
 struct DeviceCapabilities {
-    uint32_t apiVersion        = 0;
-    bool     spirv14           = false;  // Vulkan 1.2, or 1.1 + VK_KHR_spirv_1_4
-    bool     shaderFloat16     = false;  // VK_KHR_shader_float16_int8
-    bool     storage16bit      = false;  // VK_KHR_16bit_storage
-    bool     subgroupSizeCtrl  = false;  // VK_EXT_subgroup_size_control (optional)
+    uint32_t apiVersion                 = 0;
+    bool     spirv14                    = false;  // Vulkan 1.2, or 1.1 + VK_KHR_spirv_1_4
+    bool     shaderFloat16              = false;  // VK_KHR_shader_float16_int8
+    bool     storage16bit               = false;  // VK_KHR_16bit_storage
+    bool     subgroupSizeCtrl           = false;  // VK_EXT_subgroup_size_control (optional)
+    bool     storageExtendedFormats     = false;  // shaderStorageImageExtendedFormats
+    bool     storageWriteWithoutFormat  = false;  // shaderStorageImageWriteWithoutFormat
+    bool     storageFormatsSupported    = false;  // R32F, RG16F, R32U, RGBA16F, R8
+    bool     sampledFormatsSupported    = false;  // RGBA16F, D32F, RG16F
 
-    bool sufficientForArmAsr() const { return spirv14 && shaderFloat16 && storage16bit; }
+    bool sufficientForArmAsr() const {
+        return spirv14 && shaderFloat16 && storage16bit &&
+               storageExtendedFormats && storageWriteWithoutFormat &&
+               storageFormatsSupported && sampledFormatsSupported;
+    }
 };
 
 class VkContext {

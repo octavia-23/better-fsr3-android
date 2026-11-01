@@ -6,6 +6,7 @@
 
 #include "asr_upscaler.h"
 #include "common.h"
+#include "fsr3_upscaler.h"
 #include "scene.h"
 #include "vk_context.h"
 
@@ -28,6 +29,9 @@ struct App {
     VkContext   ctx;
     Scene       scene;
     AsrUpscaler upscaler;
+    Fsr3Upscaler fsr3Upscaler;
+    bool        useFsr3       = true;
+    int         maxFrames     = -1;
 
     HWND     hwnd          = nullptr;
     bool     vulkanReady   = false;
@@ -60,26 +64,44 @@ VkExtent2D clientExtent(HWND hwnd)
 }
 
 // Everything that depends on the swapchain size: the render/display extents,
-// the scene's G-buffer, and the Arm ASR context.
+// the scene's G-buffer, and the upscaler context.
 bool createSizedResources(App& app)
 {
     app.displayExtent = app.ctx.swapchainExtent();
 
-    // 2x per-dimension upscaling: a 1080p window is fed from 960x540.
-    const float ratio = arm::ffxmFsr2GetUpscaleRatioFactor(arm::FFXM_FSR2_UPSCALING_RATIO_X2);
-    app.renderExtent  = {(uint32_t)(app.displayExtent.width / ratio),
-                         (uint32_t)(app.displayExtent.height / ratio)};
-    LOGI("Rendering at %ux%u, presenting at %ux%u (ratio %.2f)", app.renderExtent.width,
-         app.renderExtent.height, app.displayExtent.width, app.displayExtent.height, ratio);
+    if (app.useFsr3) {
+        const float ratio = arm::ffxmFsr3UpscalerGetUpscaleRatioFromQualityMode(arm::FFXM_FSR3UPSCALER_QUALITY_MODE_PERFORMANCE);
+        app.renderExtent  = {(uint32_t)(app.displayExtent.width / ratio),
+                             (uint32_t)(app.displayExtent.height / ratio)};
+        LOGI("Rendering at %ux%u, presenting at %ux%u (ratio %.2f) [FSR 3.1.4]", app.renderExtent.width,
+             app.renderExtent.height, app.displayExtent.width, app.displayExtent.height, ratio);
 
-    if (!app.scene.init(app.ctx, app.renderExtent, app.displayExtent)) {
-        LOGE("Scene initialisation failed");
-        return false;
-    }
-    if (!app.upscaler.init(app.ctx, app.renderExtent, app.displayExtent,
-                           arm::FFXM_FSR2_SHADER_QUALITY_MODE_QUALITY)) {
-        LOGE("Arm ASR initialisation failed");
-        return false;
+        if (!app.scene.init(app.ctx, app.renderExtent, app.displayExtent)) {
+            LOGE("Scene initialisation failed");
+            return false;
+        }
+        if (!app.fsr3Upscaler.init(app.ctx, app.renderExtent, app.displayExtent,
+                                   arm::FFXM_FSR3UPSCALER_QUALITY_MODE_PERFORMANCE)) {
+            LOGE("FSR 3.1.4 initialisation failed");
+            return false;
+        }
+    } else {
+        // 2x per-dimension upscaling: a 1080p window is fed from 960x540.
+        const float ratio = arm::ffxmFsr2GetUpscaleRatioFactor(arm::FFXM_FSR2_UPSCALING_RATIO_X2);
+        app.renderExtent  = {(uint32_t)(app.displayExtent.width / ratio),
+                             (uint32_t)(app.displayExtent.height / ratio)};
+        LOGI("Rendering at %ux%u, presenting at %ux%u (ratio %.2f) [FSR 2]", app.renderExtent.width,
+             app.renderExtent.height, app.displayExtent.width, app.displayExtent.height, ratio);
+
+        if (!app.scene.init(app.ctx, app.renderExtent, app.displayExtent)) {
+            LOGE("Scene initialisation failed");
+            return false;
+        }
+        if (!app.upscaler.init(app.ctx, app.renderExtent, app.displayExtent,
+                               arm::FFXM_FSR2_SHADER_QUALITY_MODE_QUALITY)) {
+            LOGE("Arm ASR initialisation failed");
+            return false;
+        }
     }
     app.frameIndex = 0;   // the next dispatch gets reset = true
     return true;
@@ -88,7 +110,11 @@ bool createSizedResources(App& app)
 void destroySizedResources(App& app)
 {
     app.ctx.waitIdle();
-    app.upscaler.destroy();
+    if (app.useFsr3) {
+        app.fsr3Upscaler.destroy();
+    } else {
+        app.upscaler.destroy();
+    }
     app.scene.destroy(app.ctx);
 }
 
@@ -128,7 +154,11 @@ void teardownRendering(App& app)
 {
     if (app.vulkanReady)
         app.ctx.waitIdle();
-    app.upscaler.destroy();
+    if (app.useFsr3) {
+        app.fsr3Upscaler.destroy();
+    } else {
+        app.upscaler.destroy();
+    }
     if (app.vulkanReady)
         app.scene.destroy(app.ctx);
     app.ctx.destroy();
@@ -188,7 +218,11 @@ void drawFrame(App& app)
     VkCommandBuffer cmd = app.ctx.commandBuffer();
 
     float jitterX = 0.0f, jitterY = 0.0f;
-    app.upscaler.jitterForFrame(app.frameIndex, &jitterX, &jitterY);
+    if (app.useFsr3) {
+        app.fsr3Upscaler.jitterForFrame(app.frameIndex, &jitterX, &jitterY);
+    } else {
+        app.upscaler.jitterForFrame(app.frameIndex, &jitterX, &jitterY);
+    }
 
     ScenePushConstants pc = {};
     pc.renderSize[0] = (float)app.renderExtent.width;
@@ -207,8 +241,19 @@ void drawFrame(App& app)
     app.scene.record(cmd, pc);
     app.scene.barrierForUpscale(cmd);
 
-    app.upscaler.dispatch(cmd, app.scene, app.renderExtent, delta * 1000.0f, app.frameIndex,
-                          app.frameIndex == 0);
+    bool dispatchOk = false;
+    if (app.useFsr3) {
+        dispatchOk = app.fsr3Upscaler.dispatch(cmd, app.scene, app.renderExtent, delta * 1000.0f,
+                                               app.frameIndex, app.frameIndex == 0);
+    } else {
+        dispatchOk = app.upscaler.dispatch(cmd, app.scene, app.renderExtent, delta * 1000.0f,
+                                           app.frameIndex, app.frameIndex == 0);
+    }
+
+    if (!dispatchOk) {
+        LOGE("Upscaler dispatch failed on frame %d; dropping frame", app.frameIndex);
+        return;
+    }
 
     app.scene.recordBlit(cmd, app.ctx.swapchainImageView(imageIndex),
                          app.ctx.swapchainExtent());
@@ -322,6 +367,16 @@ int main(int argc, char** argv)
     App app;
     app.validation = validationRequested(argc, argv);
 
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "--fsr2") == 0) {
+            app.useFsr3 = false;
+        } else if (strcmp(argv[i], "--fsr3") == 0) {
+            app.useFsr3 = true;
+        } else if (strcmp(argv[i], "--frames") == 0 && i + 1 < argc) {
+            app.maxFrames = std::atoi(argv[++i]);
+        }
+    }
+
     app.hwnd = createWindow(app);
     if (!app.hwnd)
         return 1;
@@ -355,6 +410,12 @@ int main(int argc, char** argv)
         }
 
         drawFrame(app);
+
+        if (app.maxFrames > 0 && app.frameIndex >= app.maxFrames) {
+            LOGI("Reached target frame count %d, exiting cleanly", app.maxFrames);
+            app.quit = true;
+            break;
+        }
     }
 
     teardownRendering(app);

@@ -48,7 +48,8 @@ add_library(armasrsample SHARED
     main.cpp
     vk_context.cpp
     ${COMMON_DIR}/scene.cpp
-    ${COMMON_DIR}/asr_upscaler.cpp)
+    ${COMMON_DIR}/asr_upscaler.cpp
+    ${COMMON_DIR}/fsr3_upscaler.cpp)
 
 add_dependencies(armasrsample sample_shaders)
 

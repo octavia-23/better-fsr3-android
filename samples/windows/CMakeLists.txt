@@ -67,7 +67,8 @@ add_executable(ArmAsrSample
     src/main.cpp
     src/vk_context.cpp
     ${COMMON_DIR}/scene.cpp
-    ${COMMON_DIR}/asr_upscaler.cpp)
+    ${COMMON_DIR}/asr_upscaler.cpp
+    ${COMMON_DIR}/fsr3_upscaler.cpp)
 
 add_dependencies(ArmAsrSample sample_shaders)
 

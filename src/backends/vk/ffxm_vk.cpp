@@ -3426,6 +3426,8 @@ static FfxmErrorCode executeGpuJobCompute(BackendContext_VK* backendContext, Ffx
     if (pipelineLayout->descriptorSetIndex >= FFXM_MAX_QUEUED_FRAMES)
         pipelineLayout->descriptorSetIndex = 0;
 
+    backendContext->pEffectContexts[pipelineLayout->effectContextId].isEndOfUpscaler = !!wcscmp(pipelineLayout->name, L"FSR2-GEN_REACTIVE");
+
     return FFXM_OK;
 }
 

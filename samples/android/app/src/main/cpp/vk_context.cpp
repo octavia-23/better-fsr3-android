@@ -120,20 +120,61 @@ bool VkContext::pickPhysicalDevice()
                              hasExtension(exts, VK_KHR_16BIT_STORAGE_EXTENSION_NAME);
     caps_.subgroupSizeCtrl = hasExtension(exts, VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME);
 
+    VkPhysicalDeviceShaderFloat16Int8Features f16 = {
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES};
+    VkPhysicalDeviceFeatures2 features2 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
     if (hasExtension(exts, VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME) ||
         deviceProps.apiVersion >= VK_API_VERSION_1_2) {
-        VkPhysicalDeviceShaderFloat16Int8Features f16 = {
-            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES};
-        VkPhysicalDeviceFeatures2 features2 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
         features2.pNext = &f16;
-        vkGetPhysicalDeviceFeatures2(physicalDevice_, &features2);
-        caps_.shaderFloat16 = f16.shaderFloat16 == VK_TRUE;
     }
+    vkGetPhysicalDeviceFeatures2(physicalDevice_, &features2);
+    caps_.shaderFloat16             = f16.shaderFloat16 == VK_TRUE;
+    caps_.storageExtendedFormats     = features2.features.shaderStorageImageExtendedFormats == VK_TRUE;
+    caps_.storageWriteWithoutFormat  = features2.features.shaderStorageImageWriteWithoutFormat == VK_TRUE;
 
-    LOGI("Arm ASR device gate: SPIR-V 1.4 %s | shaderFloat16 %s | 16-bit storage %s | "
-         "subgroup size control %s",
+    // Check required storage image format support (R32F, RG16F, R32U, RGBA16F, R8)
+    const VkFormat storageFormats[] = {
+        VK_FORMAT_R32_SFLOAT,
+        VK_FORMAT_R16G16_SFLOAT,
+        VK_FORMAT_R32_UINT,
+        VK_FORMAT_R16G16B16A16_SFLOAT,
+        VK_FORMAT_R8_UNORM
+    };
+    bool storageOk = true;
+    for (VkFormat f : storageFormats) {
+        VkFormatProperties props = {};
+        vkGetPhysicalDeviceFormatProperties(physicalDevice_, f, &props);
+        if ((props.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) == 0) {
+            LOGE("Missing VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT for format %d", f);
+            storageOk = false;
+        }
+    }
+    caps_.storageFormatsSupported = storageOk;
+
+    // Check required sampled image format support (RGBA16F, D32F, RG16F)
+    const VkFormat sampledFormats[] = {
+        VK_FORMAT_R16G16B16A16_SFLOAT,
+        VK_FORMAT_D32_SFLOAT,
+        VK_FORMAT_R16G16_SFLOAT
+    };
+    bool sampledOk = true;
+    for (VkFormat f : sampledFormats) {
+        VkFormatProperties props = {};
+        vkGetPhysicalDeviceFormatProperties(physicalDevice_, f, &props);
+        if ((props.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) == 0) {
+            LOGE("Missing VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT for format %d", f);
+            sampledOk = false;
+        }
+    }
+    caps_.sampledFormatsSupported = sampledOk;
+
+    LOGI("Arm ASR / FSR 3.1.4 device gate: SPIR-V 1.4 %s | shaderFloat16 %s | 16-bit storage %s | "
+         "extended formats %s | write without format %s | storage formats %s | sampled formats %s",
          caps_.spirv14 ? "yes" : "NO", caps_.shaderFloat16 ? "yes" : "NO",
-         caps_.storage16bit ? "yes" : "NO", caps_.subgroupSizeCtrl ? "yes" : "no");
+         caps_.storage16bit ? "yes" : "NO", caps_.storageExtendedFormats ? "yes" : "NO",
+         caps_.storageWriteWithoutFormat ? "yes" : "NO",
+         caps_.storageFormatsSupported ? "yes" : "NO",
+         caps_.sampledFormatsSupported ? "yes" : "NO");
 
     return true;
 }
@@ -176,10 +217,11 @@ bool VkContext::createDevice()
     vkGetPhysicalDeviceFeatures2(physicalDevice_, &features2);
     // Keep only what the sample and Arm ASR actually need.
     VkPhysicalDeviceFeatures wanted = {};
-    wanted.shaderInt16          = features2.features.shaderInt16;
-    wanted.samplerAnisotropy    = features2.features.samplerAnisotropy;
-    wanted.shaderStorageImageExtendedFormats = features2.features.shaderStorageImageExtendedFormats;
-    features2.features          = wanted;
+    wanted.shaderInt16                          = features2.features.shaderInt16;
+    wanted.samplerAnisotropy                    = features2.features.samplerAnisotropy;
+    wanted.shaderStorageImageExtendedFormats    = features2.features.shaderStorageImageExtendedFormats;
+    wanted.shaderStorageImageWriteWithoutFormat = features2.features.shaderStorageImageWriteWithoutFormat;
+    features2.features                          = wanted;
 
     const float priority = 1.0f;
     VkDeviceQueueCreateInfo queueCi = {VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
