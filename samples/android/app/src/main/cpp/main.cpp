@@ -26,6 +26,7 @@ struct App {
     bool     vulkanReady = false;
     bool     renderReady = false;
     bool     swapchainDirty = false;
+    bool     renderingTerminated = false;
     uint32_t consecutiveRecreateFailures = 0;
     int32_t  frameIndex  = 0;
 
@@ -156,6 +157,7 @@ void drawFrame(App& app)
             LOGE("Repeated swapchain recreation failure on Android (%u consecutive failures); aborting rendering loop",
                  app.consecutiveRecreateFailures);
             app.renderReady = false;
+            app.renderingTerminated = true;
             return;
         }
         if (res == SwapchainRebuildResult::Failed || res == SwapchainRebuildResult::Minimized) {
@@ -232,6 +234,7 @@ void handleCommand(android_app* androidApp, int32_t cmd)
     case APP_CMD_INIT_WINDOW:
         if (androidApp->window) {
             app.window = androidApp->window;
+            app.renderingTerminated = false;
             if (!app.vulkanReady) {
                 if (!initRendering(app, androidApp->window))
                     teardownRendering(app);
@@ -264,7 +267,18 @@ void android_main(android_app* androidApp)
         int                   events = 0;
         android_poll_source*  source = nullptr;
 
-        while (ALooper_pollOnce(app.renderReady ? 0 : -1, nullptr, &events,
+        int timeoutMs = -1;
+        if (app.renderingTerminated || !app.window) {
+            timeoutMs = -1; // Waiting for native window or permanently stopped after threshold
+        } else if (app.swapchainDirty) {
+            timeoutMs = 16; // Sensible backoff (~16ms) to retry swapchain rebuild without tight CPU spinning
+        } else if (app.renderReady) {
+            timeoutMs = 0;  // Normal rendering: non-blocking
+        } else {
+            timeoutMs = -1;
+        }
+
+        while (ALooper_pollOnce(timeoutMs, nullptr, &events,
                                 reinterpret_cast<void**>(&source)) >= 0) {
             if (source)
                 source->process(androidApp, source);
@@ -274,6 +288,8 @@ void android_main(android_app* androidApp)
             }
         }
 
-        drawFrame(app);
+        if (!app.renderingTerminated && app.window) {
+            drawFrame(app);
+        }
     }
 }

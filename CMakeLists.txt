@@ -138,6 +138,7 @@ if(BUILD_TESTING)
     if(NOT FFXM_REMOVE_ARM_ASR_VK_STANDALONE_BACKEND)
         target_link_libraries(test_milestone2 PRIVATE Arm_ASR_backend)
         target_compile_definitions(test_milestone2 PRIVATE FFXM_HAS_VK_BACKEND=1)
+        target_compile_definitions(test_milestone2 PRIVATE FFXM_ENABLE_TEST_HOOKS=1)
     else()
         target_sources(test_milestone2 PRIVATE
             src/backends/shared/ffxm_shader_blobs.cpp

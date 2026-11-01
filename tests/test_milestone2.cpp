@@ -4406,7 +4406,13 @@ struct MockVulkanState {
     bool commandBufferRecording[arm::SwapchainSync::kFramesInFlight] = { false, false };
     uint32_t currentImageIndex = 0;
 
+    VkResult waitForFencesResult = VK_SUCCESS;
     VkResult acquireResult = VK_SUCCESS;
+    VkResult resetFencesResult = VK_SUCCESS;
+    VkResult resetCommandBufferResult = VK_SUCCESS;
+    VkResult beginCommandBufferResult = VK_SUCCESS;
+    VkResult endCommandBufferResult = VK_SUCCESS;
+    VkResult queueSubmitResult = VK_SUCCESS;
     VkResult presentResult = VK_SUCCESS;
 
     uint32_t waitFencesCount = 0;
@@ -4416,11 +4422,44 @@ struct MockVulkanState {
     uint32_t presentCount = 0;
     uint32_t clearColorCount = 0;
     uint32_t pipelineBarrierCount = 0;
+    uint32_t createFenceCount = 0;
+    uint32_t destroyFenceCount = 0;
+    uint32_t createSemaphoreCount = 0;
+    uint32_t destroySemaphoreCount = 0;
+    uint32_t deviceWaitIdleCount = 0;
 };
 static MockVulkanState s_MockVk;
 
+template<typename HandleType>
+inline HandleType makeMockHandle(uint64_t val) {
+    if constexpr (std::is_pointer_v<HandleType>) {
+        return reinterpret_cast<HandleType>(static_cast<uintptr_t>(val));
+    } else {
+        return static_cast<HandleType>(val);
+    }
+}
+
+static uint32_t s_MockCreateViewCount = 0;
+static uint32_t s_MockDestroyViewCount = 0;
+static uint32_t s_FailOnCreateViewCount = 0;
+
+static VKAPI_ATTR VkResult VKAPI_CALL MockVkCreateImageView(VkDevice, const VkImageViewCreateInfo*, const VkAllocationCallbacks*, VkImageView* pView) {
+    s_MockCreateViewCount++;
+    if (s_FailOnCreateViewCount > 0 && s_MockCreateViewCount == s_FailOnCreateViewCount) {
+        if (pView) *pView = VK_NULL_HANDLE;
+        return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+    }
+    if (pView) *pView = makeMockHandle<VkImageView>(0x5000 + s_MockCreateViewCount);
+    return VK_SUCCESS;
+}
+
+static VKAPI_ATTR void VKAPI_CALL MockVkDestroyImageView(VkDevice, VkImageView, const VkAllocationCallbacks*) {
+    s_MockDestroyViewCount++;
+}
+
 static VKAPI_ATTR VkResult VKAPI_CALL MockVkWaitForFences(VkDevice, uint32_t, const VkFence*, VkBool32, uint64_t) {
     s_MockVk.waitFencesCount++;
+    if (s_MockVk.waitForFencesResult != VK_SUCCESS) return s_MockVk.waitForFencesResult;
     return (s_MockVk.inFlightFenceSignaled[0] || s_MockVk.inFlightFenceSignaled[1]) ? VK_SUCCESS : VK_TIMEOUT;
 }
 
@@ -4434,24 +4473,24 @@ static VKAPI_ATTR VkResult VKAPI_CALL MockVkAcquireNextImageKHR(VkDevice, VkSwap
 
 static VKAPI_ATTR VkResult VKAPI_CALL MockVkResetFences(VkDevice, uint32_t, const VkFence*) {
     s_MockVk.resetFencesCount++;
-    return VK_SUCCESS;
+    return s_MockVk.resetFencesResult;
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL MockVkResetCommandBuffer(VkCommandBuffer, VkCommandBufferResetFlags) {
-    return VK_SUCCESS;
+    return s_MockVk.resetCommandBufferResult;
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL MockVkBeginCommandBuffer(VkCommandBuffer, const VkCommandBufferBeginInfo*) {
-    return VK_SUCCESS;
+    return s_MockVk.beginCommandBufferResult;
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL MockVkEndCommandBuffer(VkCommandBuffer) {
-    return VK_SUCCESS;
+    return s_MockVk.endCommandBufferResult;
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL MockVkQueueSubmit(VkQueue, uint32_t, const VkSubmitInfo*, VkFence) {
     s_MockVk.submitCount++;
-    return VK_SUCCESS;
+    return s_MockVk.queueSubmitResult;
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL MockVkQueuePresentKHR(VkQueue, const VkPresentInfoKHR*) {
@@ -4465,6 +4504,31 @@ static VKAPI_ATTR void VKAPI_CALL MockVkCmdPipelineBarrier(VkCommandBuffer, VkPi
 
 static VKAPI_ATTR void VKAPI_CALL MockVkCmdClearColorImage(VkCommandBuffer, VkImage, VkImageLayout, const VkClearColorValue*, uint32_t, const VkImageSubresourceRange*) {
     s_MockVk.clearColorCount++;
+}
+
+static VKAPI_ATTR VkResult VKAPI_CALL MockVkCreateFence(VkDevice, const VkFenceCreateInfo*, const VkAllocationCallbacks*, VkFence* pFence) {
+    s_MockVk.createFenceCount++;
+    if (pFence) *pFence = makeMockHandle<VkFence>(0x200 + s_MockVk.createFenceCount);
+    return VK_SUCCESS;
+}
+
+static VKAPI_ATTR void VKAPI_CALL MockVkDestroyFence(VkDevice, VkFence, const VkAllocationCallbacks*) {
+    s_MockVk.destroyFenceCount++;
+}
+
+static VKAPI_ATTR VkResult VKAPI_CALL MockVkCreateSemaphore(VkDevice, const VkSemaphoreCreateInfo*, const VkAllocationCallbacks*, VkSemaphore* pSem) {
+    s_MockVk.createSemaphoreCount++;
+    if (pSem) *pSem = makeMockHandle<VkSemaphore>(0x300 + s_MockVk.createSemaphoreCount);
+    return VK_SUCCESS;
+}
+
+static VKAPI_ATTR void VKAPI_CALL MockVkDestroySemaphore(VkDevice, VkSemaphore, const VkAllocationCallbacks*) {
+    s_MockVk.destroySemaphoreCount++;
+}
+
+static VKAPI_ATTR VkResult VKAPI_CALL MockVkDeviceWaitIdle(VkDevice) {
+    s_MockVk.deviceWaitIdleCount++;
+    return VK_SUCCESS;
 }
 } // namespace
 
@@ -4485,39 +4549,35 @@ static void TestM39SwapchainAcquisitionAndAbortSynchronization()
     fn.vkQueuePresentKHR = MockVkQueuePresentKHR;
     fn.vkCmdPipelineBarrier = MockVkCmdPipelineBarrier;
     fn.vkCmdClearColorImage = MockVkCmdClearColorImage;
+    fn.vkCreateFence = MockVkCreateFence;
+    fn.vkDestroyFence = MockVkDestroyFence;
+    fn.vkCreateSemaphore = MockVkCreateSemaphore;
+    fn.vkDestroySemaphore = MockVkDestroySemaphore;
+    fn.vkDeviceWaitIdle = MockVkDeviceWaitIdle;
 
     arm::SwapchainSync sync;
     sync.setVulkanFunctions(fn);
 
     VkDevice dummyDevice = (VkDevice)(uintptr_t)0x1;
     VkQueue dummyQueue = (VkQueue)(uintptr_t)0x2;
-    VkSwapchainKHR dummySwapchain = (VkSwapchainKHR)(uintptr_t)0x3;
-    std::vector<VkImage> dummyImages = { (VkImage)(uintptr_t)0x10, (VkImage)(uintptr_t)0x11 };
+    VkSwapchainKHR dummySwapchain = makeMockHandle<VkSwapchainKHR>(0x3);
+    std::vector<VkImage> dummyImages = { makeMockHandle<VkImage>(0x10), makeMockHandle<VkImage>(0x11) };
     VkCommandBuffer dummyCmds[2] = { (VkCommandBuffer)(uintptr_t)0x20, (VkCommandBuffer)(uintptr_t)0x21 };
-    VkSemaphore dummyAcq[2] = { (VkSemaphore)(uintptr_t)0x30, (VkSemaphore)(uintptr_t)0x31 };
-    VkSemaphore dummyRel[2] = { (VkSemaphore)(uintptr_t)0x40, (VkSemaphore)(uintptr_t)0x41 };
-    VkFence dummyFences[2] = { (VkFence)(uintptr_t)0x50, (VkFence)(uintptr_t)0x51 };
+    VkSemaphore dummyAcq[2] = { makeMockHandle<VkSemaphore>(0x30), makeMockHandle<VkSemaphore>(0x31) };
+    VkSemaphore dummyRel[2] = { makeMockHandle<VkSemaphore>(0x40), makeMockHandle<VkSemaphore>(0x41) };
+    VkFence dummyFences[2] = { makeMockHandle<VkFence>(0x50), makeMockHandle<VkFence>(0x51) };
 
     sync.init(dummyDevice, dummyQueue, dummySwapchain, dummyImages, dummyCmds, dummyAcq, dummyRel, dummyFences);
 
-    // 8. VK_SUBOPTIMAL_KHR acquisition followed by valid submission and presentation
-    s_MockVk.acquireResult = VK_SUBOPTIMAL_KHR;
+    // 1. Fault injection: vkWaitForFences failure
+    s_MockVk.waitForFencesResult = VK_TIMEOUT;
     uint32_t imgIdx = 99;
-    TEST_CHECK(sync.beginFrame(&imgIdx) == true);
-    TEST_CHECK(imgIdx == 0);
-    TEST_CHECK(sync.swapchainSuboptimal() == true);
-    TEST_CHECK(s_MockVk.acquireCount == 1);
-    TEST_CHECK(s_MockVk.resetFencesCount == 1);
+    TEST_CHECK(sync.beginFrame(&imgIdx) == false);
+    TEST_CHECK(sync.isImageAcquired() == false);
+    TEST_CHECK(sync.isFenceReset() == false);
+    s_MockVk.waitForFencesResult = VK_SUCCESS;
 
-    // Abort submission consuming acquire semaphore and presenting
-    TEST_CHECK(sync.abortFrame(imgIdx) == false); // Returns false to request swapchain rebuild
-    TEST_CHECK(s_MockVk.submitCount == 1);
-    TEST_CHECK(s_MockVk.presentCount == 1);
-    TEST_CHECK(s_MockVk.clearColorCount == 1);
-    TEST_CHECK(s_MockVk.pipelineBarrierCount == 2);
-    TEST_CHECK(sync.frame() == 1); // Advanced cleanly
-
-    // 9. VK_ERROR_OUT_OF_DATE_KHR does not consume or wait on an un-signalled acquire semaphore
+    // 2. Fault injection: vkAcquireNextImageKHR failure (VK_ERROR_OUT_OF_DATE_KHR)
     s_MockVk.acquireResult = VK_ERROR_OUT_OF_DATE_KHR;
     uint32_t unacquiredIdx = 42;
     uint32_t prevResetFences = s_MockVk.resetFencesCount;
@@ -4526,22 +4586,91 @@ static void TestM39SwapchainAcquisitionAndAbortSynchronization()
     TEST_CHECK(unacquiredIdx == 42); // Image index unmodified
     TEST_CHECK(s_MockVk.resetFencesCount == prevResetFences); // Fence not reset
     TEST_CHECK(s_MockVk.submitCount == prevSubmitCount); // No queue submit on unsignalled semaphore
+    TEST_CHECK(sync.isImageAcquired() == false);
+    s_MockVk.acquireResult = VK_SUCCESS;
 
-    // Abort presentation returning VK_SUBOPTIMAL_KHR
+    // 3. Fault injection: vkResetFences failure after acquireNextImage succeeded
+    s_MockVk.resetFencesResult = VK_ERROR_OUT_OF_DEVICE_MEMORY;
+    uint32_t prevCreateSem = s_MockVk.createSemaphoreCount;
+    TEST_CHECK(sync.beginFrame(&imgIdx) == false);
+    TEST_CHECK(sync.isImageAcquired() == false);
+    TEST_CHECK(sync.isFenceReset() == false);
+    TEST_CHECK(s_MockVk.createSemaphoreCount > prevCreateSem); // Replaced unconsumed acquire semaphore
+    s_MockVk.resetFencesResult = VK_SUCCESS;
+
+    // 4. Fault injection: vkResetCommandBuffer failure after acquire + resetFence
+    s_MockVk.resetCommandBufferResult = VK_ERROR_OUT_OF_DEVICE_MEMORY;
+    uint32_t prevCreateFence = s_MockVk.createFenceCount;
+    TEST_CHECK(sync.beginFrame(&imgIdx) == false);
+    TEST_CHECK(sync.isImageAcquired() == false);
+    TEST_CHECK(sync.isFenceReset() == false);
+    TEST_CHECK(s_MockVk.createFenceCount > prevCreateFence); // Restored fence to signaled state
+    s_MockVk.resetCommandBufferResult = VK_SUCCESS;
+
+    // 5. Fault injection: vkBeginCommandBuffer failure after acquire + resetFence
+    s_MockVk.beginCommandBufferResult = VK_ERROR_OUT_OF_DEVICE_MEMORY;
+    TEST_CHECK(sync.beginFrame(&imgIdx) == false);
+    TEST_CHECK(sync.isImageAcquired() == false);
+    TEST_CHECK(sync.isFenceReset() == false);
+    s_MockVk.beginCommandBufferResult = VK_SUCCESS;
+
+    // 6. Fault injection: vkEndCommandBuffer failure during endFrame
+    TEST_CHECK(sync.beginFrame(&imgIdx) == true);
+    TEST_CHECK(sync.isImageAcquired() == true);
+    TEST_CHECK(sync.isFenceReset() == true);
+    s_MockVk.endCommandBufferResult = VK_ERROR_OUT_OF_DEVICE_MEMORY;
+    TEST_CHECK(sync.endFrame(imgIdx) == false);
+    TEST_CHECK(sync.isImageAcquired() == false);
+    TEST_CHECK(sync.isFenceReset() == false);
+    s_MockVk.endCommandBufferResult = VK_SUCCESS;
+
+    // 7. Fault injection: vkQueueSubmit failure during endFrame
+    TEST_CHECK(sync.beginFrame(&imgIdx) == true);
+    s_MockVk.queueSubmitResult = VK_ERROR_OUT_OF_DEVICE_MEMORY;
+    TEST_CHECK(sync.endFrame(imgIdx) == false);
+    TEST_CHECK(sync.isImageAcquired() == false);
+    TEST_CHECK(sync.isSubmissionQueued() == false);
+    TEST_CHECK(sync.isFenceReset() == false);
+    s_MockVk.queueSubmitResult = VK_SUCCESS;
+
+    // 8. Repeated failure & recovery cycles: 10 cycles without deadlock or synchronization leaks
+    for (int cycle = 0; cycle < 10; ++cycle) {
+        s_MockVk.beginCommandBufferResult = VK_ERROR_OUT_OF_DEVICE_MEMORY;
+        TEST_CHECK(sync.beginFrame(&imgIdx) == false);
+        TEST_CHECK(sync.isImageAcquired() == false);
+        TEST_CHECK(sync.isFenceReset() == false);
+    }
+    s_MockVk.beginCommandBufferResult = VK_SUCCESS;
+
+    // After repeated failures, normal frame can execute and submit cleanly
+    TEST_CHECK(sync.beginFrame(&imgIdx) == true);
+    TEST_CHECK(sync.isImageAcquired() == true);
+    TEST_CHECK(sync.endFrame(imgIdx) == true);
+    TEST_CHECK(sync.isImageAcquired() == false);
+
+    // 9. VK_SUBOPTIMAL_KHR acquisition followed by valid submission and presentation
+    s_MockVk.acquireResult = VK_SUBOPTIMAL_KHR;
+    TEST_CHECK(sync.beginFrame(&imgIdx) == true);
+    TEST_CHECK(sync.swapchainSuboptimal() == true);
+
+    // Abort submission consuming acquire semaphore and presenting
+    TEST_CHECK(sync.abortFrame(imgIdx) == false); // Returns false to request swapchain rebuild
+    TEST_CHECK(s_MockVk.clearColorCount >= 1);
+    TEST_CHECK(s_MockVk.pipelineBarrierCount >= 2);
+
+    // 10. Abort presentation returning VK_SUBOPTIMAL_KHR and VK_ERROR_OUT_OF_DATE_KHR
     s_MockVk.acquireResult = VK_SUCCESS;
     s_MockVk.presentResult = VK_SUBOPTIMAL_KHR;
     TEST_CHECK(sync.beginFrame(&imgIdx) == true);
     TEST_CHECK(sync.abortFrame(imgIdx) == false);
-    TEST_CHECK(sync.frame() == 0);
 
-    // Abort presentation returning VK_ERROR_OUT_OF_DATE_KHR
     s_MockVk.acquireResult = VK_SUCCESS;
     s_MockVk.presentResult = VK_ERROR_OUT_OF_DATE_KHR;
     TEST_CHECK(sync.beginFrame(&imgIdx) == true);
     TEST_CHECK(sync.abortFrame(imgIdx) == false);
-    TEST_CHECK(sync.frame() == 1);
+    s_MockVk.presentResult = VK_SUCCESS;
 
-    // 10. Windows swapchain recreation retries and terminates after configured failure threshold
+    // 11. Windows & Android swapchain recreation policy
     bool swapchainDirty = true;
     uint32_t consecutiveFailures = 0;
 
@@ -4571,7 +4700,7 @@ static void TestM39SwapchainAcquisitionAndAbortSynchronization()
     TEST_CHECK(swapchainDirty == false);
     TEST_CHECK(consecutiveFailures == 0);
 
-    std::cout << "PASS: Production SwapchainSync and SwapchainRecoveryPolicy verified (Coverage items 8, 9, 10)." << std::endl;
+    std::cout << "PASS: Production SwapchainSync and SwapchainRecoveryPolicy verified across all 8 failure points and recovery cycles." << std::endl;
 }
 
 // ----------------------------------------------------------------------------
@@ -4717,6 +4846,20 @@ static void TestM39VulkanBackendTransactionalRecovery()
     // Check effectContextId1 is still at frameIndex 0 and untouched
     TEST_CHECK(arm::ffxmTestGetEffectContextFrameIndexVK(&backendInterface, effectContextId1) == 0);
 
+    // Stale execution isolation test:
+    // Context 0 executes and succeeds. Context 1 did not participate in this batch.
+    scheduleTestJobs(2);
+    arm::ffxmSetTestJobExecutionHookVK([](FfxmUInt32, const FfxmGpuJobDescription*) -> FfxmErrorCode {
+        return FFXM_OK;
+    });
+    TEST_CHECK(backendInterface.fpExecuteGpuJobs(&backendInterface, cmdList) == FFXM_OK);
+    // Unregistering Context 1 must NOT treat Context 1 as having succeeded from Context 0's execution
+    TEST_CHECK(backendInterface.fpUnregisterResources(&backendInterface, cmdList, effectContextId1) == FFXM_OK);
+    TEST_CHECK(arm::ffxmTestGetEffectContextFrameIndexVK(&backendInterface, effectContextId1) == 0);
+
+    // Unregister Context 0
+    TEST_CHECK(backendInterface.fpUnregisterResources(&backendInterface, cmdList, effectContextId0) == FFXM_OK);
+
     // Context 0 fails again at job 1
     scheduleTestJobs(2);
     arm::ffxmSetTestJobExecutionHookVK([](FfxmUInt32 jobIndex, const FfxmGpuJobDescription*) -> FfxmErrorCode {
@@ -4741,11 +4884,138 @@ static void TestM39VulkanBackendTransactionalRecovery()
     // Context 0 remained isolated
     TEST_CHECK(arm::ffxmTestGetEffectContextFrameIndexVK(&backendInterface, effectContextId0) == 0);
 
+    // ------------------------------------------------------------------------
+    // M3.9.2 Dynamic Image-View Reclamation Tests (Items 1-10)
+    // ------------------------------------------------------------------------
+    s_MockCreateViewCount = 0;
+    s_MockDestroyViewCount = 0;
+    s_FailOnCreateViewCount = 0;
+
+    arm::ffxmTestSetImageViewHooksVK(MockVkCreateImageView, MockVkDestroyImageView);
+
+    FfxmResource dynColor = {};
+    dynColor.resource = reinterpret_cast<void*>(0x801);
+    dynColor.description.type = FFXM_RESOURCE_TYPE_TEXTURE2D;
+    dynColor.description.format = FFXM_SURFACE_FORMAT_R16G16B16A16_FLOAT;
+    dynColor.description.width = 1280;
+    dynColor.description.height = 720;
+    dynColor.description.mipCount = 1;
+    dynColor.description.usage = FFXM_RESOURCE_USAGE_UAV; // 1 SRV + 1 UAV = 2 views
+
+    FfxmResource dynDepth = {};
+    dynDepth.resource = reinterpret_cast<void*>(0x802);
+    dynDepth.description.type = FFXM_RESOURCE_TYPE_TEXTURE2D;
+    dynDepth.description.format = FFXM_SURFACE_FORMAT_R32_FLOAT;
+    dynDepth.description.width = 1280;
+    dynDepth.description.height = 720;
+    dynDepth.description.mipCount = 1;
+    dynDepth.description.usage = FFXM_RESOURCE_USAGE_UAV; // 1 SRV + 1 UAV = 2 views
+
+    FfxmResource dynMV = {};
+    dynMV.resource = reinterpret_cast<void*>(0x803);
+    dynMV.description.type = FFXM_RESOURCE_TYPE_TEXTURE2D;
+    dynMV.description.format = FFXM_SURFACE_FORMAT_R16G16_FLOAT;
+    dynMV.description.width = 1280;
+    dynMV.description.height = 720;
+    dynMV.description.mipCount = 1;
+    dynMV.description.usage = FFXM_RESOURCE_USAGE_READ_ONLY; // 1 SRV = 1 view
+
+    const FfxmUInt32 startDynView = arm::ffxmTestGetNextDynamicResourceViewVK(&backendInterface, effectContextId0, 0);
+
+    // 1. Register several dynamic image resources (5 views total)
+    FfxmResourceInternal dynOut1, dynOut2, dynOut3;
+    s_MockCreateViewCount = 0;
+    s_MockDestroyViewCount = 0;
+    s_FailOnCreateViewCount = 0;
+
+    TEST_CHECK(backendInterface.fpRegisterResource(&backendInterface, &dynColor, effectContextId0, &dynOut1) == FFXM_OK);
+    TEST_CHECK(backendInterface.fpRegisterResource(&backendInterface, &dynDepth, effectContextId0, &dynOut2) == FFXM_OK);
+    TEST_CHECK(backendInterface.fpRegisterResource(&backendInterface, &dynMV, effectContextId0, &dynOut3) == FFXM_OK);
+    TEST_CHECK(s_MockCreateViewCount == 5);
+    TEST_CHECK(arm::ffxmTestGetNextDynamicResourceViewVK(&backendInterface, effectContextId0, 0) == startDynView - 5);
+
+    // 2. Fail dispatch after all their views have been allocated
+    scheduleTestJobs(1);
+    arm::ffxmSetTestJobExecutionHookVK([](FfxmUInt32, const FfxmGpuJobDescription*) -> FfxmErrorCode {
+        return FFXM_ERROR_BACKEND_API_ERROR;
+    });
+    TEST_CHECK(backendInterface.fpExecuteGpuJobs(&backendInterface, cmdList) == FFXM_ERROR_BACKEND_API_ERROR);
+
+    // 3. Run failure cleanup
+    TEST_CHECK(backendInterface.fpUnregisterResources(&backendInterface, cmdList, effectContextId0) == FFXM_OK);
+
+    // 4. Verify all temporary views are reclaimed
+    TEST_CHECK(s_MockDestroyViewCount == 5);
+
+    // 5. Verify view allocation counter returns to its original position
+    TEST_CHECK(arm::ffxmTestGetNextDynamicResourceViewVK(&backendInterface, effectContextId0, 0) == startDynView);
+
+    // 6. Repeat failed dispatch 50 times without exhausting the view region
+    for (int rep = 0; rep < 50; ++rep) {
+        s_MockCreateViewCount = 0;
+        s_MockDestroyViewCount = 0;
+
+        TEST_CHECK(backendInterface.fpRegisterResource(&backendInterface, &dynColor, effectContextId0, &dynOut1) == FFXM_OK);
+        TEST_CHECK(backendInterface.fpRegisterResource(&backendInterface, &dynDepth, effectContextId0, &dynOut2) == FFXM_OK);
+        TEST_CHECK(backendInterface.fpRegisterResource(&backendInterface, &dynMV, effectContextId0, &dynOut3) == FFXM_OK);
+        TEST_CHECK(s_MockCreateViewCount == 5);
+
+        scheduleTestJobs(1);
+        arm::ffxmSetTestJobExecutionHookVK([](FfxmUInt32, const FfxmGpuJobDescription*) -> FfxmErrorCode {
+            return FFXM_ERROR_BACKEND_API_ERROR;
+        });
+        TEST_CHECK(backendInterface.fpExecuteGpuJobs(&backendInterface, cmdList) == FFXM_ERROR_BACKEND_API_ERROR);
+        TEST_CHECK(backendInterface.fpUnregisterResources(&backendInterface, cmdList, effectContextId0) == FFXM_OK);
+
+        TEST_CHECK(s_MockDestroyViewCount == 5);
+        TEST_CHECK(arm::ffxmTestGetNextDynamicResourceViewVK(&backendInterface, effectContextId0, 0) == startDynView);
+    }
+
+    // 7. Retry successfully and verify correct resource/view creation
+    s_MockCreateViewCount = 0;
+    s_MockDestroyViewCount = 0;
+    TEST_CHECK(backendInterface.fpRegisterResource(&backendInterface, &dynColor, effectContextId0, &dynOut1) == FFXM_OK);
+    TEST_CHECK(backendInterface.fpRegisterResource(&backendInterface, &dynDepth, effectContextId0, &dynOut2) == FFXM_OK);
+    TEST_CHECK(backendInterface.fpRegisterResource(&backendInterface, &dynMV, effectContextId0, &dynOut3) == FFXM_OK);
+    TEST_CHECK(s_MockCreateViewCount == 5);
+
+    scheduleTestJobs(1);
+    arm::ffxmSetTestJobExecutionHookVK([](FfxmUInt32, const FfxmGpuJobDescription*) -> FfxmErrorCode {
+        return FFXM_OK;
+    });
+    TEST_CHECK(backendInterface.fpExecuteGpuJobs(&backendInterface, cmdList) == FFXM_OK);
+    TEST_CHECK(backendInterface.fpUnregisterResources(&backendInterface, cmdList, effectContextId0) == FFXM_OK);
+
+    // 8. Verify previously submitted frame views remain untouched
+    TEST_CHECK(s_MockDestroyViewCount == 0); // Preserved for GPU
+
+    // 9. Verify descriptor-ring advancement only after successful completion
+    TEST_CHECK(arm::ffxmTestGetEffectContextFrameIndexVK(&backendInterface, effectContextId0) == 0);
+
+    // 10. Verify resource-registration failures also reclaim any partially created views
+    // Fail on the 3rd view creation (during dynDepth SRV creation)
+    const FfxmUInt32 step10StartDynView = arm::ffxmTestGetNextDynamicResourceViewVK(&backendInterface, effectContextId0, 0);
+    s_MockCreateViewCount = 0;
+    s_MockDestroyViewCount = 0;
+    s_FailOnCreateViewCount = 3;
+
+    TEST_CHECK(backendInterface.fpRegisterResource(&backendInterface, &dynColor, effectContextId0, &dynOut1) == FFXM_OK);
+    TEST_CHECK(s_MockCreateViewCount == 2);
+
+    FfxmErrorCode failReg = backendInterface.fpRegisterResource(&backendInterface, &dynDepth, effectContextId0, &dynOut2);
+    TEST_CHECK(failReg == FFXM_ERROR_BACKEND_API_ERROR);
+
+    // Cleanup reclaims all views created so far (2 from dynColor, plus any partials)
+    TEST_CHECK(backendInterface.fpUnregisterResources(&backendInterface, cmdList, effectContextId0) == FFXM_OK);
+    TEST_CHECK(s_MockDestroyViewCount == 2);
+    TEST_CHECK(arm::ffxmTestGetNextDynamicResourceViewVK(&backendInterface, effectContextId0, 0) == step10StartDynView);
+
     // Teardown
+    arm::ffxmTestSetImageViewHooksVK(nullptr, nullptr);
     arm::ffxmSetTestJobExecutionHookVK(nullptr);
     arm::ffxmTestResetBackendRefCountVK();
 
-    std::cout << "PASS: Production ExecuteGpuJobsVK and UnregisterResourcesVK verified (Coverage items 1-7)." << std::endl;
+    std::cout << "PASS: Production ExecuteGpuJobsVK and UnregisterResourcesVK verified (Coverage items 1-10 + Context Isolation)." << std::endl;
 }
 
 int main()

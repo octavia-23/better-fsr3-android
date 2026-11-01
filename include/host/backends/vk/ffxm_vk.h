@@ -153,9 +153,15 @@ FFXM_API FfxmErrorCode ExecuteGpuJobsVK(FfxmInterface* backendInterface, FfxmCom
 /// @ingroup VKBackend
 FFXM_API FfxmErrorCode UnregisterResourcesVK(FfxmInterface* backendInterface, FfxmCommandList commandList, FfxmUInt32 effectContextId);
 
-// Test inspection and injection helpers
+#if defined(FFXM_ENABLE_TEST_HOOKS)
+// Test inspection and injection helpers (gated for testing only)
 typedef FfxmErrorCode (*FfxmTestJobExecutionHook)(FfxmUInt32 jobIndex, const FfxmGpuJobDescription* job);
+typedef VkResult (VKAPI_PTR *FfxmTestCreateImageViewHook)(VkDevice device, const VkImageViewCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkImageView* pView);
+typedef void (VKAPI_PTR *FfxmTestDestroyImageViewHook)(VkDevice device, VkImageView imageView, const VkAllocationCallbacks* pAllocator);
+
 FFXM_API void ffxmSetTestJobExecutionHookVK(FfxmTestJobExecutionHook hook);
+FFXM_API void ffxmTestSetImageViewHooksVK(FfxmTestCreateImageViewHook createHook, FfxmTestDestroyImageViewHook destroyHook);
+FFXM_API FfxmUInt32 ffxmTestGetNextDynamicResourceViewVK(FfxmInterface* backendInterface, FfxmUInt32 effectContextId, FfxmUInt32 frameIndex);
 FFXM_API FfxmResourceStates ffxmTestGetResourceCurrentStateVK(FfxmInterface* backendInterface, FfxmUInt32 resourceIndex);
 FFXM_API FfxmResourceStates ffxmTestGetResourceCommittedStateVK(FfxmInterface* backendInterface, FfxmUInt32 resourceIndex);
 FFXM_API bool ffxmTestGetResourceUndefinedVK(FfxmInterface* backendInterface, FfxmUInt32 resourceIndex);
@@ -173,6 +179,7 @@ FFXM_API void ffxmTestSetResourceStateVK(
     FfxmResourceStates state,
     bool undefined);
 FFXM_API void ffxmTestResetBackendRefCountVK();
+#endif // FFXM_ENABLE_TEST_HOOKS
 
 #if defined(__cplusplus)
 }
