@@ -660,19 +660,24 @@ In addition to native static backend library builds across Android ABIs (`arm64-
   - Full Vulkan 1.3+ device feature gates passed: `SPIR-V 1.4 yes | shaderFloat16 yes | 16-bit storage yes | extended formats yes | write without format yes | storage formats yes | sampled formats yes`.
   - Confirmed continuous real-time rendering and temporal upscaling (1162x540 -> 2325x1080 on Mi 11X; 1356x610 -> 2712x1220 on Poco F6) with smooth camera animation verified via on-device screen captures and zero driver warnings/crashes.
 
-### 12.5 Live Hardware Performance & Benchmark Profile (Poco F6 / Adreno 735)
-Direct hardware profiling on the Qualcomm Snapdragon 8s Gen 3 / Adreno 735 target hardware running Xiaomi HyperOS / Android 14:
+### 12.5 Live Hardware Performance & Benchmark Profile
 
-| Metric | Measured Hardware Value | Performance Evaluation |
-| :--- | :--- | :--- |
-| **Display Refresh Rate** | **120 Hz** ($8,333,333\text{ ns} = 8.33\text{ ms}$ VSYNC interval) | Verified via `SurfaceFlinger --latency` hardware timestamps. |
-| **Delivered Frame Rate** | **$\sim 80\text{ FPS}$** average | Alternating between $8.3\text{ ms}$ (single-VSYNC) and $16.6\text{ ms}$ (double-VSYNC). |
-| **Total Frame Latency** | **$\sim 12.5\text{ ms}$** average | Full frame turnaround (CPU scene update + 3D pass + all 7 FSR3 compute passes + swapchain present). |
-| **Base Render Resolution** | **$1356 \times 610$** ($0.827\text{ Mpixels}$) | Low-resolution input extent with active Halton jitter. |
-| **Presented Resolution** | **$2712 \times 1220$** ($3.308\text{ Mpixels}$) | $2.00\times$ temporal compute upscaling to native 1.5K AMOLED panel. |
-| **Rasterization Fill Savings** | **$75.0\%$ ($4.00\times$ fewer pixels)** | Geometry rasterization and pixel shading load reduced by $3/4$ compared to native 1.5K rendering. |
-| **FSR 3.1.4 Scratch Memory** | **$2,941,512\text{ bytes}$** ($2.94\text{ MB}$) | Computed dynamically by `ffxmGetScratchMemorySizeVK`; 0 reallocation cycles. |
-| **Application Native Heap** | **$63.6\text{ MB}$** resident ($60.3\text{ MB}$ allocated) | Lean heap footprint; context allocated on heap to prevent stack overflow. |
-| **Graphics Memory (Gralloc)** | **$90.3\text{ MB}$** total | Includes $6\times$ swapchain images ($79.8\text{ MB}$) and FSR3 shared intermediates. |
-| **Total Process PSS** | **$202.7\text{ MB}$** | Stable memory footprint; zero memory leakage across continuous dispatches. |
-| **Jank / Dropped Frames** | **0 jank frames** | Verified via `dumpsys gfxinfo` over continuous multi-frame execution. |
+Direct hardware profiling across physical devices running the FSR 3.1.4 compute upscaler:
+
+#### Comparative Benchmark Matrix
+
+| Metric | Xiaomi Mi 11X (Snapdragon 870 / Adreno 650) | Poco F6 (Snapdragon 8s Gen 3 / Adreno 735) | Architectural Significance |
+| :--- | :--- | :--- | :--- |
+| **SoC / Architecture** | Qualcomm Snapdragon 870 (`kona`, 7nm) | Qualcomm Snapdragon 8s Gen 3 (`pineapple`, 4nm) | Gen-over-gen mobile silicon scaling |
+| **GPU / Driver** | Adreno 650 / Qualcomm 512.597.0 (Vulkan 1.1) | Adreno 735 / Qualcomm 0762.36.1 (Vulkan 1.3/1.4) | Legacy vs Modern mobile Vulkan stack |
+| **OS Environment** | Android 13 (LineageOS, clean AOSP stack) | Android 14 (Xiaomi HyperOS) | Stock AOSP vs OEM Vendor framework |
+| **Display Refresh Rate** | **120 Hz** ($8.33\text{ ms}$ VSYNC interval) | **120 Hz** ($8.33\text{ ms}$ VSYNC interval) | Verified via `SurfaceFlinger --latency` hardware timestamps |
+| **Delivered Frame Rate** | **$\sim 37.6\text{ FPS}$** average ($\sim 40\text{ FPS}$ cadence) | **$\sim 80\text{ FPS}$** average | Solid real-time rendering on both generations |
+| **Frame Cadence & Latency** | **$26.6\text{ ms}$** avg (predominantly 3 VSYNC ticks = $24.8\text{ ms}$) | **$12.5\text{ ms}$** avg (alternating 1-2 VSYNC ticks: $8.3\text{ ms}$ / $16.6\text{ ms}$) | Adreno 735 delivers $>2\times$ throughput scaling |
+| **Base Render Extent** | **$1162 \times 540$** ($0.627\text{ Mpixels}$) | **$1356 \times 610$** ($0.827\text{ Mpixels}$) | Low-res inputs with active Halton jitter |
+| **Presented Resolution** | **$2325 \times 1080$** ($2.511\text{ Mpixels}$, 1080p FHD+) | **$2712 \times 1220$** ($3.308\text{ Mpixels}$, 1.5K AMOLED) | $2.00\times$ temporal compute upscaling |
+| **Rasterization Fill Savings** | **$75.0\%$ ($4.00\times$ fewer pixels)** | **$75.0\%$ ($4.00\times$ fewer pixels)** | Eliminates 3/4 of fragment rasterization overhead |
+| **FSR 3.1.4 Scratch Memory** | **$2,924,616\text{ bytes}$** ($2.92\text{ MB}$) | **$2,941,512\text{ bytes}$** ($2.94\text{ MB}$) | Dynamically sized by `ffxmGetScratchMemorySizeVK` |
+| **Application Native Heap** | **$33.4\text{ MB}$** resident ($10.7\text{ MB}$ allocated) | **$63.6\text{ MB}$** resident ($60.3\text{ MB}$ allocated) | Lean native memory footprint |
+| **Total Process PSS** | **$54.2\text{ MB}$** | **$202.7\text{ MB}$** | Zero memory growth across continuous dispatches |
+| **Jank / Dropped Frames** | **0 jank frames** | **0 jank frames** | Verified via `dumpsys gfxinfo` over continuous runs |
