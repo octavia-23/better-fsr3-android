@@ -116,53 +116,91 @@ bool VkContext::pickPhysicalDevice()
     caps_.apiVersion       = deviceProps.apiVersion;
     caps_.spirv14          = deviceProps.apiVersion >= VK_API_VERSION_1_2 ||
                              hasExtension(exts, VK_KHR_SPIRV_1_4_EXTENSION_NAME);
-    caps_.storage16bit     = deviceProps.apiVersion >= VK_API_VERSION_1_2 ||
-                             hasExtension(exts, VK_KHR_16BIT_STORAGE_EXTENSION_NAME);
     caps_.subgroupSizeCtrl = hasExtension(exts, VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME);
 
+    VkPhysicalDevice16BitStorageFeatures storage16 = {
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES};
     VkPhysicalDeviceShaderFloat16Int8Features f16 = {
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES};
     VkPhysicalDeviceFeatures2 features2 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+
+    void** ppNext = &features2.pNext;
+    if (hasExtension(exts, VK_KHR_16BIT_STORAGE_EXTENSION_NAME) ||
+        deviceProps.apiVersion >= VK_API_VERSION_1_1) {
+        *ppNext = &storage16;
+        ppNext = &storage16.pNext;
+    }
     if (hasExtension(exts, VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME) ||
         deviceProps.apiVersion >= VK_API_VERSION_1_2) {
-        features2.pNext = &f16;
+        *ppNext = &f16;
+        ppNext = &f16.pNext;
     }
     vkGetPhysicalDeviceFeatures2(physicalDevice_, &features2);
-    caps_.shaderFloat16             = f16.shaderFloat16 == VK_TRUE;
-    caps_.storageExtendedFormats     = features2.features.shaderStorageImageExtendedFormats == VK_TRUE;
-    caps_.storageWriteWithoutFormat  = features2.features.shaderStorageImageWriteWithoutFormat == VK_TRUE;
 
-    // Check required storage image format support (R32F, RG16F, R32U, RGBA16F, R8)
+    caps_.storage16bit              = storage16.storageBuffer16BitAccess == VK_TRUE;
+    caps_.shaderFloat16             = f16.shaderFloat16 == VK_TRUE;
+    caps_.storageExtendedFormats    = features2.features.shaderStorageImageExtendedFormats == VK_TRUE;
+    caps_.storageWriteWithoutFormat = features2.features.shaderStorageImageWriteWithoutFormat == VK_TRUE;
+
+    auto formatName = [](VkFormat format) -> const char* {
+        switch (format) {
+        case VK_FORMAT_R32_SFLOAT: return "R32_SFLOAT";
+        case VK_FORMAT_R16G16_SFLOAT: return "R16G16_SFLOAT";
+        case VK_FORMAT_R32_UINT: return "R32_UINT";
+        case VK_FORMAT_R16G16B16A16_SFLOAT: return "R16G16B16A16_SFLOAT";
+        case VK_FORMAT_R8_UNORM: return "R8_UNORM";
+        case VK_FORMAT_R8G8B8A8_UNORM: return "R8G8B8A8_UNORM";
+        case VK_FORMAT_R16_SFLOAT: return "R16_SFLOAT";
+        case VK_FORMAT_R32G32B32A32_SFLOAT: return "R32G32B32A32_SFLOAT";
+        case VK_FORMAT_D32_SFLOAT: return "D32_SFLOAT";
+        case VK_FORMAT_R16_SNORM: return "R16_SNORM";
+        case VK_FORMAT_R32G32_SFLOAT: return "R32G32_SFLOAT";
+        default: return "UNKNOWN_FORMAT";
+        }
+    };
+
+    // Check required storage image format support across all 19 surfaces + external inputs
     const VkFormat storageFormats[] = {
         VK_FORMAT_R32_SFLOAT,
         VK_FORMAT_R16G16_SFLOAT,
         VK_FORMAT_R32_UINT,
         VK_FORMAT_R16G16B16A16_SFLOAT,
-        VK_FORMAT_R8_UNORM
+        VK_FORMAT_R8_UNORM,
+        VK_FORMAT_R8G8B8A8_UNORM,
+        VK_FORMAT_R16_SFLOAT,
+        VK_FORMAT_R32G32B32A32_SFLOAT
     };
     bool storageOk = true;
     for (VkFormat f : storageFormats) {
         VkFormatProperties props = {};
         vkGetPhysicalDeviceFormatProperties(physicalDevice_, f, &props);
         if ((props.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) == 0) {
-            LOGE("Missing VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT for format %d", f);
+            LOGE("Missing VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT for format %s (%d)", formatName(f), (int)f);
             storageOk = false;
         }
     }
     caps_.storageFormatsSupported = storageOk;
 
-    // Check required sampled image format support (RGBA16F, D32F, RG16F)
+    // Check required sampled image format support across all inputs and pipeline bindings
     const VkFormat sampledFormats[] = {
         VK_FORMAT_R16G16B16A16_SFLOAT,
         VK_FORMAT_D32_SFLOAT,
-        VK_FORMAT_R16G16_SFLOAT
+        VK_FORMAT_R16G16_SFLOAT,
+        VK_FORMAT_R32_SFLOAT,
+        VK_FORMAT_R32_UINT,
+        VK_FORMAT_R8_UNORM,
+        VK_FORMAT_R8G8B8A8_UNORM,
+        VK_FORMAT_R16_SNORM,
+        VK_FORMAT_R32G32_SFLOAT,
+        VK_FORMAT_R16_SFLOAT,
+        VK_FORMAT_R32G32B32A32_SFLOAT
     };
     bool sampledOk = true;
     for (VkFormat f : sampledFormats) {
         VkFormatProperties props = {};
         vkGetPhysicalDeviceFormatProperties(physicalDevice_, f, &props);
         if ((props.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) == 0) {
-            LOGE("Missing VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT for format %d", f);
+            LOGE("Missing VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT for format %s (%d)", formatName(f), (int)f);
             sampledOk = false;
         }
     }
@@ -408,6 +446,87 @@ bool VkContext::endFrame(uint32_t imageIndex)
         return false;
     if (presented != VK_SUCCESS) {
         LOGE("vkQueuePresentKHR failed: %d", (int)presented);
+        return false;
+    }
+    return true;
+}
+
+bool VkContext::abortFrame(uint32_t imageIndex)
+{
+    // Discard any partial command recording by resetting the command buffer.
+    VK_CHECK(vkResetCommandBuffer(commandBuffers_[frame_], 0));
+
+    VkCommandBufferBeginInfo beginInfo = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    VK_CHECK(vkBeginCommandBuffer(commandBuffers_[frame_], &beginInfo));
+
+    // Transition swapchain image from UNDEFINED to TRANSFER_DST_OPTIMAL
+    VkImageMemoryBarrier toTransfer = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    toTransfer.srcAccessMask       = 0;
+    toTransfer.dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT;
+    toTransfer.oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED;
+    toTransfer.newLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    toTransfer.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toTransfer.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toTransfer.image               = swapchainImages_[imageIndex];
+    toTransfer.subresourceRange    = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+    vkCmdPipelineBarrier(commandBuffers_[frame_],
+                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &toTransfer);
+
+    // Clear swapchain image to solid black so no uninitialized contents appear
+    VkClearColorValue blackColor = {};
+    VkImageSubresourceRange clearRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkCmdClearColorImage(commandBuffers_[frame_], swapchainImages_[imageIndex],
+                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &blackColor, 1, &clearRange);
+
+    // Transition swapchain image from TRANSFER_DST_OPTIMAL to PRESENT_SRC_KHR
+    VkImageMemoryBarrier toPresent = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    toPresent.srcAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT;
+    toPresent.dstAccessMask       = 0;
+    toPresent.oldLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    toPresent.newLayout           = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    toPresent.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toPresent.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toPresent.image               = swapchainImages_[imageIndex];
+    toPresent.subresourceRange    = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+    vkCmdPipelineBarrier(commandBuffers_[frame_],
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &toPresent);
+
+    VK_CHECK(vkEndCommandBuffer(commandBuffers_[frame_]));
+
+    // Submit and signal release semaphore + inFlight fence so synchronization remains intact
+    const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    VkSubmitInfo submit = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    submit.waitSemaphoreCount   = 1;
+    submit.pWaitSemaphores      = &acquireSemaphores_[frame_];
+    submit.pWaitDstStageMask    = &waitStage;
+    submit.commandBufferCount   = 1;
+    submit.pCommandBuffers      = &commandBuffers_[frame_];
+    submit.signalSemaphoreCount = 1;
+    submit.pSignalSemaphores    = &releaseSemaphores_[frame_];
+    VK_CHECK(vkQueueSubmit(queue_, 1, &submit, inFlightFences_[frame_]));
+
+    // Present image to return ownership to the swapchain presentation engine
+    VkPresentInfoKHR present = {VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
+    present.waitSemaphoreCount = 1;
+    present.pWaitSemaphores    = &releaseSemaphores_[frame_];
+    present.swapchainCount     = 1;
+    present.pSwapchains        = &swapchain_;
+    present.pImageIndices      = &imageIndex;
+
+    VkResult presented = vkQueuePresentKHR(queue_, &present);
+    frame_ = (frame_ + 1) % kFramesInFlight;
+
+    if (presented == VK_ERROR_OUT_OF_DATE_KHR || presented == VK_SUBOPTIMAL_KHR)
+        return false;
+    if (presented != VK_SUCCESS) {
+        LOGE("vkQueuePresentKHR failed in abortFrame: %d", (int)presented);
         return false;
     }
     return true;

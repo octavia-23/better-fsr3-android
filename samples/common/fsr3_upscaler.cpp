@@ -12,7 +12,8 @@ namespace {
 // FSR 3.1.4 takes resources as FfxmResource, which pairs the API handle with a
 // description the backend uses to derive views and barriers.
 FfxmResourceDescription describeTexture(const RenderTarget& rt, FfxmSurfaceFormat format,
-                                        FfxmResourceUsage usage)
+                                        FfxmResourceUsage usage,
+                                        FfxmResourceFlags flags = FFXM_RESOURCE_FLAGS_NONE)
 {
     FfxmResourceDescription desc = {};
     desc.type     = FFXM_RESOURCE_TYPE_TEXTURE2D;
@@ -21,16 +22,17 @@ FfxmResourceDescription describeTexture(const RenderTarget& rt, FfxmSurfaceForma
     desc.height   = rt.extent.height;
     desc.depth    = 1;
     desc.mipCount = 1;
-    desc.flags    = FFXM_RESOURCE_FLAGS_NONE;
+    desc.flags    = flags;
     desc.usage    = usage;
     return desc;
 }
 
 FfxmResource wrap(const RenderTarget& rt, FfxmSurfaceFormat format, FfxmResourceUsage usage,
-                  FfxmResourceStates state, wchar_t* name)
+                  FfxmResourceStates state, wchar_t* name,
+                  FfxmResourceFlags flags = FFXM_RESOURCE_FLAGS_NONE)
 {
     return ffxmGetResourceVK(reinterpret_cast<void*>(rt.image),
-                             describeTexture(rt, format, usage), name, state);
+                             describeTexture(rt, format, usage, flags), name, state);
 }
 
 void messageCallback(FfxmMsgType type, const wchar_t* message)
@@ -152,6 +154,7 @@ bool Fsr3Upscaler::createSharedResources(VkContext& ctx)
          dilatedDepthExtent.width, dilatedDepthExtent.height,
          dilatedMvExtent.width, dilatedMvExtent.height,
          reconDepthExtent.width, reconDepthExtent.height);
+    sharedResourcesInitialized_ = false;
     return true;
 }
 
@@ -174,6 +177,7 @@ void Fsr3Upscaler::destroySharedResources(VkContext& ctx)
     destroyTarget(dilatedDepth_);
     destroyTarget(dilatedMotionVectors_);
     destroyTarget(reconstructedPrevNearestDepth_);
+    sharedResourcesInitialized_ = false;
 }
 
 bool Fsr3Upscaler::init(VkContext& ctx, VkExtent2D renderExtent, VkExtent2D displayExtent,
@@ -275,17 +279,21 @@ bool Fsr3Upscaler::dispatch(VkCommandBuffer cmd, const Scene& scene, VkExtent2D 
                               FFXM_RESOURCE_USAGE_RENDERTARGET, FFXM_RESOURCE_STATE_COMPUTE_READ,
                               kMotionName);
 
+    const FfxmResourceFlags sharedFlags = !sharedResourcesInitialized_
+        ? FFXM_RESOURCE_FLAGS_UNDEFINED
+        : FFXM_RESOURCE_FLAGS_NONE;
+
     desc.dilatedDepth = wrap(dilatedDepth_, FFXM_SURFACE_FORMAT_R32_FLOAT,
                              static_cast<FfxmResourceUsage>(FFXM_RESOURCE_USAGE_RENDERTARGET | FFXM_RESOURCE_USAGE_UAV),
-                             FFXM_RESOURCE_STATE_UNORDERED_ACCESS, kDilatedDepthName);
+                             FFXM_RESOURCE_STATE_UNORDERED_ACCESS, kDilatedDepthName, sharedFlags);
 
     desc.dilatedMotionVectors = wrap(dilatedMotionVectors_, FFXM_SURFACE_FORMAT_R16G16_FLOAT,
                                      static_cast<FfxmResourceUsage>(FFXM_RESOURCE_USAGE_RENDERTARGET | FFXM_RESOURCE_USAGE_UAV),
-                                     FFXM_RESOURCE_STATE_UNORDERED_ACCESS, kDilatedMotionVectorsName);
+                                     FFXM_RESOURCE_STATE_UNORDERED_ACCESS, kDilatedMotionVectorsName, sharedFlags);
 
     desc.reconstructedPrevNearestDepth = wrap(reconstructedPrevNearestDepth_, FFXM_SURFACE_FORMAT_R32_UINT,
                                               FFXM_RESOURCE_USAGE_UAV, FFXM_RESOURCE_STATE_UNORDERED_ACCESS,
-                                              kReconDepthName);
+                                              kReconDepthName, sharedFlags);
 
     desc.output = wrap(scene.output(), FFXM_SURFACE_FORMAT_R16G16B16A16_FLOAT,
                        FFXM_RESOURCE_USAGE_UAV, FFXM_RESOURCE_STATE_UNORDERED_ACCESS,
@@ -311,6 +319,7 @@ bool Fsr3Upscaler::dispatch(VkCommandBuffer cmd, const Scene& scene, VkExtent2D 
         LOGE("ffxmFsr3UpscalerContextDispatch failed: 0x%08X", (unsigned)err);
         return false;
     }
+    sharedResourcesInitialized_ = true;
     return true;
 }
 

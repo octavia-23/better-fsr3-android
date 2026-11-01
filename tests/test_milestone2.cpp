@@ -187,6 +187,13 @@ static int32_t s_FailAtScheduleGpuJobIndex = -1;
 static FfxmErrorCode s_ExecuteGpuJobsResult = FFXM_OK;
 static FfxmErrorCode s_UnregisterResourcesResult = FFXM_OK;
 
+struct MockRegisteredResourceRecord {
+    FfxmResourceDescription desc;
+    FfxmResourceStates state;
+    wchar_t name[64];
+};
+static std::vector<MockRegisteredResourceRecord> s_MockRegisteredResources;
+
 // Occurrence-aware resource creation & destruction tracking
 static std::map<int32_t, int> s_ResourceCreationCounts;
 static std::map<int32_t, int> s_ResourceDestructionCounts;
@@ -305,7 +312,16 @@ static FfxmErrorCode MockRegisterResource(
     FfxmUInt32 effectContextId,
     FfxmResourceInternal* outResource)
 {
-    (void)backendInterface; (void)inResource; (void)effectContextId;
+    (void)backendInterface; (void)effectContextId;
+    if (inResource) {
+        MockRegisteredResourceRecord rec = {};
+        rec.desc = inResource->description;
+        rec.state = inResource->state;
+        if (inResource->name[0] != L'\0') {
+            wcsncpy(rec.name, inResource->name, 63);
+        }
+        s_MockRegisteredResources.push_back(rec);
+    }
     if (s_FailAtRegisterResourceIndex >= 0 && static_cast<int32_t>(s_RegisterResourceCallCount) == s_FailAtRegisterResourceIndex) {
         s_RegisterResourceCallCount++;
         return FFXM_ERROR_OUT_OF_MEMORY;
@@ -482,6 +498,21 @@ static void ResetMockState()
     s_RegisterResourceCallCount = 0;
     s_ScheduleGpuJobResult = FFXM_OK;
     s_ScheduleGpuJobCallCount = 0;
+    s_FailAtScheduleGpuJobIndex = -1;
+    s_ExecuteGpuJobsResult = FFXM_OK;
+    s_UnregisterResourcesResult = FFXM_OK;
+    s_MockRegisteredResources.clear();
+}
+
+static void ResetDispatchTrackers()
+{
+    s_RegisterResourceCallCount = 0;
+    s_ScheduleGpuJobCallCount = 0;
+    s_ExecuteGpuJobsCallCount = 0;
+    s_UnregisterResourcesCallCount = 0;
+    s_ScheduledGpuJobs.clear();
+    s_MockRegisteredResources.clear();
+    s_ScheduleGpuJobResult = FFXM_OK;
     s_FailAtScheduleGpuJobIndex = -1;
     s_ExecuteGpuJobsResult = FFXM_OK;
     s_UnregisterResourcesResult = FFXM_OK;
@@ -3805,12 +3836,19 @@ static void TestM3PrepareInputsRealVulkanExecution()
     FfxmFsr3UpscalerSharedResourceDescriptions sharedDescs = {};
     TEST_CHECK(ffxmFsr3UpscalerGetSharedResourceDescriptions(&realContext, &sharedDescs) == FFXM_OK);
 
+    FfxmResourceDescription descDilatedMv = sharedDescs.dilatedMotionVectors.resourceDescription;
+    descDilatedMv.flags = FFXM_RESOURCE_FLAGS_UNDEFINED;
+    FfxmResourceDescription descDilatedDepth = sharedDescs.dilatedDepth.resourceDescription;
+    descDilatedDepth.flags = FFXM_RESOURCE_FLAGS_UNDEFINED;
+    FfxmResourceDescription descReconDepth = sharedDescs.reconstructedPrevNearestDepth.resourceDescription;
+    descReconDepth.flags = FFXM_RESOURCE_FLAGS_UNDEFINED;
+
     dispDesc.color = ffxmGetResourceVK(colorImg.image, rR8G8B8A8, nullptr, FFXM_RESOURCE_STATE_COMPUTE_READ);
     dispDesc.depth = ffxmGetResourceVK(depthImg.image, rR32F, nullptr, FFXM_RESOURCE_STATE_COMPUTE_READ);
     dispDesc.motionVectors = ffxmGetResourceVK(mvImg.image, rRG16F, nullptr, FFXM_RESOURCE_STATE_COMPUTE_READ);
-    dispDesc.dilatedMotionVectors = ffxmGetResourceVK(dilMvImg.image, sharedDescs.dilatedMotionVectors.resourceDescription, nullptr, FFXM_RESOURCE_STATE_UNORDERED_ACCESS);
-    dispDesc.dilatedDepth = ffxmGetResourceVK(dilDepthImg.image, sharedDescs.dilatedDepth.resourceDescription, nullptr, FFXM_RESOURCE_STATE_UNORDERED_ACCESS);
-    dispDesc.reconstructedPrevNearestDepth = ffxmGetResourceVK(reconDepthImg.image, sharedDescs.reconstructedPrevNearestDepth.resourceDescription, nullptr, FFXM_RESOURCE_STATE_UNORDERED_ACCESS);
+    dispDesc.dilatedMotionVectors = ffxmGetResourceVK(dilMvImg.image, descDilatedMv, nullptr, FFXM_RESOURCE_STATE_UNORDERED_ACCESS);
+    dispDesc.dilatedDepth = ffxmGetResourceVK(dilDepthImg.image, descDilatedDepth, nullptr, FFXM_RESOURCE_STATE_UNORDERED_ACCESS);
+    dispDesc.reconstructedPrevNearestDepth = ffxmGetResourceVK(reconDepthImg.image, descReconDepth, nullptr, FFXM_RESOURCE_STATE_UNORDERED_ACCESS);
     dispDesc.output = ffxmGetResourceVK(outputImg.image, rUavOutput, nullptr, FFXM_RESOURCE_STATE_UNORDERED_ACCESS);
 
     FfxmErrorCode dispErr = ffxmFsr3UpscalerContextDispatch(&realContext, &dispDesc);
@@ -3836,6 +3874,14 @@ static void TestM3PrepareInputsRealVulkanExecution()
     FfxmResourceDescription rR8 = { FFXM_RESOURCE_TYPE_TEXTURE2D, FFXM_SURFACE_FORMAT_R8_UNORM, renderW, renderH, 1, 1, FFXM_RESOURCE_FLAGS_NONE, FFXM_RESOURCE_USAGE_READ_ONLY };
     dispDesc.reactive = ffxmGetResourceVK(reactiveImg.image, rR8, nullptr, FFXM_RESOURCE_STATE_COMPUTE_READ);
     dispDesc.transparencyAndComposition = ffxmGetResourceVK(transpImg.image, rR8, nullptr, FFXM_RESOURCE_STATE_COMPUTE_READ);
+
+    // Frame 2 on real GPU: shared resources are now initialized, so pass FFXM_RESOURCE_FLAGS_NONE
+    descDilatedMv.flags = FFXM_RESOURCE_FLAGS_NONE;
+    descDilatedDepth.flags = FFXM_RESOURCE_FLAGS_NONE;
+    descReconDepth.flags = FFXM_RESOURCE_FLAGS_NONE;
+    dispDesc.dilatedMotionVectors = ffxmGetResourceVK(dilMvImg.image, descDilatedMv, nullptr, FFXM_RESOURCE_STATE_UNORDERED_ACCESS);
+    dispDesc.dilatedDepth = ffxmGetResourceVK(dilDepthImg.image, descDilatedDepth, nullptr, FFXM_RESOURCE_STATE_UNORDERED_ACCESS);
+    dispDesc.reconstructedPrevNearestDepth = ffxmGetResourceVK(reconDepthImg.image, descReconDepth, nullptr, FFXM_RESOURCE_STATE_UNORDERED_ACCESS);
 
     pfnBeginCommandBuffer(cmdBuffer, &beginInfo);
     FfxmErrorCode dispErr2 = ffxmFsr3UpscalerContextDispatch(&realContext, &dispDesc);
@@ -3954,6 +4000,293 @@ static void TestM3PrepareInputsRealVulkanExecution()
 #endif
 }
 
+static void TestM38SharedResourceInitialLayouts()
+{
+    std::cout << "--- Test 25: M3.8 Shared-Resource Initial Image Layouts Verification ---" << std::endl;
+
+    ResetDispatchTrackers();
+    FfxmInterface mockInterface = {};
+    SetupMockInterface(&mockInterface);
+
+    FfxmFsr3UpscalerContextDescription contextDesc = {};
+    contextDesc.flags = FFXM_FSR3UPSCALER_ENABLE_AUTO_EXPOSURE;
+    contextDesc.maxRenderSize = { 1920, 1080 };
+    contextDesc.maxUpscaleSize = { 3840, 2160 };
+    contextDesc.backendInterface = mockInterface;
+
+    FfxmFsr3UpscalerContext context = {};
+    TEST_CHECK(ffxmFsr3UpscalerContextCreate(&context, &contextDesc) == FFXM_OK);
+
+    int s_Dummy = 1;
+    FfxmResource s_Res = {};
+    s_Res.resource = &s_Dummy;
+
+    FfxmFsr3UpscalerDispatchDescription dispDesc = {};
+    dispDesc.commandList = reinterpret_cast<FfxmCommandList>(&s_Dummy);
+    dispDesc.renderSize = { 1920, 1080 };
+    dispDesc.upscaleSize = { 3840, 2160 };
+    dispDesc.frameTimeDelta = 16.6f;
+    dispDesc.cameraNear = 0.1f;
+    dispDesc.cameraFar = 1000.0f;
+    dispDesc.cameraFovAngleVertical = 1.0f;
+    dispDesc.viewSpaceToMetersFactor = 1.0f;
+
+    dispDesc.color = s_Res;
+    dispDesc.depth = s_Res;
+    dispDesc.motionVectors = s_Res;
+    dispDesc.output = s_Res;
+
+    // 1. First-use dispatch (Frame 0): Shared resources marked with FFXM_RESOURCE_FLAGS_UNDEFINED
+    dispDesc.dilatedDepth = s_Res;
+    dispDesc.dilatedDepth.description.flags = FFXM_RESOURCE_FLAGS_UNDEFINED;
+    wcsncpy(dispDesc.dilatedDepth.name, L"FSR3_DilatedDepth", 63);
+
+    dispDesc.dilatedMotionVectors = s_Res;
+    dispDesc.dilatedMotionVectors.description.flags = FFXM_RESOURCE_FLAGS_UNDEFINED;
+    wcsncpy(dispDesc.dilatedMotionVectors.name, L"FSR3_DilatedVelocity", 63);
+
+    dispDesc.reconstructedPrevNearestDepth = s_Res;
+    dispDesc.reconstructedPrevNearestDepth.description.flags = FFXM_RESOURCE_FLAGS_UNDEFINED;
+    wcsncpy(dispDesc.reconstructedPrevNearestDepth.name, L"FSR3_ReconstructedPrevNearestDepth", 63);
+
+    ResetDispatchTrackers();
+    FfxmErrorCode err0 = ffxmFsr3UpscalerContextDispatch(&context, &dispDesc);
+    TEST_CHECK(err0 == FFXM_OK);
+    TEST_CHECK(s_RegisterResourceCallCount == 7);
+    TEST_CHECK(s_UnregisterResourcesCallCount == 1);
+
+    // Verify that all 3 shared resources were registered with FFXM_RESOURCE_FLAGS_UNDEFINED on Frame 0
+    bool foundDilatedDepthUndef = false;
+    bool foundDilatedMvUndef = false;
+    bool foundReconDepthUndef = false;
+    for (const auto& rec : s_MockRegisteredResources) {
+        if (wcscmp(rec.name, L"FSR3_DilatedDepth") == 0) {
+            TEST_CHECK((rec.desc.flags & FFXM_RESOURCE_FLAGS_UNDEFINED) != 0);
+            foundDilatedDepthUndef = true;
+        } else if (wcscmp(rec.name, L"FSR3_DilatedVelocity") == 0) {
+            TEST_CHECK((rec.desc.flags & FFXM_RESOURCE_FLAGS_UNDEFINED) != 0);
+            foundDilatedMvUndef = true;
+        } else if (wcscmp(rec.name, L"FSR3_ReconstructedPrevNearestDepth") == 0) {
+            TEST_CHECK((rec.desc.flags & FFXM_RESOURCE_FLAGS_UNDEFINED) != 0);
+            foundReconDepthUndef = true;
+        }
+    }
+    TEST_CHECK(foundDilatedDepthUndef && foundDilatedMvUndef && foundReconDepthUndef);
+
+    // 2. Subsequent-use dispatch (Frame 1): Shared resources marked with FFXM_RESOURCE_FLAGS_NONE
+    dispDesc.dilatedDepth.description.flags = FFXM_RESOURCE_FLAGS_NONE;
+    dispDesc.dilatedMotionVectors.description.flags = FFXM_RESOURCE_FLAGS_NONE;
+    dispDesc.reconstructedPrevNearestDepth.description.flags = FFXM_RESOURCE_FLAGS_NONE;
+
+    ResetDispatchTrackers();
+    FfxmErrorCode err1 = ffxmFsr3UpscalerContextDispatch(&context, &dispDesc);
+    TEST_CHECK(err1 == FFXM_OK);
+    TEST_CHECK(s_RegisterResourceCallCount == 7);
+    TEST_CHECK(s_UnregisterResourcesCallCount == 1);
+
+    // Verify that all 3 shared resources were registered with FFXM_RESOURCE_FLAGS_NONE on Frame 1
+    bool foundDilatedDepthNone = false;
+    bool foundDilatedMvNone = false;
+    bool foundReconDepthNone = false;
+    for (const auto& rec : s_MockRegisteredResources) {
+        if (wcscmp(rec.name, L"FSR3_DilatedDepth") == 0) {
+            TEST_CHECK((rec.desc.flags & FFXM_RESOURCE_FLAGS_UNDEFINED) == 0);
+            foundDilatedDepthNone = true;
+        } else if (wcscmp(rec.name, L"FSR3_DilatedVelocity") == 0) {
+            TEST_CHECK((rec.desc.flags & FFXM_RESOURCE_FLAGS_UNDEFINED) == 0);
+            foundDilatedMvNone = true;
+        } else if (wcscmp(rec.name, L"FSR3_ReconstructedPrevNearestDepth") == 0) {
+            TEST_CHECK((rec.desc.flags & FFXM_RESOURCE_FLAGS_UNDEFINED) == 0);
+            foundReconDepthNone = true;
+        }
+    }
+    TEST_CHECK(foundDilatedDepthNone && foundDilatedMvNone && foundReconDepthNone);
+
+    TEST_CHECK(ffxmFsr3UpscalerContextDestroy(&context) == FFXM_OK);
+    VerifyOccurrenceAwareResourceBalance();
+
+    std::cout << "PASS: First-use and subsequent-frame shared-resource layout state transitions verified." << std::endl;
+}
+
+static void TestM38FrameCancellationAndRecovery()
+{
+    std::cout << "--- Test 26: M3.8 Frame Cancellation and Recovery Verification ---" << std::endl;
+
+    ResetDispatchTrackers();
+    FfxmInterface mockInterface = {};
+    SetupMockInterface(&mockInterface);
+
+    FfxmFsr3UpscalerContextDescription contextDesc = {};
+    contextDesc.flags = FFXM_FSR3UPSCALER_ENABLE_AUTO_EXPOSURE;
+    contextDesc.maxRenderSize = { 1920, 1080 };
+    contextDesc.maxUpscaleSize = { 3840, 2160 };
+    contextDesc.backendInterface = mockInterface;
+
+    FfxmFsr3UpscalerContext context = {};
+    TEST_CHECK(ffxmFsr3UpscalerContextCreate(&context, &contextDesc) == FFXM_OK);
+    FfxmFsr3UpscalerContext_Private* priv = reinterpret_cast<FfxmFsr3UpscalerContext_Private*>(&context);
+
+    int s_Dummy = 1;
+    FfxmResource s_Res = {};
+    s_Res.resource = &s_Dummy;
+
+    FfxmFsr3UpscalerDispatchDescription validDesc = {};
+    validDesc.commandList = reinterpret_cast<FfxmCommandList>(&s_Dummy);
+    validDesc.renderSize = { 1920, 1080 };
+    validDesc.upscaleSize = { 3840, 2160 };
+    validDesc.frameTimeDelta = 16.6f;
+    validDesc.cameraNear = 0.1f;
+    validDesc.cameraFar = 1000.0f;
+    validDesc.cameraFovAngleVertical = 1.0f;
+    validDesc.viewSpaceToMetersFactor = 1.0f;
+    validDesc.color = s_Res;
+    validDesc.depth = s_Res;
+    validDesc.motionVectors = s_Res;
+    validDesc.dilatedDepth = s_Res;
+    validDesc.dilatedMotionVectors = s_Res;
+    validDesc.reconstructedPrevNearestDepth = s_Res;
+    validDesc.output = s_Res;
+
+    // 1. Precondition failure validation
+    TEST_CHECK(ffxmFsr3UpscalerContextDispatch(nullptr, &validDesc) == FFXM_ERROR_INVALID_POINTER);
+    TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, nullptr) == FFXM_ERROR_INVALID_POINTER);
+
+    // Null command list
+    FfxmFsr3UpscalerDispatchDescription invalidDesc = validDesc;
+    invalidDesc.commandList = nullptr;
+    TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, &invalidDesc) == FFXM_ERROR_INVALID_POINTER);
+
+    // Invalid renderSize
+    invalidDesc = validDesc;
+    invalidDesc.renderSize = { 0, 1080 };
+    TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, &invalidDesc) == FFXM_ERROR_OUT_OF_RANGE);
+    invalidDesc.renderSize = { 1920, 0 };
+    TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, &invalidDesc) == FFXM_ERROR_OUT_OF_RANGE);
+    invalidDesc.renderSize = { 2560, 1080 };
+    TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, &invalidDesc) == FFXM_ERROR_OUT_OF_RANGE);
+    invalidDesc.renderSize = { 1920, 1440 };
+    TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, &invalidDesc) == FFXM_ERROR_OUT_OF_RANGE);
+
+    // Invalid upscaleSize
+    invalidDesc = validDesc;
+    invalidDesc.upscaleSize = { 0, 2160 };
+    TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, &invalidDesc) == FFXM_ERROR_OUT_OF_RANGE);
+    invalidDesc.upscaleSize = { 3840, 0 };
+    TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, &invalidDesc) == FFXM_ERROR_OUT_OF_RANGE);
+    invalidDesc.upscaleSize = { 4096, 2160 };
+    TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, &invalidDesc) == FFXM_ERROR_OUT_OF_RANGE);
+    invalidDesc.upscaleSize = { 3840, 3000 };
+    TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, &invalidDesc) == FFXM_ERROR_OUT_OF_RANGE);
+
+    // Verify context invariants remain untouched after all validation failures
+    TEST_CHECK(priv->resourceFrameIndex == 0);
+    TEST_CHECK(priv->firstExecution == true);
+    TEST_CHECK(s_RegisterResourceCallCount == 0);
+    TEST_CHECK(s_ScheduleGpuJobCallCount == 0);
+    TEST_CHECK(s_ExecuteGpuJobsCallCount == 0);
+    TEST_CHECK(s_UnregisterResourcesCallCount == 0);
+
+    // 2. Mid-schedule failure and clean unregister
+    ResetDispatchTrackers();
+    s_FailAtScheduleGpuJobIndex = 3;
+    TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, &validDesc) == FFXM_ERROR_BACKEND_API_ERROR);
+    TEST_CHECK(s_UnregisterResourcesCallCount == 1);
+    TEST_CHECK(priv->resourceFrameIndex == 0); // Preserved
+    TEST_CHECK(priv->firstExecution == true);
+
+    // 3. Execution failure and clean unregister
+    ResetDispatchTrackers();
+    s_ExecuteGpuJobsResult = FFXM_ERROR_BACKEND_API_ERROR;
+    TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, &validDesc) == FFXM_ERROR_BACKEND_API_ERROR);
+    TEST_CHECK(s_UnregisterResourcesCallCount == 1);
+    TEST_CHECK(priv->resourceFrameIndex == 0); // Preserved
+
+    // 4. Clean recovery: Next valid dispatch succeeds and commits frame 0 state
+    ResetDispatchTrackers();
+    TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context, &validDesc) == FFXM_OK);
+    TEST_CHECK(priv->resourceFrameIndex == 1);
+    TEST_CHECK(priv->firstExecution == false);
+    TEST_CHECK(priv->constants.frameIndex == 0.0f);
+
+    TEST_CHECK(ffxmFsr3UpscalerContextDestroy(&context) == FFXM_OK);
+    VerifyOccurrenceAwareResourceBalance();
+
+    std::cout << "PASS: Frame cancellation, parameter boundaries, and state recovery verified." << std::endl;
+}
+
+static void TestM38DescriptorLifecycleAndContextIsolation()
+{
+    std::cout << "--- Test 27: M3.8 Descriptor Lifecycle & Multi-Context Isolation Verification ---" << std::endl;
+
+    ResetDispatchTrackers();
+    FfxmInterface mockInterface = {};
+    SetupMockInterface(&mockInterface);
+
+    // Create Context 1
+    FfxmFsr3UpscalerContextDescription contextDesc1 = {};
+    contextDesc1.flags = FFXM_FSR3UPSCALER_ENABLE_AUTO_EXPOSURE;
+    contextDesc1.maxRenderSize = { 1920, 1080 };
+    contextDesc1.maxUpscaleSize = { 3840, 2160 };
+    contextDesc1.backendInterface = mockInterface;
+
+    FfxmFsr3UpscalerContext context1 = {};
+    TEST_CHECK(ffxmFsr3UpscalerContextCreate(&context1, &contextDesc1) == FFXM_OK);
+    FfxmFsr3UpscalerContext_Private* priv1 = reinterpret_cast<FfxmFsr3UpscalerContext_Private*>(&context1);
+
+    // Create Context 2
+    FfxmFsr3UpscalerContextDescription contextDesc2 = contextDesc1;
+    FfxmFsr3UpscalerContext context2 = {};
+    TEST_CHECK(ffxmFsr3UpscalerContextCreate(&context2, &contextDesc2) == FFXM_OK);
+    FfxmFsr3UpscalerContext_Private* priv2 = reinterpret_cast<FfxmFsr3UpscalerContext_Private*>(&context2);
+
+    int s_Dummy = 1;
+    FfxmResource s_Res = {};
+    s_Res.resource = &s_Dummy;
+
+    FfxmFsr3UpscalerDispatchDescription dispDesc = {};
+    dispDesc.commandList = reinterpret_cast<FfxmCommandList>(&s_Dummy);
+    dispDesc.renderSize = { 1920, 1080 };
+    dispDesc.upscaleSize = { 3840, 2160 };
+    dispDesc.frameTimeDelta = 16.6f;
+    dispDesc.cameraNear = 0.1f;
+    dispDesc.cameraFar = 1000.0f;
+    dispDesc.cameraFovAngleVertical = 1.0f;
+    dispDesc.viewSpaceToMetersFactor = 1.0f;
+    dispDesc.color = s_Res;
+    dispDesc.depth = s_Res;
+    dispDesc.motionVectors = s_Res;
+    dispDesc.dilatedDepth = s_Res;
+    dispDesc.dilatedMotionVectors = s_Res;
+    dispDesc.reconstructedPrevNearestDepth = s_Res;
+    dispDesc.output = s_Res;
+
+    // 1. Dispatch 16 frames on Context 1, verifying ring-buffer descriptor rotation
+    for (int frame = 0; frame < 16; ++frame) {
+        ResetDispatchTrackers();
+        TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context1, &dispDesc) == FFXM_OK);
+        TEST_CHECK(priv1->resourceFrameIndex == static_cast<uint32_t>((frame + 1) % 16));
+        // Verify Context 2 remained completely untouched
+        TEST_CHECK(priv2->resourceFrameIndex == 0);
+        TEST_CHECK(priv2->firstExecution == true);
+    }
+
+    // 2. Dispatch 16 frames on Context 2, verifying ring-buffer descriptor rotation
+    for (int frame = 0; frame < 16; ++frame) {
+        ResetDispatchTrackers();
+        TEST_CHECK(ffxmFsr3UpscalerContextDispatch(&context2, &dispDesc) == FFXM_OK);
+        TEST_CHECK(priv2->resourceFrameIndex == static_cast<uint32_t>((frame + 1) % 16));
+        // Verify Context 1 remained at frame index 0 (% 16)
+        TEST_CHECK(priv1->resourceFrameIndex == 0);
+    }
+
+    // 3. Clean destruction in reverse order
+    TEST_CHECK(ffxmFsr3UpscalerContextDestroy(&context2) == FFXM_OK);
+    TEST_CHECK(ffxmFsr3UpscalerContextDestroy(&context1) == FFXM_OK);
+    VerifyOccurrenceAwareResourceBalance();
+
+    std::cout << "PASS: Descriptor lifecycle, view recycling, and multi-context isolation verified." << std::endl;
+}
+
 int main()
 {
     std::cout << "============================================================" << std::endl;
@@ -3985,6 +4318,9 @@ int main()
     TestM3LumaInstabilityAndAccumulatePipelines();
     TestM3ComputeLumaInstabilityAndAccumulate();
     TestM3PrepareInputsRealVulkanExecution();
+    TestM38SharedResourceInitialLayouts();
+    TestM38FrameCancellationAndRecovery();
+    TestM38DescriptorLifecycleAndContextIsolation();
 
     std::cout << "============================================================" << std::endl;
     std::cout << "Summary: " << g_TestPasses << " checks PASSED, " << g_TestFailures << " FAILED." << std::endl;

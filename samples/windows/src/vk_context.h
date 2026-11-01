@@ -42,6 +42,7 @@ public:
     // Returns false when the swapchain needs recreating or acquisition failed.
     bool beginFrame(uint32_t* outImageIndex);
     bool endFrame(uint32_t imageIndex);
+    bool abortFrame(uint32_t imageIndex);
 
     bool recreateSwapchain(HWND window);
 

@@ -1122,15 +1122,19 @@ FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextDispatch(
     FFXM_RETURN_ON_ERROR(contextPrivate->device != nullptr, FFXM_ERROR_NULL_DEVICE);
 
     FFXM_RETURN_ON_ERROR(
+        pDispatchDescription->renderSize.width > 0 &&
         pDispatchDescription->renderSize.width <= contextPrivate->contextDescription.maxRenderSize.width,
         FFXM_ERROR_OUT_OF_RANGE);
     FFXM_RETURN_ON_ERROR(
+        pDispatchDescription->renderSize.height > 0 &&
         pDispatchDescription->renderSize.height <= contextPrivate->contextDescription.maxRenderSize.height,
         FFXM_ERROR_OUT_OF_RANGE);
     FFXM_RETURN_ON_ERROR(
+        pDispatchDescription->upscaleSize.width > 0 &&
         pDispatchDescription->upscaleSize.width <= contextPrivate->contextDescription.maxUpscaleSize.width,
         FFXM_ERROR_OUT_OF_RANGE);
     FFXM_RETURN_ON_ERROR(
+        pDispatchDescription->upscaleSize.height > 0 &&
         pDispatchDescription->upscaleSize.height <= contextPrivate->contextDescription.maxUpscaleSize.height,
         FFXM_ERROR_OUT_OF_RANGE);
 

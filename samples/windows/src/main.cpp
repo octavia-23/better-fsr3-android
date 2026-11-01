@@ -251,7 +251,9 @@ void drawFrame(App& app)
     }
 
     if (!dispatchOk) {
-        LOGE("Upscaler dispatch failed on frame %d; dropping frame", app.frameIndex);
+        LOGE("Upscaler dispatch failed on frame %d; recovering via abortFrame", app.frameIndex);
+        if (!app.ctx.abortFrame(imageIndex))
+            app.swapchainDirty = true;
         return;
     }
 

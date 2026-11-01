@@ -144,7 +144,8 @@ void drawFrame(App& app)
     const bool dispatchOk = app.upscaler.dispatch(cmd, app.scene, app.renderExtent, delta * 1000.0f, app.frameIndex,
                                                   app.frameIndex == 0);
     if (!dispatchOk) {
-        LOGE("FSR 3.1.4 dispatch failed at frame %d", app.frameIndex);
+        LOGE("FSR 3.1.4 dispatch failed at frame %d; recovering via abortFrame", app.frameIndex);
+        app.ctx.abortFrame(imageIndex);
         return;
     }
 

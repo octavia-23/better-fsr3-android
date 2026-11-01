@@ -16,3 +16,8 @@ local.properties
 .DS_Store
 .idea/
 .vscode/
+
+# Local build artifacts
+*.lib
+*.exp
+*.def

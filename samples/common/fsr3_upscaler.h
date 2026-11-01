@@ -55,4 +55,5 @@ private:
     RenderTarget             dilatedDepth_;
     RenderTarget             dilatedMotionVectors_;
     RenderTarget             reconstructedPrevNearestDepth_;
+    bool                     sharedResourcesInitialized_ = false;
 };

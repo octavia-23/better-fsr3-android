@@ -20,6 +20,8 @@
 // SOFTWARE.
 
 #include <host/ffxm_interface.h>
+#include <host/ffxm_fsr2.h>
+#include <host/ffxm_fsr3upscaler.h>
 #include <host/ffxm_util.h>
 #include <host/ffxm_assert.h>
 #include <host/backends/vk/ffxm_vk.h>
@@ -183,6 +185,8 @@ typedef struct BackendContext_VK {
 
         wchar_t                 name[64];
         FfxmUInt32               effectContextId;
+        FfxmEffect              effect;
+        FfxmPass                pass;
     } PipelineLayout;
 
     typedef struct VKFunctionTable
@@ -2071,6 +2075,7 @@ FfxmErrorCode UnregisterResourcesVK(FfxmInterface* backendInterface, FfxmCommand
     {
         effectContext.frameIndex = (effectContext.frameIndex + 1) % FFXM_MAX_QUEUED_FRAMES;
         destroyDynamicViews(backendContext, effectContextId, effectContext.frameIndex);
+        effectContext.isEndOfUpscaler = false;
     }
 
     return FFXM_OK;
@@ -2297,6 +2302,8 @@ FfxmErrorCode CreateComputePipelineVK(FfxmInterface* backendInterface,
 
     wcscpy(pPipelineLayout->name, pipelineDescription->name);
     pPipelineLayout->effectContextId = effectContextId;
+    pPipelineLayout->effect = effect;
+    pPipelineLayout->pass = pass;
 
     // set the root signature to pipeline
     outPipeline->rootSignature = reinterpret_cast<FfxmRootSignature>(pPipelineLayout);
@@ -2609,6 +2616,8 @@ FfxmErrorCode CreateGraphicsPipelineVK(FfxmInterface* backendInterface,
 
     wcscpy(pPipelineLayout->name, pipelineDescription->name);
     pPipelineLayout->effectContextId = effectContextId;
+    pPipelineLayout->effect = effect;
+    pPipelineLayout->pass = pass;
 
     // set the root signature to pipeline
     outPipeline->rootSignature = reinterpret_cast<FfxmRootSignature>(pPipelineLayout);
@@ -3426,7 +3435,21 @@ static FfxmErrorCode executeGpuJobCompute(BackendContext_VK* backendContext, Ffx
     if (pipelineLayout->descriptorSetIndex >= FFXM_MAX_QUEUED_FRAMES)
         pipelineLayout->descriptorSetIndex = 0;
 
-    backendContext->pEffectContexts[pipelineLayout->effectContextId].isEndOfUpscaler = !!wcscmp(pipelineLayout->name, L"FSR2-GEN_REACTIVE");
+    bool isEndOfUpscaler = false;
+    if (pipelineLayout->effect == FFXM_EFFECT_FSR2)
+    {
+        isEndOfUpscaler = (pipelineLayout->pass != FFXM_FSR2_PASS_GENERATE_REACTIVE);
+    }
+    else if (pipelineLayout->effect == FFXM_EFFECT_FSR3UPSCALER)
+    {
+        isEndOfUpscaler = (pipelineLayout->pass != FFXM_FSR3UPSCALER_PASS_GENERATE_REACTIVE);
+    }
+    else
+    {
+        isEndOfUpscaler = (wcscmp(pipelineLayout->name, L"FSR2-GEN_REACTIVE") != 0 &&
+                           wcscmp(pipelineLayout->name, L"FSR3-GEN_REACTIVE") != 0);
+    }
+    backendContext->pEffectContexts[pipelineLayout->effectContextId].isEndOfUpscaler = isEndOfUpscaler;
 
     return FFXM_OK;
 }
@@ -3612,7 +3635,21 @@ static FfxmErrorCode executeGpuJobFragment(BackendContext_VK* backendContext, Ff
     if (pipelineLayout->descriptorSetIndex >= FFXM_MAX_QUEUED_FRAMES)
         pipelineLayout->descriptorSetIndex = 0;
 
-    backendContext->pEffectContexts[pipelineLayout->effectContextId].isEndOfUpscaler = !!wcscmp(pipelineLayout->name, L"FSR2-GEN_REACTIVE");
+    bool isEndOfUpscaler = false;
+    if (pipelineLayout->effect == FFXM_EFFECT_FSR2)
+    {
+        isEndOfUpscaler = (pipelineLayout->pass != FFXM_FSR2_PASS_GENERATE_REACTIVE);
+    }
+    else if (pipelineLayout->effect == FFXM_EFFECT_FSR3UPSCALER)
+    {
+        isEndOfUpscaler = (pipelineLayout->pass != FFXM_FSR3UPSCALER_PASS_GENERATE_REACTIVE);
+    }
+    else
+    {
+        isEndOfUpscaler = (wcscmp(pipelineLayout->name, L"FSR2-GEN_REACTIVE") != 0 &&
+                           wcscmp(pipelineLayout->name, L"FSR3-GEN_REACTIVE") != 0);
+    }
+    backendContext->pEffectContexts[pipelineLayout->effectContextId].isEndOfUpscaler = isEndOfUpscaler;
 
     return FFXM_OK;
 }
