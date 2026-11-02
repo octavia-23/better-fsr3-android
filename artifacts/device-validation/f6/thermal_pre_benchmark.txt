@@ -1,0 +1,82 @@
+{
+  "battery": {
+    "value": 34.8,
+    "status": 0
+  },
+  "CPU0": {
+    "value": 56.6,
+    "status": 0
+  },
+  "CPU1": {
+    "value": 57.0,
+    "status": 0
+  },
+  "CPU2": {
+    "value": 57.4,
+    "status": 0
+  },
+  "CPU3": {
+    "value": 53.3,
+    "status": 0
+  },
+  "CPU4": {
+    "value": 54.1,
+    "status": 0
+  },
+  "CPU5": {
+    "value": 53.3,
+    "status": 0
+  },
+  "CPU6": {
+    "value": 55.7,
+    "status": 0
+  },
+  "CPU7": {
+    "value": 57.7,
+    "status": 0
+  },
+  "GPU0": {
+    "value": 81.2,
+    "status": 0
+  },
+  "GPU1": {
+    "value": 82.4,
+    "status": 0
+  },
+  "GPU2": {
+    "value": 76.9,
+    "status": 0
+  },
+  "GPU3": {
+    "value": 73.7,
+    "status": 0
+  },
+  "nsp0": {
+    "value": 57.8,
+    "status": 0
+  },
+  "nsp1": {
+    "value": 57.8,
+    "status": 0
+  },
+  "nsp2": {
+    "value": 56.3,
+    "status": 0
+  },
+  "nsp3": {
+    "value": 57.0,
+    "status": 0
+  },
+  "skin": {
+    "value": 38.949,
+    "status": 0
+  },
+  "socd": {
+    "value": 40.0,
+    "status": 0
+  },
+  "vbat": {
+    "value": 3.936,
+    "status": 0
+  }
+}

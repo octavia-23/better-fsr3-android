@@ -1,0 +1,14 @@
+{
+  "home_reopen": {
+    "status": "PASS",
+    "pid": "7374",
+    "pss_after_resume_mb": 190.65
+  },
+  "app_switch": {
+    "status": "PASS",
+    "pid": "7374",
+    "pss_after_switch_mb": 190.76
+  },
+  "crashes_detected": 0,
+  "crash_log_snippets": []
+}

@@ -1,0 +1,279 @@
+﻿--------- beginning of main
+11-02 10:50:23.542   675  3406 W libperfmgr: Failed to write to node: /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq with value: 1075200, fd: 5
+11-02 10:50:24.042   675  3406 W libperfmgr: Failed to write to node: /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq with value: 1075200, fd: 5
+--------- beginning of system
+11-02 10:50:24.251  1473  2938 I ActivityTaskManager: START u0 {flg=0x10000000 cmp=com.arm.asr.sample/android.app.NativeActivity} from uid 2000
+11-02 10:50:24.274  8378  8409 W Parcel  : Expecting binder but got null!
+11-02 10:50:24.276  1473  1510 W ActivityManager: Unknown package:com.google.android.gms
+11-02 10:50:24.281  1473  1510 I ActivityManager: Start proc 19676:com.arm.asr.sample/u0a681 for next-top-activity {com.arm.asr.sample/android.app.NativeActivity}
+11-02 10:50:24.283  1473  2737 D CoreBackPreview: Window{910c17d u0 Splash Screen com.arm.asr.sample}: Setting back callback OnBackInvokedCallbackInfo{mCallback=android.window.IOnBackInvokedCallback$Stub$Proxy@b3aa4c3, mPriority=0}
+11-02 10:50:24.305 19676 19676 E .arm.asr.sample: Not starting debugger since process cannot load the jdwp agent.
+11-02 10:50:24.324 19676 19676 W System  : ClassLoader referenced unknown path: 
+11-02 10:50:24.332 19676 19676 V GraphicsEnvironment: ANGLE Developer option for 'com.arm.asr.sample' set to: 'default'
+11-02 10:50:24.332 19676 19676 V GraphicsEnvironment: ANGLE GameManagerService for com.arm.asr.sample: false
+11-02 10:50:24.332 19676 19676 V GraphicsEnvironment: Neither updatable production driver nor prerelease driver is supported.
+11-02 10:50:24.356 19676 19676 V threaded_app: Creating: 0xb400006fcf516f80
+11-02 10:50:24.356 19676  5095 V threaded_app: Config: mcc=0 mnc=0 lang=en cnt=US orien=2 touch=3 dens=420 keys=1 nav=1 keysHid=3 navHid=0 sdk=33 size=2 long=2 modetype=1 modenight=2
+11-02 10:50:24.356 19676 19676 V threaded_app: Start: 0xb400006fcf516f80
+11-02 10:50:24.357 19676  5095 V threaded_app: activityState=10
+11-02 10:50:24.359 19676 19676 V threaded_app: Resume: 0xb400006fcf516f80
+11-02 10:50:24.359 19676  5095 V threaded_app: activityState=11
+11-02 10:50:24.368 19676 19676 V threaded_app: InputQueueCreated: 0xb400006fcf516f80 -- 0xb400006fb88a7000
+11-02 10:50:24.368 19676  5095 V threaded_app: APP_CMD_INPUT_CHANGED
+11-02 10:50:24.368 19676  5095 V threaded_app: Attaching input queue to looper
+11-02 10:50:24.369  1473  4510 D CoreBackPreview: Window{3d09d46 u0 com.arm.asr.sample/android.app.NativeActivity}: Setting back callback OnBackInvokedCallbackInfo{mCallback=android.window.IOnBackInvokedCallback$Stub$Proxy@554b434, mPriority=0}
+11-02 10:50:24.382 19676 19676 V threaded_app: NativeWindowCreated: 0xb400006fcf516f80 -- 0xb400006facc47810
+11-02 10:50:24.382 19676  5095 V threaded_app: APP_CMD_INIT_WINDOW
+11-02 10:50:24.382 19676 19676 V threaded_app: NativeWindowResized: 0xb400006fcf516f80 -- 0xb400006facc47810
+11-02 10:50:24.382 19676 19676 V threaded_app: ContentRectChanged: l=0,t=226,r=2325,b=1017
+11-02 10:50:24.383 19676 19676 V threaded_app: NativeWindowRedrawNeeded: 0xb400006fcf516f80 -- 0xb400006facc47810
+11-02 10:50:24.383  3072  3127 W FileUtils: No such file /sys/class/thermal/thermal_message/sconfig for writing
+11-02 10:50:24.383  3072  3127 W FileUtils: java.io.FileNotFoundException: /sys/class/thermal/thermal_message/sconfig: open failed: EACCES (Permission denied)
+11-02 10:50:24.383  3072  3127 W FileUtils: 	at libcore.io.IoBridge.open(IoBridge.java:574)
+11-02 10:50:24.383  3072  3127 W FileUtils: 	at java.io.FileOutputStream.<init>(FileOutputStream.java:236)
+11-02 10:50:24.383  3072  3127 W FileUtils: 	at java.io.FileOutputStream.<init>(FileOutputStream.java:125)
+11-02 10:50:24.383  3072  3127 W FileUtils: 	at java.io.FileWriter.<init>(FileWriter.java:66)
+11-02 10:50:24.383  3072  3127 W FileUtils: 	at org.lineageos.settings.utils.FileUtils.writeLine(FileUtils.java:83)
+11-02 10:50:24.383  3072  3127 W FileUtils: 	at org.lineageos.settings.thermal.ThermalUtils.setThermalProfile(ThermalUtils.java:192)
+11-02 10:50:24.383  3072  3127 W FileUtils: 	at org.lineageos.settings.thermal.ThermalService$2.onTaskStackChanged(ThermalService.java:104)
+11-02 10:50:24.383  3072  3127 W FileUtils: 	at android.app.ITaskStackListener$Stub.onTransact(ITaskStackListener.java:382)
+11-02 10:50:24.383  3072  3127 W FileUtils: 	at android.os.Binder.execTransactInternal(Binder.java:1288)
+11-02 10:50:24.383  3072  3127 W FileUtils: 	at android.os.Binder.execTransact(Binder.java:1227)
+11-02 10:50:24.383  3072  3127 W FileUtils: Caused by: android.system.ErrnoException: open failed: EACCES (Permission denied)
+11-02 10:50:24.383  3072  3127 W FileUtils: 	at libcore.io.Linux.open(Native Method)
+11-02 10:50:24.383  3072  3127 W FileUtils: 	at libcore.io.ForwardingOs.open(ForwardingOs.java:563)
+11-02 10:50:24.383  3072  3127 W FileUtils: 	at libcore.io.BlockGuardOs.open(BlockGuardOs.java:274)
+11-02 10:50:24.383  3072  3127 W FileUtils: 	at libcore.io.ForwardingOs.open(ForwardingOs.java:563)
+11-02 10:50:24.383  3072  3127 W FileUtils: 	at android.app.ActivityThread$AndroidOs.open(ActivityThread.java:7829)
+11-02 10:50:24.383  3072  3127 W FileUtils: 	at libcore.io.IoBridge.open(IoBridge.java:560)
+11-02 10:50:24.383  3072  3127 W FileUtils: 	... 9 more
+11-02 10:50:24.390  1473  1499 W ziparchive: Unable to open '/data/app/~~L4VTbqF5LAywWdeNIfWeXQ==/com.arm.asr.sample-4_JayMWtGrv7NDLlunE63g==/base.dm': No such file or directory
+11-02 10:50:24.391  1473  1499 I ActivityTaskManager: Displayed com.arm.asr.sample/android.app.NativeActivity: +139ms
+11-02 10:50:24.392  1473  4076 W ActivityTaskManager: Request to remove task ignored for non-existent task 411
+11-02 10:50:24.395 19676 19676 V threaded_app: WindowFocusChanged: 0xb400006fcf516f80 -- 1
+11-02 10:50:24.396 19676  5095 D vulkan  : searching for layers in '/data/app/~~L4VTbqF5LAywWdeNIfWeXQ==/com.arm.asr.sample-4_JayMWtGrv7NDLlunE63g==/lib/arm64'
+11-02 10:50:24.397 19676  5095 D vulkan  : searching for layers in '/data/app/~~L4VTbqF5LAywWdeNIfWeXQ==/com.arm.asr.sample-4_JayMWtGrv7NDLlunE63g==/base.apk!/lib/arm64-v8a'
+11-02 10:50:24.397 19676  5095 I ArmASR  : Vulkan loader reports instance version 1.3.0
+11-02 10:50:24.398 19676  5095 E cutils-trace: Error opening trace file: No such file or directory (2)
+11-02 10:50:24.401  7602  7602 I GoogleInputMethodService: GoogleInputMethodService.onFinishInput():2404 
+11-02 10:50:24.404  7602  7602 I GoogleInputMethodService: GoogleInputMethodService.onStartInput():1552 onStartInput(EditorInfo{EditorInfo{packageName=com.arm.asr.sample, inputType=0, inputTypeString=NULL, enableLearning=false, autoCorrection=false, autoComplete=false, imeOptions=0, privateImeOptions=null, actionName=UNSPECIFIED, actionLabel=null, initialSelStart=-1, initialSelEnd=-1, initialCapsMode=0, label=null, fieldId=-1, fieldName=null, extras=null, hintText=null, hintLocales=[]}}, false)
+11-02 10:50:24.405  7602  4144 I Module  : DeviceLockedStatusModuleProvider$Module.updateDeviceLockedStatusInternal():119 repeatCheckTimes = 0, locked = false
+11-02 10:50:24.405  7602  7602 I LatinInputMethodServiceBase: LatinInputMethodServiceBase.updateInputViewCoverNavigation():360 Update input view padding, isNavbarOverInputWindow=false, bottom inset=126
+11-02 10:50:24.406  7602  4140 I Module  : DeviceLockedStatusModuleProvider$Module.updateDeviceLockedStatusInternal():119 repeatCheckTimes = 1, locked = false
+11-02 10:50:24.406 19676  5095 I AdrenoVK-0: ===== BEGIN DUMP OF OVERRIDDEN SETTINGS =====
+11-02 10:50:24.406 19676  5095 I AdrenoVK-0: ===== END DUMP OF OVERRIDDEN SETTINGS =====
+11-02 10:50:24.416 19676  5095 I AdrenoVK-0: QUALCOMM build          : db3d445dbc, Ia06b22fa1a
+11-02 10:50:24.416 19676  5095 I AdrenoVK-0: Build Date              : 10/04/21
+11-02 10:50:24.416 19676  5095 I AdrenoVK-0: Shader Compiler Version : EV031.32.02.16
+11-02 10:50:24.416 19676  5095 I AdrenoVK-0: Local Branch            : 
+11-02 10:50:24.416 19676  5095 I AdrenoVK-0: Remote Branch           : 
+11-02 10:50:24.416 19676  5095 I AdrenoVK-0: Remote Branch           : 
+11-02 10:50:24.416 19676  5095 I AdrenoVK-0: Reconstruct Branch      : 
+11-02 10:50:24.416 19676  5095 I AdrenoVK-0: Build Config            : S P 10.0.7 AArch64
+11-02 10:50:24.416 19676  5095 I AdrenoVK-0: Driver Path             : /vendor/lib64/hw/vulkan.adreno.so
+11-02 10:50:24.427 19676  5095 I ArmASR  : Using device 'Adreno (TM) 650' (Vulkan 1.1.128)
+11-02 10:50:24.427 19676  5095 I ArmASR  : Arm ASR / FSR 3.1.4 device gate: SPIR-V 1.4 yes | shaderFloat16 yes | 16-bit storage yes | extended formats yes | write without format yes | storage formats yes | sampled formats yes
+11-02 10:50:24.431 19676  5095 I Gralloc4: Adding additional valid usage bits: 0x546c08202000
+11-02 10:50:24.432   572   572 I servicemanager: Could not find android.hardware.graphics.allocator.IAllocator/default in the VINTF manifest.
+11-02 10:50:24.433 19676  5095 E qdgralloc: GetGpuPixelFormat: No map for format: 0x38
+11-02 10:50:24.433 19676  5095 E AdrenoUtils: <validate_memory_layout_input_parmas:1984>: Unknown Format 0
+11-02 10:50:24.433 19676  5095 E AdrenoUtils: <adreno_init_memory_layout:4723>: Memory Layout input parameter validation failed!
+11-02 10:50:24.433 19676  5095 E qdgralloc: GetGpuResourceSizeAndDimensions Graphics metadata init failed
+11-02 10:50:24.433 19676  5095 E Gralloc4: isSupported(1, 1, 56, 1, ...) failed with 1
+11-02 10:50:24.437   586   609 E qdgralloc: GetGpuPixelFormat: No map for format: 0x38
+11-02 10:50:24.437   586   609 E AdrenoUtils: <validate_memory_layout_input_parmas:1984>: Unknown Format 0
+11-02 10:50:24.437   586   609 E AdrenoUtils: <adreno_init_memory_layout:4723>: Memory Layout input parameter validation failed!
+11-02 10:50:24.437   586   609 E qdgralloc: GetGpuResourceSizeAndDimensions Graphics metadata init failed
+11-02 10:50:24.437 19676  5095 E GraphicBufferAllocator: Failed to allocate (4 x 4) layerCount 1 format 56 usage b00: 1
+11-02 10:50:24.437 19676  5095 E AHardwareBuffer: GraphicBuffer(w=4, h=4, lc=1) failed (Unknown error -1), handle=0x0
+11-02 10:50:24.438 19676  5095 E qdgralloc: GetGpuPixelFormat: No map for format: 0x38
+11-02 10:50:24.438 19676  5095 E AdrenoUtils: <validate_memory_layout_input_parmas:1984>: Unknown Format 0
+11-02 10:50:24.438 19676  5095 E AdrenoUtils: <adreno_init_memory_layout:4723>: Memory Layout input parameter validation failed!
+11-02 10:50:24.438 19676  5095 E qdgralloc: GetGpuResourceSizeAndDimensions Graphics metadata init failed
+11-02 10:50:24.438 19676  5095 E Gralloc4: isSupported(1, 1, 56, 1, ...) failed with 1
+11-02 10:50:24.438   586   609 E qdgralloc: GetGpuPixelFormat: No map for format: 0x38
+11-02 10:50:24.438   586   609 E AdrenoUtils: <validate_memory_layout_input_parmas:1984>: Unknown Format 0
+11-02 10:50:24.438   586   609 E AdrenoUtils: <adreno_init_memory_layout:4723>: Memory Layout input parameter validation failed!
+11-02 10:50:24.438   586   609 E qdgralloc: GetGpuResourceSizeAndDimensions Graphics metadata init failed
+11-02 10:50:24.438 19676  5095 E GraphicBufferAllocator: Failed to allocate (4 x 4) layerCount 1 format 56 usage b00: 1
+11-02 10:50:24.438 19676  5095 E AHardwareBuffer: GraphicBuffer(w=4, h=4, lc=1) failed (Unknown error -1), handle=0x0
+11-02 10:50:24.446 19676  5095 I ArmASR  : Swapchain: 2325x1080, 5 images, format 37
+11-02 10:50:24.447 19676  5095 I ArmASR  : FSR 3.1.4: Rendering at 1162x540, presenting at 2325x1080 (ratio 2.00)
+11-02 10:50:24.498 19676  5095 I ArmASR  : FSR 3.1.4 scratch buffer: 2924616 bytes
+11-02 10:50:24.543   675  3406 W libperfmgr: Failed to write to node: /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq with value: 1075200, fd: 5
+11-02 10:50:24.581  1473  1502 I ActivityTaskManager: Config changes=20000480 {1.0 ?mcc?mnc [en_US] ldltr sw411dp w886dp h387dp 420dpi nrml long hdr widecg land night finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 2400, 1080) mAppBounds=Rect(75, 0 - 2400, 1017) mMaxBounds=Rect(0, 0 - 2400, 1080) mDisplayRotation=ROTATION_90 mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_90} as.75 s.12286 fontWeightAdjustment=0}
+11-02 10:50:24.587  1473  1502 I WindowManager: Override config changes=20000480 {1.0 ?mcc?mnc [en_US] ldltr sw411dp w886dp h387dp 420dpi nrml long hdr widecg land night finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 2400, 1080) mAppBounds=Rect(75, 0 - 2400, 1017) mMaxBounds=Rect(0, 0 - 2400, 1080) mDisplayRotation=ROTATION_90 mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_90} as.75 s.12286 fontWeightAdjustment=0} for displayId=0
+11-02 10:50:24.600  8378  8378 I NoBackGesture: NavbarController: newConfig={1.0 ?mcc?mnc [en_US] ldltr sw411dp w886dp h387dp 420dpi nrml long hdr widecg land night finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 2400, 1080) mAppBounds=Rect(75, 0 - 2400, 1017) mMaxBounds=Rect(0, 0 - 2400, 1080) mDisplayRotation=ROTATION_90 mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_90} as.75 s.12297 fontWeightAdjustment=0} mTaskbarDelegate initialized=false willApplyConfigToNavbars=false navBarCount=1
+11-02 10:50:24.605  8378  8398 V WindowManagerShell: Display changed: 0
+11-02 10:50:24.607  1473  1502 I InputManager-JNI: Viewport [0] to add: local:4630946736638489729, isActive: true
+11-02 10:50:24.609  1473  2121 I InputReader: Reconfiguring input devices, changes=DISPLAY_INFO | 
+11-02 10:50:24.617  1473  1485 W System  : A resource failed to call release. 
+11-02 10:50:24.620  1473  1485 W MediaPlayer-JNI: MediaPlayer finalized without being released
+11-02 10:50:24.620   820 30879 D audio_hw_primary: adev_set_parameters: enter: rotation=90
+11-02 10:50:24.620   820 30879 V msm8974_platform: platform_set_parameters: enter: rotation=90
+11-02 10:50:24.620   820 30879 D audio_hw_hfp: hfp_set_parameters: enter
+11-02 10:50:24.621  1132  3918 D NuPlayerDriver: reset(0xf2c88fa0) at state 4
+11-02 10:50:24.621   820 30879 D adsp_utils: set_channel_reverse mode: 0
+11-02 10:50:24.621   820 30879 V msm8974_platform: platform_set_parameters: enter: cal_persist=0;cal_devid=2;cal_moduleid=0x1000a106;cal_caltype=0;cal_instanceid=0x0;cal_apptype=69940;cal_paramid=0x1000a198;cal_topoid=0x1000a100;cal_samplerate=48000;cal_data=AAAAAA==
+11-02 10:50:24.621   820 30879 D msm8974_platform: Setting audio calibration for snd_device(2) acdb_id(10011)
+11-02 10:50:24.622  1132  4964 D NuPlayerDriver: notifyResetComplete(0xf2c88fa0)
+11-02 10:50:24.622   820 30879 E ACDB-LOADER: [acdb_loader_adsp_set_audio_cal] active device/stream not found (result=-100) for topology 0x1000a100 and apptype 0x11134
+11-02 10:50:24.622   820 30879 E ACDB-LOADER: [acdb_loader_adsp_set_audio_cal] set parameters failed with status -100
+11-02 10:50:24.622   820 30879 D audio_hw_hfp: hfp_set_parameters: enter
+11-02 10:50:24.623   820 30879 V msm8974_platform: platform_set_parameters: enter: cal_persist=0;cal_devid=2;cal_moduleid=0x1000a100;cal_caltype=0;cal_instanceid=0x0;cal_apptype=69940;cal_paramid=0x1000a110;cal_topoid=0x1000a106;cal_samplerate=48000;cal_data=AAAAAA==
+11-02 10:50:24.623   820 30879 D msm8974_platform: Setting audio calibration for snd_device(2) acdb_id(10011)
+11-02 10:50:24.623   820 30879 E ACDB-LOADER: [acdb_loader_adsp_set_audio_cal] active device/stream not found (result=-100) for topology 0x1000a106 and apptype 0x11134
+11-02 10:50:24.623   820 30879 E ACDB-LOADER: [acdb_loader_adsp_set_audio_cal] set parameters failed with status -100
+11-02 10:50:24.623   820 30879 D audio_hw_hfp: hfp_set_parameters: enter
+11-02 10:50:24.623   820 30879 V msm8974_platform: platform_set_parameters: enter: cal_persist=0;cal_devid=2;cal_moduleid=0x1000a100;cal_caltype=0;cal_instanceid=0x0;cal_apptype=69937;cal_paramid=0x1000a110;cal_topoid=0x1000a106;cal_samplerate=48000;cal_data=AAAAAA==
+11-02 10:50:24.623   820 30879 D msm8974_platform: Setting audio calibration for snd_device(2) acdb_id(10011)
+11-02 10:50:24.623   820 30879 E ACDB-LOADER: [acdb_loader_adsp_set_audio_cal] active device/stream not found (result=-100) for topology 0x1000a106 and apptype 0x11131
+11-02 10:50:24.623   820 30879 E ACDB-LOADER: [acdb_loader_adsp_set_audio_cal] set parameters failed with status -100
+11-02 10:50:24.623   820 30879 D audio_hw_hfp: hfp_set_parameters: enter
+11-02 10:50:24.623   820 30879 D audio_hw_hfp: hfp_set_parameters: enter
+11-02 10:50:24.623   820 30879 V a2dp_offload: end of a2dp setparam
+11-02 10:50:24.623   820 30879 D audio_hw_cspl_cal: cirrus_cal_setparameters: enter 0xe9626000
+11-02 10:50:24.623   820 30879 D audio_hw_extn: audio_extn_fm_set_parameters: Enter
+11-02 10:50:24.623   820 30879 D audio_hw_hfp: hfp_set_parameters: enter
+11-02 10:50:24.623   820 30879 V a2dp_offload: end of a2dp setparam
+11-02 10:50:24.623   820 30879 D audio_hw_primary: adev_set_parameters: exit with code(0)
+11-02 10:50:24.623  1473  1485 V MediaPlayer: resetDrmState:  mDrmInfo=null mDrmProvisioningThread=null mPrepareDrmInProgress=false mActiveDrmScheme=false
+11-02 10:50:24.624  1473  1485 V MediaPlayer: cleanDrmObj: mDrmObj=null mDrmSessionId=null
+11-02 10:50:24.624  1473  1485 W System  : A resource failed to call HardwareBuffer.close. 
+11-02 10:50:24.624  1473  1485 W System  : A resource failed to call HardwareBuffer.close. 
+11-02 10:50:24.627  7602  7602 I GoogleInputMethodService: GoogleInputMethodService.onConfigurationChanged():1207 onConfigurationChanged() : NewConfig = {1.0 ?mcc?mnc [en_US] ldltr sw411dp w886dp h387dp 420dpi nrml long hdr widecg land night finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 2400, 1080) mAppBounds=Rect(75, 0 - 2400, 1017) mMaxBounds=Rect(0, 0 - 2400, 1080) mDisplayRotation=ROTATION_90 mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_90} as.75 s.12286 fontWeightAdjustment=0}
+11-02 10:50:24.627  7602  7602 I GoogleInputMethodService: GoogleInputMethodService.onConfigurationChanged():1208 device real metrics: DisplayMetrics{density=2.625, width=2400, height=1080, scaledDensity=2.625, xdpi=391.885, ydpi=393.29}
+11-02 10:50:24.627  7602  7602 I GoogleInputMethodService: GoogleInputMethodService.onConfigurationChanged():1232 Maybe update OEM conditional config because of configuration change
+11-02 10:50:24.627  7602  7602 I InputMethodEntryManager: InputMethodEntryManager.notifyCurrentInputMethodEntryOnContextChanged():607 notifyCurrentInputMethodEntryOnContextChanged()
+11-02 10:50:24.627  7602  7602 I InputMethodEntryManager: InputMethodEntryManager.notifyCurrentInputMethodEntryOnContextChanged():624 Notify current input method entry changed on context change
+11-02 10:50:24.627  7602  7602 I KeyboardContextProvider: KeyboardContextProvider$KeyboardContextCache.createKeyboardContext():173 createKeyboardContext(): en-US, nwi@d1b9148(com.android.inputmethod.latin.LatinIME@c415e46), {1.0 ?mcc?mnc [en_US] ldltr sw411dp w886dp h387dp 420dpi nrml long hdr widecg land night finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 2400, 1080) mAppBounds=Rect(75, 0 - 2400, 1017) mMaxBounds=Rect(0, 0 - 2400, 1080) mDisplayRotation=ROTATION_90 mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_90} as.75 s.12286 fontWeightAdjustment=0}
+11-02 10:50:24.628  7602  7602 I GoogleInputMethodService: GoogleInputMethodService.onCurrentInputMethodEntryChanged():2671 onCurrentInputMethodEntryChanged(): imeDefsChanged=false, entryLanguageVariantChanged=false, keyboardContextChanged=true
+11-02 10:50:24.628  7602  7602 I KeyboardContextProvider: KeyboardContextProvider.setBaseContextAndInvalidKeyboardContextCache():88 setBaseContextAndInvalidKeyboardContextCache(): com.android.inputmethod.latin.LatinIME@c415e46
+11-02 10:50:24.628  7602  7602 I DeviceModeModule: DeviceModeModule.calculateAndNotify():242 Device mode 'phone' from display metrics 'DisplayMetrics{density=0.0, width=1080, height=2400, scaledDensity=0.0, xdpi=391.885, ydpi=393.29}' or smallestScreenWidthDp: 411
+11-02 10:50:24.628  7602  7602 I InputMethodEntryManager: InputMethodEntryManager.resetLanguages():2905 resetLanguages() debounced: languages=null, conditionName=orientation
+11-02 10:50:24.628  7602  7602 I GoogleInputMethodService: GoogleInputMethodService.onConfigurationChanged():1250 changedMask : 20000480
+11-02 10:50:24.629  7602  7602 I GoogleInputMethodService: GoogleInputMethodService.clearInputMethodServiceData():1193 clearInputMethodServiceData for configurationChange
+11-02 10:50:24.629  7602  7602 I GoogleInputMethodService: GoogleInputMethodService.discardAllKeyboardViewAndInputView():1467 discardAllKeyboardViewAndInputView()
+11-02 10:50:24.630  7602  7635 W GooglePlayServicesUtil: com.google.android.inputmethod.latin requires the Google Play Store, but it is missing.
+11-02 10:50:24.630  7602  7635 W GoogleApiManager: The service for lfg is not available: lfw{statusCode=SERVICE_INVALID, resolution=null, message=null, clientMethodKey=null, errorResolutionInfo=null}
+11-02 10:50:24.629  4489  4489 D b/254119092: DisplayController#onConfigurationChanged: {1.0 ?mcc?mnc [en_US] ldltr sw411dp w886dp h387dp 420dpi nrml long hdr widecg land night finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 2400, 1080) mAppBounds=Rect(75, 0 - 2400, 1017) mMaxBounds=Rect(0, 0 - 2400, 1080) mDisplayRotation=ROTATION_90 mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_90} as.75 s.12286 fontWeightAdjustment=0}
+11-02 10:50:24.630  7602  7635 W GooglePlayServicesUtil: com.google.android.inputmethod.latin requires the Google Play Store, but it is missing.
+11-02 10:50:24.630  7602  7635 W GoogleApiManager: The service for lfg is not available: lfw{statusCode=SERVICE_INVALID, resolution=null, message=null, clientMethodKey=null, errorResolutionInfo=null}
+11-02 10:50:24.633  7602  7602 W TooltipLifecycleManager: TooltipLifecycleManager.dismissTooltips():152 Tooltip with id undo_access_point_promotion_banner not found in tooltipManager.
+11-02 10:50:24.634  7602  7602 I AbstractOpenableExtension: AbstractOpenableExtension.maybeDestroyExistingKeyboardGroupManager():552 Destroy existing keyboard group manager in jha
+11-02 10:50:24.634  7602  7602 I AbstractOpenableExtension: AbstractOpenableExtension$3.onSuccess():572 KeyboardGroupManager destroyed in jha.
+11-02 10:50:24.635  7602  7602 I AbstractOpenableExtension: AbstractOpenableExtension.createKeyboardGroupManagerListenableFuture():122 Create keyboard group manager listenable future in jha
+11-02 10:50:24.635  7602  7602 I AbstractOpenableExtension: AbstractOpenableExtension.maybeDestroyExistingKeyboardGroupManager():552 Destroy existing keyboard group manager in gnr
+11-02 10:50:24.635  7602  7602 I AbstractOpenableExtension: AbstractOpenableExtension$3.onSuccess():572 KeyboardGroupManager destroyed in gnr.
+11-02 10:50:24.635  7602  7602 I AbstractOpenableExtension: AbstractOpenableExtension.createKeyboardGroupManagerListenableFuture():122 Create keyboard group manager listenable future in gnr
+11-02 10:50:24.635  7602  7602 I AbstractOpenableExtension: AbstractOpenableExtension.maybeDestroyExistingKeyboardGroupManager():552 Destroy existing keyboard group manager in jkw
+11-02 10:50:24.635  7602  7602 I AbstractOpenableExtension: AbstractOpenableExtension$3.onSuccess():572 KeyboardGroupManager destroyed in jkw.
+11-02 10:50:24.635  7602  7602 I AbstractOpenableExtension: AbstractOpenableExtension.createKeyboardGroupManagerListenableFuture():122 Create keyboard group manager listenable future in jkw
+11-02 10:50:24.635  7602  4142 I KeyboardGroupDefParser: KeyboardGroupDefParser.parseKeyboardGroupDef():72 parseKeyboardGroupDef() 2132213830 -> 0_resource_name_obfuscated : WaitTime = 1 ms : RunTime = 0 ms
+11-02 10:50:24.635  7602  4142 I KeyboardGroupDefParser: KeyboardGroupDefParser.parseKeyboardGroupDef():72 parseKeyboardGroupDef() 2132213833 -> 0_resource_name_obfuscated : WaitTime = 0 ms : RunTime = 0 ms
+11-02 10:50:24.635  7602  4142 I KeyboardGroupDefParser: KeyboardGroupDefParser.parseKeyboardGroupDef():72 parseKeyboardGroupDef() 2132213834 -> 0_resource_name_obfuscated : WaitTime = 0 ms : RunTime = 0 ms
+11-02 10:50:24.636  7602  7602 I DeviceModeModule: DeviceModeModule.calculateAndNotify():242 Device mode 'phone' from display metrics 'DisplayMetrics{density=0.0, width=2400, height=1080, scaledDensity=0.0, xdpi=391.885, ydpi=393.29}' or smallestScreenWidthDp: 411
+11-02 10:50:24.637  7602  7602 I GoogleInputMethodService: GoogleInputMethodService$8.onWindowMetricsChanged():859 windowMetrics: bounds() = Rect(75, 74 - 2400, 1080), insets() = Rect(0, 0 - 0, 0)
+11-02 10:50:24.637  7602  7602 W LatinInputMethodServiceBase: LatinInputMethodServiceBase.updateInputViewCoverNavigation():365 Null input view, cannot update padding!
+11-02 10:50:24.638  7602  7602 I WindowMetricsNotification: WindowMetricsNotification.notify():169 tmv[bounds=Rect(75, 74 - 2400, 1080), insets=Rect(0, 0 - 0, 0), decorBounds=Rect(0, 0 - 2400, 1080), densityDpi=420, smallestScreenWidthDp=411, displayWidth=2400, displayHeight=1080, xdpi=391.885, ydpi=393.29, isTrustable=true, displayId=0]; DisplayMetrics{density=2.625, width=2400, height=1080, scaledDensity=2.625, xdpi=391.885, ydpi=393.29}
+11-02 10:50:24.638  7602  7602 I WindowMetricsHelper: WindowMetricsHelper.predictAndNotify():148 Window metrics predicted.
+11-02 10:50:24.638  7602  7602 I GoogleInputMethodService: GoogleInputMethodService.initializeInputMethodServiceData():914 initializeInputMethodServiceData for pfe{languageTag=en-US, variant=qwerty, hasLocalizedResources=true, conditionCacheKey=_android_software_xr_api_spatial=false_device=phone_device_size=default_enable_free_cursor_by_long_press_space=true_enable_number_row=false_enable_number_row_in_password=true_enable_pk_simulator=false_enable_pk_simulator_setting=false_enable_scrub_move=true_enable_secondary_digits=true_enable_secondary_symbols=false_enable_simplified_expression_keyboard=false_expressions=normal_four_or_more_letter_rows=false_free_cursor=false_free_cursor_del_swipe_delete=false_free_cursor_in_split_keyboard_gap=false_keyboard_font_size_setting=_keyboard_mode=normal_language=en-US_layout_9key_split=false_orientation=portrait_physical_keyboard=nokeys_pk_simulator_vk_ready=false_pref_enable_flick_symbols=false_rtl_layout=false_show_comma_key=true_show_period_key=true_show_secondary_digits=true_show_suggestion_strip=true_show_suggestions=true_split_with_duplicate_keys=true_true=true_variant=qwerty_writing_helper_enable_by_word_revert=false, imeDef.stringId=ime_english_united_states, imeDef.className=com.google.android.apps.inputmethod.libs.latin5.LatinIme, imeDef.languageTag=en-US}
+11-02 10:50:24.639  7602  7602 I KeyboardThemeProvider: KeyboardThemeProvider.applyKeyboardTheme():27 Apply keyboard theme: theme,!gsf,!pgsf,!use_system_font,BORDER,FLAVOR_DPI=XXHDPI,KEYBOARD_MODE=1,KEYBOARD_WIDTH_CATEGORY=NORMAL,KEY_BORDER_SHAPE=1,LANDSCAPE,LIGHT_THEME=false,ORIENTATION=2,PHYSICAL_DIAGONAL=6.031691,POPUP,SCREEN_SHORTEST_WIDTH=411,SCREEN_SHORTEST_WIDTH_NO_SCALE=411,SW400DP,XXHDPI,builtin_color_black.binarypb,density_2.625,enable_popup_on_keypress=true,font_scale_1.0,noshadow,pgsans,silkpopup
+11-02 10:50:24.639  7602  7602 I InputMethodEntryManager: InputMethodEntryManager.getAdditionalImeDefs():2571 getAdditionalImeDefs() called, flag enabled: false, isUserUnlocked: true
+11-02 10:50:24.640  7602  7602 I InputMethodEntryManager: InputMethodEntryManager.getAdditionalImeDefs():2579 OptimizeAdditionalImeDefLoadingFlag disabled, retrieving additional ImeDefs synchronously for entry: pfe{languageTag=en-US, variant=qwerty, hasLocalizedResources=true, conditionCacheKey=_android_software_xr_api_spatial=false_device=phone_device_size=default_enable_free_cursor_by_long_press_space=true_enable_number_row=false_enable_number_row_in_password=true_enable_pk_simulator=false_enable_pk_simulator_setting=false_enable_scrub_move=true_enable_secondary_digits=true_enable_secondary_symbols=false_enable_simplified_expression_keyboard=false_expressions=normal_four_or_more_letter_rows=false_free_cursor=false_free_cursor_del_swipe_delete=false_free_cursor_in_split_keyboard_gap=false_keyboard_font_size_setting=_keyboard_mode=normal_language=en-US_layout_9key_split=false_orientation=portrait_physical_keyboard=nokeys_pk_simulator_vk_ready=false_pref_enable_flick_symbols=false_rtl_layout=false_show_comma_key=true_show_period_key=true_show_secondary_digits=true_show_suggestion_strip=true_show_suggestions=true_split_with_duplicate_keys=true_true=true_variant=qwerty_writing_helper_enable_by_word_revert=false, imeDef.stringId=ime_english_united_states, imeDef.className=com.google.android.apps.inputmethod.libs.latin5.LatinIme, imeDef.languageTag=en-US}
+11-02 10:50:24.640  7602  7602 I InputBundle: InputBundle.prefetchKeyboard():679 prefetchKeyboard: prime
+11-02 10:50:24.640  7602  7602 I KeyboardDefManager: KeyboardDefManager.requestKeyboardDef():143 requestKeyboardDef(): type=prime, info=qca{defIds=[#0x7f170555, #0x7f1707eb], defIdsCacheKey=2132215125,2132215787}
+11-02 10:50:24.640  7602  7602 I KeyboardDefManager: KeyboardDefManager.requestKeyboardDef():232 requestKeyboardDef(): getOrCreate from cache, info=qca{defIds=[#0x7f170555, #0x7f1707eb], defIdsCacheKey=2132215125,2132215787}
+11-02 10:50:24.640  8378  8378 I NoBackGesture: Config changed: newConfig={1.0 ?mcc?mnc [en_US] ldltr sw411dp w886dp h387dp 420dpi nrml long hdr widecg land night finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 2400, 1080) mAppBounds=Rect(75, 0 - 2400, 1017) mMaxBounds=Rect(0, 0 - 2400, 1080) mDisplayRotation=ROTATION_90 mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_90} as.75 s.12297 fontWeightAdjustment=0} lastReportedConfig={1.0 ?mcc?mnc [en_US] ldltr sw411dp w411dp h862dp 420dpi nrml long hdr widecg port night finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 1080, 2400) mAppBounds=Rect(0, 75 - 1080, 2337) mMaxBounds=Rect(0, 0 - 1080, 2400) mDisplayRotation=ROTATION_0 mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_0} as.75 s.12253 fontWeightAdjustment=0}
+11-02 10:50:24.641  7602  7602 I KeyboardDefManager: KeyboardDefManager$Companion$addFutureCallbackForKeyboardDefReceiver$<anonymous>.onSuccess():524 requestKeyboardDef onSuccess(): info=qca{defIds=[#0x7f170555, #0x7f1707eb], defIdsCacheKey=2132215125,2132215787}
+11-02 10:50:24.641  8378  8378 D CentralSurfaces: Received new disable state: enaihbcrso.qingr (unchanged)
+11-02 10:50:24.641  7602  7635 W GooglePlayServicesUtil: com.google.android.inputmethod.latin requires the Google Play Store, but it is missing.
+11-02 10:50:24.641  7602  7635 W GoogleApiManager: The service for lfg is not available: lfw{statusCode=SERVICE_INVALID, resolution=null, message=null, clientMethodKey=null, errorResolutionInfo=null}
+11-02 10:50:24.642  7602  7602 I KeyboardInterfacePrivate: IKeyboard.createKeyboard():71 Keyboard created from HiltKeyboardFactory: com.google.android.apps.inputmethod.latin.keyboard.LatinPrimeKeyboard
+11-02 10:50:24.642  7602  7602 I InputBundleManager: InputBundleManager.loadActiveInputBundleId():552 loadActiveInputBundleId: en-US, ime_english_united_states
+11-02 10:50:24.643  8378  8378 V MotionLayout: .(MotionLayout.java:48) transitionToStart 
+11-02 10:50:24.643  7602  7635 W GooglePlayServicesUtil: com.google.android.inputmethod.latin requires the Google Play Store, but it is missing.
+11-02 10:50:24.643  7602  7635 W GoogleApiManager: The service for lfg is not available: lfw{statusCode=SERVICE_INVALID, resolution=null, message=null, clientMethodKey=null, errorResolutionInfo=null}
+11-02 10:50:24.646  7602  7602 I GoogleInputMethodService: GoogleInputMethodService.onStartInput():1552 onStartInput(EditorInfo{EditorInfo{packageName=com.arm.asr.sample, inputType=0, inputTypeString=NULL, enableLearning=false, autoCorrection=false, autoComplete=false, imeOptions=0, privateImeOptions=null, actionName=UNSPECIFIED, actionLabel=null, initialSelStart=-1, initialSelEnd=-1, initialCapsMode=0, label=null, fieldId=-1, fieldName=null, extras=null, hintText=null, hintLocales=[]}}, true)
+11-02 10:50:24.646  7602  7602 W SessionManager: SessionManager.beginSession():73 Try to begin an already begun session [INPUT_SESSION], end it first
+11-02 10:50:24.646  7602  7602 W LatinInputMethodServiceBase: LatinInputMethodServiceBase.updateInputViewCoverNavigation():365 Null input view, cannot update padding!
+11-02 10:50:24.647  7602  4144 I Module  : DeviceLockedStatusModuleProvider$Module.updateDeviceLockedStatusInternal():119 repeatCheckTimes = 1, locked = false
+11-02 10:50:24.648  7602  7602 I AppBase : AppBase.onConfigurationChanged():283 onConfigurationChanged() : NewConfig = {1.0 ?mcc?mnc [en_US] ldltr sw411dp w886dp h387dp 420dpi nrml long hdr widecg land night finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 2400, 1080) mAppBounds=Rect(75, 0 - 2400, 1017) mMaxBounds=Rect(0, 0 - 2400, 1080) mDisplayRotation=ROTATION_90 mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_90} as.75 s.12327 fontWeightAdjustment=0}
+11-02 10:50:24.649  7602  4140 I DeviceStatusMonitor: DeviceStatusMonitor.onDisplayChanged():442 Display 0 rotation changed: 0 -> 1
+11-02 10:50:24.649  7602  7602 I ImeDefCache: ImeDefCache.clearCacheForLanguages():340 clearCacheForLanguages: languagesToClear=null, conditionName=orientation
+11-02 10:50:24.649  7602  7602 I AdditionalImeDefCache: AdditionalImeDefCache.clearAdditionalImeDefsForCondition():303 clearAdditionalImeDefsForCondition() clear additional ImeDefs: []
+11-02 10:50:24.649  7602  7602 I InputMethodEntryManager: InputMethodEntryManager.startLoadingInputMethodEntrySettings():814 Start loading input method entry settings: [LanguageTagVariantTuple{languageTag=en-US, variant=qwerty}]
+11-02 10:50:24.649  1473  6914 I WindowManager: finishDrawing of orientation change: Window{7ed5a2e u0 ScreenDecorOverlay} 43ms
+11-02 10:50:24.650  4489  4489 D b/254119092: DisplayInfoChangeListener#CHANGE_ROTATION
+11-02 10:50:24.650  4489  4489 D b/254119092: mActivity and mContext agree taskbarIsPresent=false
+11-02 10:50:24.650  7602  7602 I InputMethodEntryManager: InputMethodEntryManager.updateInputMethodEntrySettingsLoadingTask():944 update loading task with resetImplicitlyEnabledEntries is false
+11-02 10:50:24.650  7602  7602 I InputMethodEntryManager: InputMethodEntryManager$4.onSuccess():966 Success load entries: [LanguageTagVariantTuple{languageTag=en-US, variant=qwerty}], resetImplicitlyEnabledEntries=false, initialized=true
+11-02 10:50:24.650  7602  4140 I DeviceStatusMonitor: DeviceStatusMonitor.onDisplayChanged():442 Display 0 rotation changed: 0 -> 1
+11-02 10:50:24.651  7602  7644 I SP      : Registering emoticon_content_description.2022081613, url: https://www.gstatic.com/android/keyboard/emoticon_content_desc/202208161305/superpacks_manifest.json, constraints: W:*:*:*, flags: bg, requested: 2022081613, current: 2022081613
+11-02 10:50:24.651  7602  7602 I InputMethodEntryManager: InputMethodEntryManager.changeCurrentInputMethodEntry():3177 Set current input method entry: source=UNSPECIFIED, entryChanged=false, enablePersist=true, pfe{languageTag=en-US, variant=qwerty, hasLocalizedResources=true, conditionCacheKey=_android_software_xr_api_spatial=false_device=phone_device_size=default_enable_free_cursor_by_long_press_space=true_enable_number_row=false_enable_number_row_in_password=true_enable_pk_simulator=false_enable_pk_simulator_setting=false_enable_scrub_move=true_enable_secondary_digits=true_enable_secondary_symbols=false_enable_simplified_expression_keyboard=false_expressions=normal_four_or_more_letter_rows=false_free_cursor=false_free_cursor_del_swipe_delete=false_free_cursor_in_split_keyboard_gap=false_keyboard_font_size_setting=_keyboard_mode=normal_language=en-US_layout_9key_split=false_orientation=landscape_physical_keyboard=nokeys_pk_simulator_vk_ready=false_pref_enable_flick_symbols=false_rtl_layout=false_show_comma_key=true_show_period_key=true_show_secondary_digits=true_show_suggestion_strip=true_show_suggestions=true_split_with_duplicate_keys=true_true=true_variant=qwerty_writing_helper_enable_by_word_revert=false, imeDef.stringId=ime_english_united_states, imeDef.className=com.google.android.apps.inputmethod.libs.latin5.LatinIme, imeDef.languageTag=en-US}
+11-02 10:50:24.651  7602  7602 I InputMethodEntryManager: InputMethodEntryManager.loadAdditionalImeDefsForCurrentEntry():3210 loadAdditionalImeDefsForCurrentEntry(): pfe{languageTag=en-US, variant=qwerty, hasLocalizedResources=true, conditionCacheKey=_android_software_xr_api_spatial=false_device=phone_device_size=default_enable_free_cursor_by_long_press_space=true_enable_number_row=false_enable_number_row_in_password=true_enable_pk_simulator=false_enable_pk_simulator_setting=false_enable_scrub_move=true_enable_secondary_digits=true_enable_secondary_symbols=false_enable_simplified_expression_keyboard=false_expressions=normal_four_or_more_letter_rows=false_free_cursor=false_free_cursor_del_swipe_delete=false_free_cursor_in_split_keyboard_gap=false_keyboard_font_size_setting=_keyboard_mode=normal_language=en-US_layout_9key_split=false_orientation=landscape_physical_keyboard=nokeys_pk_simulator_vk_ready=false_pref_enable_flick_symbols=false_rtl_layout=false_show_comma_key=true_show_period_key=true_show_secondary_digits=true_show_suggestion_strip=true_show_suggestions=true_split_with_duplicate_keys=true_true=true_variant=qwerty_writing_helper_enable_by_word_revert=false, imeDef.stringId=ime_english_united_states, imeDef.className=com.google.android.apps.inputmethod.libs.latin5.LatinIme, imeDef.languageTag=en-US}
+11-02 10:50:24.652  7602  7602 I InputMethodEntryManager: InputMethodEntryManager$6.onSuccess():3257 Success load additional ImeDefs, entryChanged=false, additionalImeDefsChanged=false, [ImeDef{stringId=password, language=und-Latn-x-password, languageTag=und-Latn-x-password, processedConditions={language=en-US, variant=qwerty, enable_number_row=true, device=phone, enable_pk_simulator=false, true=true, writing_helper_enable_by_word_revert=false, enable_number_row_in_password=true}, className=com.google.android.libraries.inputmethod.ime.password.PasswordIme, label=2132019313, keyEventInterpreter=null, inlineComposing=true, autoCapital=true, announceAutoSelectedCandidate=true, statusIcon=0, indicatorIcon=0, indicatorLabel=null, displayAppCompletions=false, extraValues=qap{}, processors=com.google.android.libraries.inputmethod.metadata.ProcessorsDef@e87385b, unacceptableMetaKeys=4098, languageSpecificSettings=0, asciiCapable=false, alwaysShowSuggestions=false, useAsciiPasswordKeyboard=false, keyboardGroupDef=KeyboardGroupDef(variant=qwerty, variantLabel=0, pkLanguageTag=, pkLayoutType=, dynamicLayout=null, layoutSpecificSettings=[], layoutSpecificTheme=2132083602, order=0, supportsSplitMode=true, supportsOneHandedMode=true, isVariantNameMandatory=false, keyboardDefInfos={prime=KeyboardDefInfo(kbType=prime, initialStates=0, keyboardSources=[Xml(resId=2132215125), Xml(resId=2132215787), Xml(resId=2132215317)], extraValues=qap{}), digit=KeyboardDefInfo(kbType=digit, initialStates=0, keyboardSources=[Xml(resId=2132215748)], extraValues=qap{}), symbol=KeyboardDefInfo(kbType=symbol, initialStates=0, keyboardSources=[Xml(resId=2132215928)], extraValues=qap{})}, overrideKeyboardXmlConditions=com.google.android.libraries.inputmethod.metadata.OverrideKeyboardXmlConditionsDef@22e58d1), phenotypeFlagId=0, localizationLanguageTag=null, supportsInlineSuggestion=false}, ImeDef{stringId=number, language=und-Latn-x-number, languageTag=und-Latn-x-number, processedConditions={}, className=com.google.android.libraries.inputmethod.ime.DummyIme, label=2132019275, keyEventInterpreter=null, inlineComposing=true, autoCapital=false, announceAutoSelectedCandidate=false, statusIcon=0, indicatorIcon=0, indicatorLabel=null, displayAppCompletions=false, extraValues=qap{}, processors=com.google.android.libraries.inputmethod.metadata.ProcessorsDef@e87385b, unacceptableMetaKeys=4098, languageSpecificSettings=0, asciiCapable=false, alwaysShowSuggestions=false, useAsciiPasswordKeyboard=false, keyboardGroupDef=KeyboardGroupDef(variant=, variantLabel=0, pkLanguageTag=, pkLayoutType=, dynamicLayout=null, layoutSpecificSettings=[], layoutSpecificTheme=0, order=0, supportsSplitMode=false, supportsOneHandedMode=true, isVariantNameMandatory=false, keyboardDefInfos={prime=KeyboardDefInfo(kbType=prime, initialStates=0, keyboardSources=[Xml(resId=2132215753)], extraValues=qap{})}, overrideKeyboardXmlConditions=com.google.android.libraries.inputmethod.metadata.OverrideKeyboardXmlConditionsDef@1), phenotypeFlagId=0, localizationLanguageTag=null, supportsInlineSuggestion=false}, ImeDef{stringId=number_password, language=und-Latn-x-number-password, languageTag=und-Latn-x-number-password, processedConditions={}, className=com.google.android.libraries.inputmethod.ime.DummyIme, label=2132019276, keyEventInterpreter=null, inlineComposing=true, autoCapital=false, announceAutoSelectedCandidate=false, statusIcon=0, indicatorIcon=0, indicatorLabel=null, displayAppCompletions=false, extraValues=qap{}, processors=com.google.android.libraries.inputmethod.metadata.ProcessorsDef@e87385b, unacceptableMetaKeys=4098, languageSpecificSettings=0, asciiCapable=false, alwaysShowSuggestions=false, useAsciiPasswordKeyboard=false, keyboardGroupDef=KeyboardGroupDef(variant=, variantLabel=0, pkLanguageTag=, pkLayoutType=, dynamicLayout=null, layoutSpecificSettings=[], layoutSpecificTheme=0, order=0, supportsSplitMode=false, supportsOneHandedMode=true, isVariantNameMandatory=false, keyboardDefInfos={prime=KeyboardDefInfo(kbType=prime, initialStates=0, keyboardSources=[Xml(
+11-02 10:50:24.652  7602  7602 I InputMethodEntryManager: resId=2132215754)], extraValues=qap{})}, overrideKeyboardXmlConditions=com.google.android.libraries.inputmethod.metadata.OverrideKeyboardXmlConditionsDef@1), phenotypeFlagId=0, localizationLanguageTag=null, supportsInlineSuggestion=false}, ImeDef{stringId=phone_number, language=und-Latn-x-phone-number, languageTag=und-Latn-x-phone-number, processedConditions={}, className=com.google.android.libraries.inputmethod.ime.DummyIme, label=2132019344, keyEventInterpreter=null, inlineComposing=true, autoCapital=false, announceAutoSelectedCandidate=false, statusIcon=0, indicatorIcon=0, indicatorLabel=null, displayAppCompletions=false, extraValues=qap{}, processors=com.google.android.libraries.inputmethod.metadata.ProcessorsDef@e87385b, unacceptableMetaKeys=4098, languageSpecificSettings=0, asciiCapable=false, alwaysShowSuggestions=false, useAsciiPasswordKeyboard=false, keyboardGroupDef=KeyboardGroupDef(variant=, variantLabel=0, pkLanguageTag=, pkLayoutType=, dynamicLayout=null, layoutSpecificSettings=[], layoutSpecificTheme=0, order=0, supportsSplitMode=false, supportsOneHandedMode=true, isVariantNameMandatory=false, keyboardDefInfos={prime=KeyboardDefInfo(kbType=prime, initialStates=0, keyboardSources=[Xml(resId=2132215779)], extraValues=qap{})}, overrideKeyboardXmlConditions=com.google.android.libraries.inputmethod.metadata.OverrideKeyboardXmlConditionsDef@1), phenotypeFlagId=0, localizationLanguageTag=null, supportsInlineSuggestion=false}, ImeDef{stringId=date_time, language=und-Latn-x-date-time, languageTag=und-Latn-x-date-time, processedConditions={}, className=com.google.android.libraries.inputmethod.ime.DummyIme, label=2132017782, keyEventInterpreter=null, inlineComposing=true, autoCapital=false, announceAutoSelectedCandidate=false, statusIcon=0, indicatorIcon=0, indicatorLabel=null, displayAppCompletions=false, extraValues=qap{}, processors=com.google.android.libraries.inputmethod.metadata.ProcessorsDef@e87385b, unacceptableMetaKeys=4098, languageSpecificSettings=0, asciiCapable=false, alwaysShowSuggestions=false, useAsciiPasswordKeyboard=false, keyboardGroupDef=KeyboardGroupDef(variant=, variantLabel=0, pkLanguageTag=, pkLayoutType=, dynamicLayout=null, layoutSpecificSettings=[], layoutSpecificTheme=0, order=0, supportsSplitMode=false, supportsOneHandedMode=true, isVariantNameMandatory=false, keyboardDefInfos={prime=KeyboardDefInfo(kbType=prime, initialStates=0, keyboardSources=[Xml(resId=2132215619)], extraValues=qap{})}, overrideKeyboardXmlConditions=com.google.android.libraries.inputmethod.metadata.OverrideKeyboardXmlConditionsDef@1), phenotypeFlagId=0, localizationLanguageTag=null, supportsInlineSuggestion=false}]
+11-02 10:50:24.652  7602  7602 I InputMethodEntryManager: InputMethodEntryManager.onSuccessLoadingAdditionalImeDefs():3333 Additional ImeDefs have been loaded, maybe notify entry change: false
+11-02 10:50:24.652  7602  7602 I GoogleInputMethodService: GoogleInputMethodService.onCurrentInputMethodEntryChanged():2671 onCurrentInputMethodEntryChanged(): imeDefsChanged=false, entryLanguageVariantChanged=false, keyboardContextChanged=false
+11-02 10:50:24.653  7602  7602 I GoogleInputMethodService: GoogleInputMethodService.onCurrentInputMethodEntryChanged():2698 Skip the entry change as the input method entry is consider as not changed.
+11-02 10:50:24.654  7602  7643 W ModuleManager: ModuleManager.loadModule():641 Module see is not available
+11-02 10:50:24.655  7602  7644 I SuperpacksManagerImpl: SuperpacksManagerImpl$3$1.onSuccess():552 emoticon_content_description.registerManifest() succeeded
+11-02 10:50:24.656  7602  7644 I SP      : Syncing emoticon_content_description (2022081613) with slices: [7a635888cb828dfa2fc744b7b9b50f04], metadata: false
+11-02 10:50:24.656  4489  4489 D b/254119092: TaskbarManager#mComponentCallbacks.onConfigurationChanged: {1.0 ?mcc?mnc [en_US] ldltr sw411dp w886dp h387dp 420dpi nrml long hdr widecg land night finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 2400, 1080) mAppBounds=Rect(75, 0 - 2400, 1017) mMaxBounds=Rect(0, 0 - 2400, 1080) mDisplayRotation=ROTATION_90 mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_90} as.75 s.12286 fontWeightAdjustment=0}
+11-02 10:50:24.656  4489  4489 D b/254119092: mActivity and mContext agree taskbarIsPresent=false
+11-02 10:50:24.656  4489  4489 D b/254119092: ComponentCallbacks#onConfigurationChanged() configDiffForRecreate={CONFIG_ORIENTATION, CONFIG_SCREEN_SIZE, CONFIG_WINDOW_CONFIGURATION}
+11-02 10:50:24.656  4489  4489 D b/254119092: mActivity and mContext agree taskbarIsPresent=false
+11-02 10:50:24.656  4489  4489 D b/254119092: destroyExistingTaskbar: null
+11-02 10:50:24.656  4489  4489 D b/254119092: mActivity and mContext agree taskbarIsPresent=false
+11-02 10:50:24.656  4489  4489 D b/254119092: recreateTaskbar: isTaskbarEnabled=false [dp != null (i.e. mUserUnlocked)]=true FLAG_HIDE_NAVBAR_WINDOW=false dp.isTaskbarPresent=false
+11-02 10:50:24.656  4489  4489 D b/254119092: mActivity and mContext agree taskbarIsPresent=false
+11-02 10:50:24.659  7602  7635 W GooglePlayServicesUtil: com.google.android.inputmethod.latin requires the Google Play Store, but it is missing.
+11-02 10:50:24.659  7602  7635 W GoogleApiManager: The service for lfg is not available: lfw{statusCode=SERVICE_INVALID, resolution=null, message=null, clientMethodKey=null, errorResolutionInfo=null}
+11-02 10:50:24.660  7602  7643 W LatinCommonMetricsProcessor: LatinCommonMetricsProcessor.processInputMethodEntryChanged():2680 The new entry is equal to the old entry
+11-02 10:50:24.661  1473  4076 I WindowManager: finishDrawing of orientation change: Window{e45cb7 u0 ScreenDecorOverlayBottom} 56ms
+11-02 10:50:24.661  7602  7635 W GooglePlayServicesUtil: com.google.android.inputmethod.latin requires the Google Play Store, but it is missing.
+11-02 10:50:24.661  7602  7635 W GoogleApiManager: The service for lfg is not available: lfw{statusCode=SERVICE_INVALID, resolution=null, message=null, clientMethodKey=null, errorResolutionInfo=null}
+11-02 10:50:24.667  8378  8378 W ConstraintSet: id unknown center_vertical_guideline
+11-02 10:50:24.667  8378  8378 W ConstraintSet: id unknown action_button_guideline
+11-02 10:50:24.667  8378  8378 W ConstraintSet: id unknown icon
+11-02 10:50:24.667  8378  8378 W ConstraintSet: id unknown media_seamless
+11-02 10:50:24.667  8378  8378 W ConstraintSet: id unknown media_action_barrier_start
+11-02 10:50:24.667  8378  8378 W ConstraintSet: id unknown media_action_barrier_end
+11-02 10:50:24.667  8378  8378 W ConstraintSet: id unknown media_action_barrier_top
+11-02 10:50:24.667  8378  8378 W ConstraintSet: id unknown remove_text
+11-02 10:50:24.667  8378  8378 W ConstraintSet: id unknown settings
+11-02 10:50:24.667  8378  8378 W ConstraintSet: id unknown dismiss
+11-02 10:50:24.667  8378  8378 W ConstraintSet: id unknown cancel
+11-02 10:50:24.673  8378  8378 W ConstraintSet: id unknown center_vertical_guideline
+11-02 10:50:24.673  8378  8378 W ConstraintSet: id unknown action_button_guideline
+11-02 10:50:24.673  8378  8378 W ConstraintSet: id unknown icon
+11-02 10:50:24.673  8378  8378 W ConstraintSet: id unknown media_seamless
+11-02 10:50:24.673  8378  8378 W ConstraintSet: id unknown media_action_barrier_start
+11-02 10:50:24.673  8378  8378 W ConstraintSet: id unknown media_action_barrier_end
+11-02 10:50:24.673  8378  8378 W ConstraintSet: id unknown media_action_barrier_top
+11-02 10:50:24.673  8378  8378 W ConstraintSet: id unknown remove_text
+11-02 10:50:24.673  8378  8378 W ConstraintSet: id unknown settings
+11-02 10:50:24.673  8378  8378 W ConstraintSet: id unknown dismiss
+11-02 10:50:24.673  8378  8378 W ConstraintSet: id unknown cancel
+11-02 10:50:24.675  7602  7644 I SP      : Sync for emoticon_content_description succeeded in 19 ms: no changes
+11-02 10:50:24.677  7602  7644 I SP      : GC for 'emoticon_content_description' (10) with ttl of 0 ms took 2 ms (0/2/0)
+11-02 10:50:24.677  7602  7644 I SuperpacksManagerImpl: SuperpacksManagerImpl$19.onSyncSuccess():947 emoticon_content_description.sync() succeeded
+11-02 10:50:24.704  8378  8378 I NoBackGesture: Config changed: newConfig={1.0 ?mcc?mnc [en_US] ldltr sw411dp w886dp h387dp 420dpi nrml long hdr widecg land night finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 2400, 1080) mAppBounds=Rect(75, 0 - 2400, 1017) mMaxBounds=Rect(0, 0 - 2400, 1080) mDisplayRotation=ROTATION_90 mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_90} as.75 s.12297 fontWeightAdjustment=0} lastReportedConfig={1.0 ?mcc?mnc [en_US] ldltr sw411dp w886dp h387dp 420dpi nrml long hdr widecg land night finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 2400, 1080) mAppBounds=Rect(75, 0 - 2400, 1017) mMaxBounds=Rect(0, 0 - 2400, 1080) mDisplayRotation=ROTATION_90 mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_90} as.75 s.12297 fontWeightAdjustment=0}
+11-02 10:50:24.747  1473  6914 W InputManager-JNI: Input channel object '910c17d Splash Screen com.arm.asr.sample (client)' was disposed without first being removed with the input manager!
+11-02 10:50:24.752  1473  4515 D CoreBackPreview: Window{910c17d u0 Splash Screen com.arm.asr.sample EXITING}: Setting back callback null
+11-02 10:50:24.888 19676  5095 I ArmASR  : FSR 3.1.4 shared resources allocated: dilatedDepth (1162x540 R32_SFLOAT), dilatedMV (1162x540 R16G16_SFLOAT), reconDepth (1162x540 R32_UINT)
+11-02 10:50:24.888 19676  5095 I ArmASR  : FSR 3.1.4 context created: 1162x540 -> 2325x1080, jitter phase count 33
+11-02 10:50:24.888 19676  5095 I ArmASR  : FSR 3.1.4 sample ready
+11-02 10:50:24.890 19676  5095 I ArmASR  : First FSR 3.1.4 frame dispatched successfully
+11-02 10:50:25.043   675  3406 W libperfmgr: Failed to write to node: /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq with value: 1075200, fd: 5
+11-02 10:50:25.543   675  3406 W libperfmgr: Failed to write to node: /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq with value: 1075200, fd: 5
+11-02 10:50:26.044   675  3406 W libperfmgr: Failed to write to node: /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq with value: 1075200, fd: 5
+11-02 10:50:26.467  1473  1473 I LineageHealth: Current mChargingStopReason: 0
+11-02 10:50:26.468  3015  3015 D QtiCarrierConfigHelper: WARNING, no carrier configs on phone Id: 0
+11-02 10:50:26.468  3015  3015 D QtiCarrierConfigHelper: WARNING, no carrier configs on phone Id: 1
+11-02 10:50:26.544   675  3406 W libperfmgr: Failed to write to node: /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq with value: 1075200, fd: 5
+11-02 10:50:27.044   675  3406 W libperfmgr: Failed to write to node: /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq with value: 1075200, fd: 5
+11-02 10:50:27.269  1473  3872 E TaskPersister: File error accessing recents directory (directory doesn't exist?).
+11-02 10:50:27.545   675  3406 W libperfmgr: Failed to write to node: /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq with value: 1075200, fd: 5
+11-02 10:50:28.045   675  3406 W libperfmgr: Failed to write to node: /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq with value: 1075200, fd: 5

@@ -1,0 +1,5 @@
+=== THERMAL SUMMARY (XIAOMI MI 11X / LINEAGEOS) ===
+Thermal Status: 0 (THERMAL_STATUS_NONE - Normal / No throttling)
+Battery Temperature: 35.5 C (355 tenths of a degree via dumpsys battery)
+Thermal HAL: Custom ROM (LineageOS AOSP stack, vendor HAL cached temperatures unexposed via Java service)
+Environmental Note: Device is cool to touch, running well within safe thermal envelope.

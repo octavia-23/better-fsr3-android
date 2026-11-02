@@ -1,0 +1,11 @@
+=== BUILD AND APK INFORMATION ===
+Device: Xiaomi Mi 11X (M2012K11AI / aliothin)
+Commit HEAD: 53404bc428a9325b48bc1378654e27cc97e3b1b7
+Local APK: samples/android/app/build/outputs/apk/debug/app-debug.apk
+Local APK SHA256: 334089FD54FE37F99B5A43E7F064A75BF2E45E617E9FE35A429CACB097603635
+Device APK Path: /data/app/~~L4VTbqF5LAywWdeNIfWeXQ==/com.arm.asr.sample-4_JayMWtGrv7NDLlunE63g==/base.apk
+Device APK SHA256: 334089fd54fe37f99b5a43e7f064a75bf2e45e617e9fe35a429cacb097603635
+Match Status: EXACT_MATCH
+Build Configuration: -DANDROID_STL=c++_shared -DBUILD_TESTING=OFF
+Package Name: com.arm.asr.sample
+Native Activity: android.app.NativeActivity

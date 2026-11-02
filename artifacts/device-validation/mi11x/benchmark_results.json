@@ -1,0 +1,94 @@
+{
+  "device": "Xiaomi Mi 11X (M2012K11AI / aliothin)",
+  "platform": "Qualcomm Snapdragon 870 (SM8250 / kona)",
+  "gpu": "Adreno (TM) 650",
+  "display_refresh_period_ns": 8333333,
+  "display_refresh_hz": 120.0,
+  "target_layer": "com.arm.asr.sample/android.app.NativeActivity#35675",
+  "samples": {
+    "sample_1": {
+      "valid_samples": 2347,
+      "total_duration_sec": 63.383,
+      "average_fps": 37.03,
+      "mean_frame_interval_ms": 27.006,
+      "median_frame_interval_ms": 24.781,
+      "p95_frame_interval_ms": 33.045,
+      "p99_frame_interval_ms": 33.054,
+      "min_interval_ms": 16.511,
+      "max_interval_ms": 33.068,
+      "std_interval_ms": 3.674,
+      "vsync_cadence": {
+        "1_vsync (~8.3ms)": 0,
+        "2_vsync (~16.7ms)": 1,
+        "3_vsync (~25.0ms)": 1712,
+        "4_vsync (~33.3ms)": 634,
+        ">4_vsync (>37.5ms)": 0
+      },
+      "frame_time_distribution": {
+        "0.0-10.0ms": 0,
+        "10.0-18.0ms": 1,
+        "18.0-26.0ms": 1712,
+        "26.0-35.0ms": 634,
+        "35.0-50.0ms": 0,
+        "50.0-100.0ms": 0,
+        "100.0-1000.0ms": 0
+      }
+    },
+    "sample_2": {
+      "valid_samples": 2346,
+      "total_duration_sec": 63.341,
+      "average_fps": 37.04,
+      "mean_frame_interval_ms": 27.0,
+      "median_frame_interval_ms": 24.778,
+      "p95_frame_interval_ms": 33.041,
+      "p99_frame_interval_ms": 33.051,
+      "min_interval_ms": 24.744,
+      "max_interval_ms": 33.064,
+      "std_interval_ms": 3.664,
+      "vsync_cadence": {
+        "1_vsync (~8.3ms)": 0,
+        "2_vsync (~16.7ms)": 0,
+        "3_vsync (~25.0ms)": 1714,
+        "4_vsync (~33.3ms)": 632,
+        ">4_vsync (>37.5ms)": 0
+      },
+      "frame_time_distribution": {
+        "0.0-10.0ms": 0,
+        "10.0-18.0ms": 0,
+        "18.0-26.0ms": 1714,
+        "26.0-35.0ms": 632,
+        "35.0-50.0ms": 0,
+        "50.0-100.0ms": 0,
+        "100.0-1000.0ms": 0
+      }
+    },
+    "sample_3": {
+      "valid_samples": 2345,
+      "total_duration_sec": 63.33,
+      "average_fps": 37.03,
+      "mean_frame_interval_ms": 27.006,
+      "median_frame_interval_ms": 24.78,
+      "p95_frame_interval_ms": 33.043,
+      "p99_frame_interval_ms": 33.053,
+      "min_interval_ms": 24.747,
+      "max_interval_ms": 33.08,
+      "std_interval_ms": 3.667,
+      "vsync_cadence": {
+        "1_vsync (~8.3ms)": 0,
+        "2_vsync (~16.7ms)": 0,
+        "3_vsync (~25.0ms)": 1712,
+        "4_vsync (~33.3ms)": 633,
+        ">4_vsync (>37.5ms)": 0
+      },
+      "frame_time_distribution": {
+        "0.0-10.0ms": 0,
+        "10.0-18.0ms": 0,
+        "18.0-26.0ms": 1712,
+        "26.0-35.0ms": 633,
+        "35.0-50.0ms": 0,
+        "50.0-100.0ms": 0,
+        "100.0-1000.0ms": 0
+      }
+    }
+  }
+}

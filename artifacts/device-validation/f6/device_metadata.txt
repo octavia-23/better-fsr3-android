@@ -1,0 +1,17 @@
+﻿=== DEVICE METADATA ===
+ro.product.model = 24069PC21I
+ro.product.device = peridot
+ro.product.brand = POCO
+ro.product.name = peridot_in
+ro.product.manufacturer = Xiaomi
+ro.board.platform = pineapple
+ro.hardware = qcom
+ro.build.version.release = 16
+ro.build.version.sdk = 36
+ro.build.version.security_patch = 2026-07-01
+ro.build.fingerprint = POCO/peridot_in/peridot:16/BP2A.250605.031.A3/OS3.0.303.0.WNPINXM:user/release-keys
+ro.build.display.id = BP2A.250605.031.A3
+ro.soc.model = SM8635
+ro.hardware.vulkan = adreno
+ro.hardware.egl = adreno
+GPU: Qualcomm, Adreno (TM) 735, Driver V@0762.36.1

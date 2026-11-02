@@ -1,0 +1,94 @@
+{
+  "device": "Poco F6 (24069PC21I / peridot)",
+  "platform": "Qualcomm Snapdragon 8s Gen 3 (SM8635 / pineapple)",
+  "gpu": "Adreno (TM) 735",
+  "display_refresh_period_ns": 8333333,
+  "display_refresh_hz": 120.0,
+  "target_layer": "com.arm.asr.sample/android.app.NativeActivity#37774",
+  "samples": {
+    "sample_1": {
+      "valid_samples": 4921,
+      "total_duration_sec": 60.673,
+      "average_fps": 81.11,
+      "mean_frame_interval_ms": 12.329,
+      "median_frame_interval_ms": 8.318,
+      "p95_frame_interval_ms": 16.636,
+      "p99_frame_interval_ms": 16.636,
+      "min_interval_ms": 8.317,
+      "max_interval_ms": 307.773,
+      "std_interval_ms": 5.915,
+      "vsync_cadence": {
+        "1_vsync (~8.3ms)": 2583,
+        "2_vsync (~16.7ms)": 2337,
+        "3_vsync (~25.0ms)": 0,
+        "4_vsync (~33.3ms)": 0,
+        ">4_vsync (>37.5ms)": 1
+      },
+      "frame_time_distribution": {
+        "0.0-10.0ms": 2583,
+        "10.0-18.0ms": 2337,
+        "18.0-26.0ms": 0,
+        "26.0-35.0ms": 0,
+        "35.0-50.0ms": 0,
+        "50.0-100.0ms": 0,
+        "100.0-1000.0ms": 1
+      }
+    },
+    "sample_2": {
+      "valid_samples": 5011,
+      "total_duration_sec": 61.488,
+      "average_fps": 81.5,
+      "mean_frame_interval_ms": 12.271,
+      "median_frame_interval_ms": 8.318,
+      "p95_frame_interval_ms": 16.636,
+      "p99_frame_interval_ms": 16.636,
+      "min_interval_ms": 8.318,
+      "max_interval_ms": 16.637,
+      "std_interval_ms": 4.154,
+      "vsync_cadence": {
+        "1_vsync (~8.3ms)": 2630,
+        "2_vsync (~16.7ms)": 2381,
+        "3_vsync (~25.0ms)": 0,
+        "4_vsync (~33.3ms)": 0,
+        ">4_vsync (>37.5ms)": 0
+      },
+      "frame_time_distribution": {
+        "0.0-10.0ms": 2630,
+        "10.0-18.0ms": 2381,
+        "18.0-26.0ms": 0,
+        "26.0-35.0ms": 0,
+        "35.0-50.0ms": 0,
+        "50.0-100.0ms": 0,
+        "100.0-1000.0ms": 0
+      }
+    },
+    "sample_3": {
+      "valid_samples": 4950,
+      "total_duration_sec": 60.748,
+      "average_fps": 81.48,
+      "mean_frame_interval_ms": 12.272,
+      "median_frame_interval_ms": 8.318,
+      "p95_frame_interval_ms": 16.636,
+      "p99_frame_interval_ms": 16.636,
+      "min_interval_ms": 8.316,
+      "max_interval_ms": 16.638,
+      "std_interval_ms": 4.154,
+      "vsync_cadence": {
+        "1_vsync (~8.3ms)": 2597,
+        "2_vsync (~16.7ms)": 2353,
+        "3_vsync (~25.0ms)": 0,
+        "4_vsync (~33.3ms)": 0,
+        ">4_vsync (>37.5ms)": 0
+      },
+      "frame_time_distribution": {
+        "0.0-10.0ms": 2597,
+        "10.0-18.0ms": 2353,
+        "18.0-26.0ms": 0,
+        "26.0-35.0ms": 0,
+        "35.0-50.0ms": 0,
+        "50.0-100.0ms": 0,
+        "100.0-1000.0ms": 0
+      }
+    }
+  }
+}

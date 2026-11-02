@@ -1,0 +1,17 @@
+﻿=== DEVICE METADATA ===
+ro.product.model = M2012K11AI
+ro.product.device = aliothin
+ro.product.brand = Mi
+ro.product.name = lineage_alioth
+ro.product.manufacturer = alioth
+ro.board.platform = kona
+ro.hardware = qcom
+ro.build.version.release = 13
+ro.build.version.sdk = 33
+ro.build.version.security_patch = 2023-09-01
+ro.build.fingerprint = Mi/aliothin/aliothin:13/TKQ1.220829.002/V14.0.3.0.TKHINXM:user/release-keys
+ro.build.display.id = TQ3C.230901.001.B1 release-keys
+ro.soc.model = SM8250
+ro.hardware.vulkan = adreno
+ro.hardware.egl = adreno
+GPU: GLES: Qualcomm, Adreno (TM) 650, OpenGL ES 3.2 V@0502.0 (GIT@db3d445dbc, Ia06b22fa1a, 1633355031) (Date:10/04/21)
