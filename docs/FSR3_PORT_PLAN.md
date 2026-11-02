@@ -584,7 +584,7 @@ flowchart TD
 ### 12.1 Overview & Scope Completion
 Milestone 3 implements the full 7-pass FSR 3.1.4 compute pipeline (`PrepareInputs`, `LumaPyramid`, `ShadingChangePyramid`, `ShadingChange`, `PrepareReactivity`, `LumaInstability`, `Accumulate`), optional `AccumulateSharpen` / `RCAS` sharpening paths, and robust mobile Vulkan lifecycle / synchronization management across both Android (`samples/android`) and Windows (`samples/windows`).
 
-Host-side unit/regression tests, mock state machines, and multi-platform compilation builds verify the implementation contracts, but are explicitly recognized as separate from physical device execution. Real mobile GPU execution and full temporal upscaler visual fidelity remain strictly pending physical device testing on target hardware.
+Host-side unit/regression tests, mock state machines, and multi-platform compilation builds verify the implementation contracts. Physical device execution, real mobile GPU validation, and visual fidelity checks have now been completed on target hardware (Poco F6 Adreno 735 and Xiaomi Mi 11X Adreno 650).
 
 No further M3.x submilestones or speculative optimizations are required. Frame Generation remains deferred to Phase 2.
 
@@ -641,7 +641,7 @@ In addition to native static backend library builds across Android ABIs (`arm64-
      - **Swapchain**: 2325x1080 display, rendering at 1162x540 (2.00x upscaling).
      - **Scratch Buffer**: 2,924,616 bytes.
   2. **Poco F6 (`24069PC21I`, `peridot`)**:
-     - **Platform**: Qualcomm Snapdragon 8s Gen 3 (`pineapple`), Adreno 735 GPU, Android 14 (Xiaomi HyperOS).
+     - **Platform**: Qualcomm Snapdragon 8s Gen 3 (`pineapple`), Adreno 735 GPU, Android 16 (Xiaomi HyperOS OS3.0, API level 36).
      - **Vulkan Driver**: Qualcomm 0762.36.1 (Vulkan 1.3.128, Vulkan 1.4 Loader).
      - **Swapchain**: 2712x1220 1.5K AMOLED display (6 swapchain images, `VK_FORMAT_R8G8B8A8_UNORM`), rendering at 1356x610 (2.00x upscaling).
      - **Scratch Buffer**: 2,941,512 bytes.
@@ -657,32 +657,71 @@ In addition to native static backend library builds across Android ABIs (`arm64-
 - **Live Hardware Results**:
   - All 7 FSR 3.1.4 compute pipelines successfully compiled on physical Adreno 650 and Adreno 735 hardware.
   - Scratch buffers (2.92 MB on 1080p, 2.94 MB on 1.5K) and shared resources (`dilatedDepth`, `dilatedMV`, `reconDepth`) allocated cleanly.
-  - Full Vulkan 1.3+ device feature gates passed: `SPIR-V 1.4 yes | shaderFloat16 yes | 16-bit storage yes | extended formats yes | write without format yes | storage formats yes | sampled formats yes`.
-  - Confirmed continuous real-time rendering and temporal upscaling (1162x540 -> 2325x1080 on Mi 11X; 1356x610 -> 2712x1220 on Poco F6) with smooth camera animation verified via on-device screen captures and zero driver warnings/crashes.
+  - Device feature gates verified on both devices (`SPIR-V 1.4`, `shaderFloat16`, `16-bit storage`, `extended formats`, `write without format`, `storage formats`, `sampled formats`), supported via native Vulkan 1.3 core features on Adreno 735 and via KHR extensions on Adreno 650's Vulkan 1.1.128 driver.
+  - Confirmed real-time rendering and temporal upscaling (1162x540 -> 2325x1080 on Mi 11X; 1356x610 -> 2712x1220 on Poco F6) with smooth camera animation verified via on-device screen captures and zero driver warnings/crashes.
 
 ### 12.5 Live Hardware Performance & Benchmark Profile
 
-Direct hardware profiling across physical devices running the FSR 3.1.4 compute upscaler, measured using hardware `SurfaceFlinger` presentation timestamps (3 separate 60-second samples per device, totaling 21,920 frames) and 10-minute continuous memory time-series profiling.
+Direct hardware profiling across physical devices running the FSR 3.1.4 compute upscaler. Frame pacing was measured using hardware `SurfaceFlinger` presentation timestamps (3 separate 60-second samples per device, totaling 21,920 deduplicated presentation intervals). Memory behavior was tracked via 10-minute time-series `dumpsys meminfo` profiling.
 
 #### Comprehensive Multi-Device Benchmark Matrix
 
-| Metric | Xiaomi Mi 11X (Snapdragon 870 / Adreno 650) | Poco F6 (Snapdragon 8s Gen 3 / Adreno 735) | Architectural & Silicon Significance |
+| Metric | Xiaomi Mi 11X (Snapdragon 870 / Adreno 650) | Poco F6 (Snapdragon 8s Gen 3 / Adreno 735) | Metric Significance & Measurement Scope |
 | :--- | :--- | :--- | :--- |
 | **SoC / Silicon Platform** | Qualcomm Snapdragon 870 (`kona`, 7nm TSMC) | Qualcomm Snapdragon 8s Gen 3 (`pineapple`, 4nm TSMC) | 2 Silicon Generations of mobile scaling |
 | **GPU / Driver Version** | Adreno 650 / Qualcomm 512.597.0 (Vulkan 1.1.128) | Adreno 735 / Qualcomm 0762.36.1 (Vulkan 1.3.128) | Legacy vs Modern mobile Vulkan stack |
-| **OS Environment** | Android 13 (LineageOS AOSP stack) | Android 16 (Xiaomi HyperOS) | Stock AOSP vs OEM Vendor framework |
+| **OS Environment** | Android 13 (LineageOS AOSP stack) | Android 16 (Xiaomi HyperOS OS3.0) | Stock AOSP vs OEM Vendor framework |
 | **Display Panel & Cadence** | **$2325 \times 1080$** @ **120.0 Hz** ($8.33\text{ ms}$ tick) | **$2712 \times 1220$** @ **120.0 Hz** ($8.33\text{ ms}$ tick) | Confirmed via `SurfaceFlinger --latency` |
 | **Presented Resolution** | **$2325 \times 1080$** ($2.511\text{ Mpixels}$, FHD+) | **$2712 \times 1220$** ($3.308\text{ Mpixels}$, 1.5K AMOLED) | **$+31.7\%$ more pixels on Poco F6** |
 | **Base Render Extent (Input)** | **$1162 \times 540$** ($0.627\text{ Mpixels}$) | **$1356 \times 610$** ($0.827\text{ Mpixels}$) | $2.00\times$ temporal upscaling mode on both |
 | **Shading Fill-Rate Savings** | **$75.0\%$ ($4.00\times$ fewer pixels)** | **$75.0\%$ ($4.00\times$ fewer pixels)** | Cuts $3/4$ of base fragment shading cost |
-| **Delivered Average FPS** | **$37.03\text{ FPS}$** (7,038 frames measured) | **$81.36\text{ FPS}$** (14,882 frames measured) | **$>2.20\times$ throughput speedup on F6** |
-| **Mean Frame Interval** | **$27.00\text{ ms}$** | **$12.29\text{ ms}$** | **$54.5\%$ frame time reduction on F6** |
+| **Delivered Average FPS** | **$37.03\text{ FPS}$** (7,038 valid frames) | **$81.36\text{ FPS}$** (14,882 valid frames) | Delivered presentation rate (reflects display refresh cadence and compositor turnaround, not isolated GPU compute execution time) |
+| **Mean Frame Interval** | **$27.00\text{ ms}$** | **$12.29\text{ ms}$** | Presentation interval turnaround (snaps to display refresh cadence) |
 | **Median Frame Interval** | **$24.78\text{ ms}$** | **$8.32\text{ ms}$** | Modal presentation turnaround |
-| **P95 / P99 Frame Interval** | **$33.04\text{ ms}$ / $33.05\text{ ms}$** | **$16.64\text{ ms}$ / $16.64\text{ ms}$** | Extremely tight latency bounds |
-| **VSYNC Cadence Distribution** | **$73.0\%$** @ 3 VSYNCs ($24.8\text{ ms}$)<br>**$27.0\%$** @ 4 VSYNCs ($33.0\text{ ms}$) | **$52.5\%$** @ 1 VSYNC ($8.3\text{ ms}$)<br>**$47.5\%$** @ 2 VSYNCs ($16.6\text{ ms}$) | Zero janks or dropped frames beyond cadence slots |
+| **P95 / P99 Frame Interval** | **$33.04\text{ ms}$ / $33.05\text{ ms}$** | **$16.64\text{ ms}$ / $16.64\text{ ms}$** | Presentation pacing bounds |
+| **VSYNC Cadence & Pacing** | **$73.0\%$** @ 3 VSYNCs ($24.8\text{ ms}$)<br>**$27.0\%$** @ 4 VSYNCs ($33.0\text{ ms}$)<br>Max interval: $33.08\text{ ms}$ (0 frames exceeding 4 VSYNC ticks) | **$52.5\%$** @ 1 VSYNC ($8.3\text{ ms}$)<br>**$47.5\%$** @ 2 VSYNCs ($16.6\text{ ms}$)<br>Sample 1 had 1 startup pause ($307.77\text{ ms}$); Samples 2 & 3 had max intervals of $16.64\text{ ms}$ | Mi 11X locked to 3-4 VSYNCs; F6 locked to 1-2 VSYNCs |
 | **FSR 3.1.4 Scratch Memory** | **$2,924,616\text{ bytes}$** ($2.92\text{ MB}$) | **$2,941,512\text{ bytes}$** ($2.94\text{ MB}$) | Dynamic device memory allocated once |
-| **10-Min Native Heap Trend** | **$10.40\text{ MB} \rightarrow 10.40\text{ MB}$ ($\mathbf{\Delta = 0.00\text{ MB}}$)** | **$58.87\text{ MB} \rightarrow 58.89\text{ MB}$ ($\mathbf{\Delta = +0.02\text{ MB}}$)** | **Zero sustained memory leaks** over 49k frames |
-| **10-Min Process PSS Trend** | **$54.39\text{ MB} \rightarrow 59.99\text{ MB}$** (Flat after init) | **$199.90\text{ MB} \rightarrow 197.54\text{ MB}$ ($\mathbf{-2.36\text{ MB}}$)** | Stable memory footprints across both devices |
+| **10-Min Native Heap Trend** | **$10.40\text{ MB} \rightarrow 10.40\text{ MB}$ ($\mathbf{\Delta = 0.00\text{ MB}}$)** | **$58.87\text{ MB} \rightarrow 21.98\text{ MB} \rightarrow 58.89\text{ MB}$** | Mi 11X: Uninterrupted 10-min soak test.<br>Poco F6: Lifecycle-interrupted profile (see 12.5.1). |
+| **10-Min Process PSS Trend** | **$54.39\text{ MB} \rightarrow 59.99\text{ MB}$** (Flat after init) | **$199.90\text{ MB} \rightarrow 96.97\text{ MB} \rightarrow 197.54\text{ MB}$** | Mi 11X: Flat continuous footprint.<br>Poco F6: Drops during sleep; fully restored upon wake. |
 | **Lifecycle Resumption** | **PASS** (Home / Switcher resume cleanly) | **PASS** (Home / Switcher resume cleanly) | 0 recreation crashes or black screens |
 
 All raw timestamp datasets, JSON metrics, CSV exports, screenshots, and screen recordings are recorded under `artifacts/device-validation/`.
+
+#### 12.5.1 Poco F6 Memory Timeline Reconciliation (Lifecycle Interruption Analysis)
+
+Investigation of the 10-minute Poco F6 memory series (`artifacts/device-validation/f6/memory_samples.csv` and `memory_samples.json`) revealed a distinct dip and recovery in memory footprint:
+- **Sample 0 ($t = 0\text{ s}$, `10:32:56`)**: PSS $199.90\text{ MB}$, Graphics $88.18\text{ MB}$, Native Heap Allocated $58.87\text{ MB}$.
+- **Samples 1–13 ($t = 35\text{ s}$ to $397\text{ s}$, `10:33:26`–`10:39:29`)**: PSS dropped to $\sim 96.9\text{ MB} \rightarrow 93.9\text{ MB}$, Graphics dropped to $0.40\text{ MB}$, and Native Heap Allocated dropped to strictly $21.98\text{ MB}$.
+- **Samples 14–20 ($t = 427\text{ s}$ to $608\text{ s}$, `10:39:59`–`10:43:00`)**: PSS recovered to $196.93\text{ MB} \rightarrow 197.54\text{ MB}$, Graphics recovered to $85.46\text{ MB} \rightarrow 88.18\text{ MB}$, and Native Heap Allocated returned to $58.89\text{ MB}$.
+
+Logcat cross-correlation (`artifacts/device-validation/f6/validation_full.log`) establishes the exact root cause:
+1. **Screen Timeout & Teardown ($t \approx 14\text{ s}$)**:
+   - At `10:33:10.522`, `PowerManagerService` logged: `Going to sleep due to timeout (uid 1000, screenOffTimeout=600000, ... why=OFF_BECAUSE_OF_TIMEOUT)`.
+   - At `10:33:11.155`, Android delivered `APP_CMD_TERM_WINDOW` to the application thread (`threaded_app`).
+   - In accordance with `samples/android/app/src/main/cpp/main.cpp`, `APP_CMD_TERM_WINDOW` triggers `teardownRendering(app)`: all 7 FSR 3 compute pipelines, shared resources, scratch buffers, the swapchain, and the `VkDevice` are explicitly destroyed, resetting `vulkanReady = false; renderReady = false; window = nullptr;`.
+   - In `android_main`, event polling blocked on `ALooper_pollOnce(-1, ...)` and rendering completely halted (0 frames drawn).
+   - Sample 1 collected at `10:33:26` captured this torn-down state (PSS $96.97\text{ MB}$, Graphics $0.40\text{ MB}$, Heap $21.98\text{ MB}$).
+2. **Dormant Period ($\sim 393\text{ seconds}$ / $\sim 6.5\text{ minutes}$)**:
+   - Between `10:33:11` and `10:39:44`, the device was asleep / dozing (`performDraw: Not drawing due to screen off`).
+   - The process remained alive (PID 7374), but was completely dormant. Native heap allocation stayed flat at exactly $21.98\text{ MB}$ across all 13 samples.
+3. **Screen Wake & Reinitialization ($t \approx 408\text{ s}$)**:
+   - At `10:39:44.476`, the device was woken via power keypress (`keyCode:224 ... WAKE_REASON_WAKE_KEY`).
+   - Keyguard was unlocked, and at `10:39:45.244`, Android delivered `APP_CMD_INIT_WINDOW`.
+   - `initRendering(app)` was executed: Vulkan instance 1.4.0, Adreno 735 device, swapchain, 2.94 MB scratch buffer, and the 7 FSR 3.1.4 compute pipelines were recreated from scratch.
+   - At `10:39:45.905`, `First FSR 3.1.4 frame dispatched successfully` was logged, resuming active rendering.
+   - Sample 14 (`10:39:59`, $t = 427\text{ s}$) and Sample 15 (`10:40:29`, $t = 458\text{ s}$) captured the fully reinitialized rendering state ($196.93\text{ MB} \rightarrow 198.16\text{ MB}$ PSS, $88.18\text{ MB}$ Graphics, $58.89\text{ MB}$ Native Heap Alloc), which remained stable through Sample 20 ($197.54\text{ MB}$ PSS).
+
+**Significance & Scope of Memory Testing**:
+- This evidence proves that the Android NativeActivity cleanly tears down and reinitializes all Vulkan and FSR 3.1.4 resources without leaking descriptors, images, or native memory upon resumption.
+- However, because the application was dormant with rendering suspended for $\sim 6.5\text{ minutes}$, the Poco F6 10-minute dataset constitutes a **lifecycle interruption profile** rather than a continuous, uninterrupted rendering soak test.
+- A true uninterrupted 10-minute continuous rendering soak test was achieved on the Xiaomi Mi 11X (continuous active dispatches over 10 minutes with flat $10.40\text{ MB}$ native heap allocation and zero growth).
+- Therefore, the claim of zero memory leaks across 10 continuous minutes is strictly proven on the Mi 11X, while the Poco F6 demonstrates complete lifecycle re-creation safety and short-interval steady-state stability.
+
+#### 12.5.2 SurfaceFlinger Presentation Ring-Buffer Deduplication
+
+Android's `dumpsys SurfaceFlinger --latency <layer>` command dumps a fixed 127-entry circular ring buffer containing nanosecond timestamps for each frame: `app_sample_time`, `desired_present_time`, and `actual_present_time`.
+
+When sampling continuously over 60 seconds (sampling every $\sim 1\text{ second}$), consecutive query responses contain overlapping snapshots of the same circular buffer. To compute mathematically sound presentation pacing:
+- Frame entries were strictly deduplicated using the monotonic presentation timestamp ($t_1$).
+- Repeated frame entries from subsequent ring buffer polls were excluded.
+- The reported valid sample counts (**14,882** on Poco F6 across 3 runs; **7,038** on Mi 11X across 3 runs; totaling **21,920** intervals) represent exclusively unique, consecutive presented frames. Raw undeduplicated ring-buffer queries contain $\sim 8,500$–$9,200$ entries per run due to circular re-reads and must not be conflated with unique frame intervals.

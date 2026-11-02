@@ -26,6 +26,9 @@
 #include "swapchain_sync.h"
 #include "swapchain_recovery.h"
 #include "fsr3_upscaler.h"
+#include "vk_context.h"
+#include "host/ffxm_gpu_timestamps.h"
+#include "gpu_profiler.h"
 
 #if defined(FFXM_HAS_VK_BACKEND)
 #include "host/backends/vk/ffxm_vk.h"
@@ -133,6 +136,304 @@ extern "C" {
 }
 #endif
 #endif
+
+#if !defined(ANDROID) && !defined(__ANDROID__)
+#include <vulkan/vulkan_android.h>
+struct ANativeWindow {
+    int dummy = 0;
+};
+
+#if !defined(FFXM_HAS_VK_BACKEND)
+extern "C" {
+    VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
+        VkPhysicalDevice, const char*, uint32_t* pPropertyCount, VkExtensionProperties*)
+    {
+        if (pPropertyCount) *pPropertyCount = 0;
+        return VK_SUCCESS;
+    }
+
+    VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice, const char*)
+    {
+        return nullptr;
+    }
+
+    VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceProperties2(
+        VkPhysicalDevice, VkPhysicalDeviceProperties2*) {}
+
+    VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceFeatures2(
+        VkPhysicalDevice, VkPhysicalDeviceFeatures2*) {}
+
+    VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceMemoryProperties(
+        VkPhysicalDevice, VkPhysicalDeviceMemoryProperties*) {}
+
+    VKAPI_ATTR void VKAPI_CALL vkCmdSetViewport(
+        VkCommandBuffer, uint32_t, uint32_t, const VkViewport*) {}
+
+    VKAPI_ATTR void VKAPI_CALL vkCmdSetScissor(
+        VkCommandBuffer, uint32_t, uint32_t, const VkRect2D*) {}
+}
+#endif // !FFXM_HAS_VK_BACKEND
+
+extern "C" {
+    VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance, const char*)
+    {
+        return nullptr;
+    }
+
+    VKAPI_ATTR VkResult VKAPI_CALL vkCreateInstance(
+        const VkInstanceCreateInfo*, const VkAllocationCallbacks*, VkInstance* pInstance)
+    {
+        if (pInstance) *pInstance = (VkInstance)(uintptr_t)0x1;
+        return VK_SUCCESS;
+    }
+
+    VKAPI_ATTR void VKAPI_CALL vkDestroyInstance(VkInstance, const VkAllocationCallbacks*) {}
+
+    VKAPI_ATTR VkResult VKAPI_CALL vkCreateAndroidSurfaceKHR(
+        VkInstance, const VkAndroidSurfaceCreateInfoKHR*, const VkAllocationCallbacks*, VkSurfaceKHR* pSurface)
+    {
+        if (pSurface) *pSurface = (VkSurfaceKHR)(uintptr_t)0x2;
+        return VK_SUCCESS;
+    }
+
+    VKAPI_ATTR void VKAPI_CALL vkDestroySurfaceKHR(VkInstance, VkSurfaceKHR, const VkAllocationCallbacks*) {}
+
+    VKAPI_ATTR VkResult VKAPI_CALL vkEnumeratePhysicalDevices(VkInstance, uint32_t* pPhysicalDeviceCount, VkPhysicalDevice* pPhysicalDevices)
+    {
+        if (pPhysicalDeviceCount) {
+            if (pPhysicalDevices && *pPhysicalDeviceCount > 0) {
+                pPhysicalDevices[0] = (VkPhysicalDevice)(uintptr_t)0x3;
+            }
+            *pPhysicalDeviceCount = 1;
+        }
+        return VK_SUCCESS;
+    }
+
+    static uint32_t s_MockTimestampValidBits = 64;
+    static float    s_MockTimestampPeriod    = 1.0f;
+
+    VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceQueueFamilyProperties(
+        VkPhysicalDevice, uint32_t* pPropertyCount, VkQueueFamilyProperties* pProperties)
+    {
+        if (pPropertyCount) {
+            if (pProperties && *pPropertyCount > 0) {
+                pProperties[0] = {};
+                pProperties[0].queueFlags = VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT;
+                pProperties[0].queueCount = 1;
+                pProperties[0].timestampValidBits = s_MockTimestampValidBits;
+            }
+            *pPropertyCount = 1;
+        }
+    }
+
+    VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceSupportKHR(
+        VkPhysicalDevice, uint32_t, VkSurfaceKHR, VkBool32* pSupported)
+    {
+        if (pSupported) *pSupported = VK_TRUE;
+        return VK_SUCCESS;
+    }
+
+    VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceProperties(VkPhysicalDevice, VkPhysicalDeviceProperties* pProperties)
+    {
+        if (pProperties) {
+            *pProperties = {};
+            pProperties->apiVersion = VK_API_VERSION_1_2;
+            pProperties->limits.timestampPeriod = s_MockTimestampPeriod;
+            strcpy_s(pProperties->deviceName, "Mock Device");
+        }
+    }
+
+    VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceFormatProperties(VkPhysicalDevice, VkFormat, VkFormatProperties* pFormatProperties)
+    {
+        if (pFormatProperties) {
+            pFormatProperties->linearTilingFeatures = 0;
+            pFormatProperties->optimalTilingFeatures = VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+            pFormatProperties->bufferFeatures = 0;
+        }
+    }
+
+    VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
+        VkPhysicalDevice, const VkDeviceCreateInfo*, const VkAllocationCallbacks*, VkDevice* pDevice)
+    {
+        if (pDevice) *pDevice = (VkDevice)(uintptr_t)0x4;
+        return VK_SUCCESS;
+    }
+
+    VKAPI_ATTR void VKAPI_CALL vkGetDeviceQueue(VkDevice, uint32_t, uint32_t, VkQueue* pQueue)
+    {
+        if (pQueue) *pQueue = (VkQueue)(uintptr_t)0x5;
+    }
+
+    VKAPI_ATTR void VKAPI_CALL vkDestroyDevice(VkDevice, const VkAllocationCallbacks*) {}
+
+    VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+        VkPhysicalDevice, VkSurfaceKHR, VkSurfaceCapabilitiesKHR* pSurfaceCapabilities)
+    {
+        if (pSurfaceCapabilities) {
+            *pSurfaceCapabilities = {};
+            pSurfaceCapabilities->minImageCount = 2;
+            pSurfaceCapabilities->maxImageCount = 3;
+            pSurfaceCapabilities->currentExtent = { 1920, 1080 };
+            pSurfaceCapabilities->currentTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+        }
+        return VK_SUCCESS;
+    }
+
+    VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceFormatsKHR(
+        VkPhysicalDevice, VkSurfaceKHR, uint32_t* pSurfaceFormatCount, VkSurfaceFormatKHR* pSurfaceFormats)
+    {
+        if (pSurfaceFormatCount) {
+            if (pSurfaceFormats && *pSurfaceFormatCount > 0) {
+                pSurfaceFormats[0].format = VK_FORMAT_R8G8B8A8_UNORM;
+                pSurfaceFormats[0].colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+            }
+            *pSurfaceFormatCount = 1;
+        }
+        return VK_SUCCESS;
+    }
+
+    VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(
+        VkDevice, const VkSwapchainCreateInfoKHR*, const VkAllocationCallbacks*, VkSwapchainKHR* pSwapchain)
+    {
+        if (pSwapchain) *pSwapchain = (VkSwapchainKHR)(uintptr_t)0x10;
+        return VK_SUCCESS;
+    }
+
+    VKAPI_ATTR VkResult VKAPI_CALL vkGetSwapchainImagesKHR(
+        VkDevice, VkSwapchainKHR, uint32_t* pSwapchainImageCount, VkImage* pSwapchainImages)
+    {
+        if (pSwapchainImageCount) {
+            if (pSwapchainImages && *pSwapchainImageCount >= 2) {
+                pSwapchainImages[0] = (VkImage)(uintptr_t)0x20;
+                pSwapchainImages[1] = (VkImage)(uintptr_t)0x21;
+            }
+            *pSwapchainImageCount = 2;
+        }
+        return VK_SUCCESS;
+    }
+
+    VKAPI_ATTR void VKAPI_CALL vkDestroySwapchainKHR(VkDevice, VkSwapchainKHR, const VkAllocationCallbacks*) {}
+
+    VKAPI_ATTR VkResult VKAPI_CALL vkCreateImageView(
+        VkDevice, const VkImageViewCreateInfo*, const VkAllocationCallbacks*, VkImageView* pView)
+    {
+        if (pView) *pView = (VkImageView)(uintptr_t)0x30;
+        return VK_SUCCESS;
+    }
+
+    VKAPI_ATTR void VKAPI_CALL vkDestroyImageView(VkDevice, VkImageView, const VkAllocationCallbacks*) {}
+
+    VKAPI_ATTR VkResult VKAPI_CALL vkCreateCommandPool(
+        VkDevice, const VkCommandPoolCreateInfo*, const VkAllocationCallbacks*, VkCommandPool* pCommandPool)
+    {
+        if (pCommandPool) *pCommandPool = (VkCommandPool)(uintptr_t)0x50;
+        return VK_SUCCESS;
+    }
+
+    VKAPI_ATTR VkResult VKAPI_CALL vkAllocateCommandBuffers(
+        VkDevice, const VkCommandBufferAllocateInfo* pAllocateInfo, VkCommandBuffer* pCommandBuffers)
+    {
+        if (pAllocateInfo && pCommandBuffers) {
+            for (uint32_t i = 0; i < pAllocateInfo->commandBufferCount; ++i) {
+                pCommandBuffers[i] = (VkCommandBuffer)(uintptr_t)(0x60 + i);
+            }
+        }
+        return VK_SUCCESS;
+    }
+
+    VKAPI_ATTR void VKAPI_CALL vkDestroyCommandPool(VkDevice, VkCommandPool, const VkAllocationCallbacks*) {}
+
+    VKAPI_ATTR VkResult VKAPI_CALL vkCreateSemaphore(
+        VkDevice, const VkSemaphoreCreateInfo*, const VkAllocationCallbacks*, VkSemaphore* pSemaphore)
+    {
+        if (pSemaphore) *pSemaphore = (VkSemaphore)(uintptr_t)0x70;
+        return VK_SUCCESS;
+    }
+
+    VKAPI_ATTR void VKAPI_CALL vkDestroySemaphore(VkDevice, VkSemaphore, const VkAllocationCallbacks*) {}
+
+    VKAPI_ATTR VkResult VKAPI_CALL vkCreateFence(
+        VkDevice, const VkFenceCreateInfo*, const VkAllocationCallbacks*, VkFence* pFence)
+    {
+        if (pFence) *pFence = (VkFence)(uintptr_t)0x80;
+        return VK_SUCCESS;
+    }
+
+    VKAPI_ATTR void VKAPI_CALL vkDestroyFence(VkDevice, VkFence, const VkAllocationCallbacks*) {}
+
+    VKAPI_ATTR VkResult VKAPI_CALL vkDeviceWaitIdle(VkDevice)
+    {
+        return VK_SUCCESS;
+    }
+
+    VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(VkQueue, uint32_t, const VkSubmitInfo*, VkFence)
+    {
+        return VK_SUCCESS;
+    }
+
+    VKAPI_ATTR VkResult VKAPI_CALL vkResetFences(VkDevice, uint32_t, const VkFence*)
+    {
+        return VK_SUCCESS;
+    }
+
+    VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences(VkDevice, uint32_t, const VkFence*, VkBool32, uint64_t)
+    {
+        return VK_SUCCESS;
+    }
+
+    VKAPI_ATTR VkResult VKAPI_CALL vkBeginCommandBuffer(VkCommandBuffer, const VkCommandBufferBeginInfo*)
+    {
+        return VK_SUCCESS;
+    }
+
+    VKAPI_ATTR VkResult VKAPI_CALL vkEndCommandBuffer(VkCommandBuffer)
+    {
+        return VK_SUCCESS;
+    }
+
+    VKAPI_ATTR VkResult VKAPI_CALL vkResetCommandBuffer(VkCommandBuffer, VkCommandBufferResetFlags)
+    {
+        return VK_SUCCESS;
+    }
+
+    VKAPI_ATTR void VKAPI_CALL vkCmdClearColorImage(VkCommandBuffer, VkImage, VkImageLayout, const VkClearColorValue*, uint32_t, const VkImageSubresourceRange*)
+    {
+    }
+
+    VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier(VkCommandBuffer, VkPipelineStageFlags, VkPipelineStageFlags, VkDependencyFlags, uint32_t, const VkMemoryBarrier*, uint32_t, const VkBufferMemoryBarrier*, uint32_t, const VkImageMemoryBarrier*)
+    {
+    }
+
+    VKAPI_ATTR VkResult VKAPI_CALL vkAcquireNextImageKHR(VkDevice, VkSwapchainKHR, uint64_t, VkSemaphore, VkFence, uint32_t*)
+    {
+        return VK_SUCCESS;
+    }
+
+    VKAPI_ATTR VkResult VKAPI_CALL vkQueuePresentKHR(VkQueue, const VkPresentInfoKHR*)
+    {
+        return VK_SUCCESS;
+    }
+
+    VKAPI_ATTR VkResult VKAPI_CALL vkCreateQueryPool(
+        VkDevice, const VkQueryPoolCreateInfo*, const VkAllocationCallbacks*, VkQueryPool* pQueryPool)
+    {
+        if (pQueryPool) *pQueryPool = (VkQueryPool)(uintptr_t)0x100;
+        return VK_SUCCESS;
+    }
+
+    VKAPI_ATTR void VKAPI_CALL vkDestroyQueryPool(VkDevice, VkQueryPool, const VkAllocationCallbacks*) {}
+
+    VKAPI_ATTR VkResult VKAPI_CALL vkGetQueryPoolResults(
+        VkDevice, VkQueryPool, uint32_t, uint32_t, size_t, void*, VkDeviceSize, VkQueryResultFlags)
+    {
+        return VK_SUCCESS;
+    }
+
+    VKAPI_ATTR void VKAPI_CALL vkCmdResetQueryPool(VkCommandBuffer, VkQueryPool, uint32_t, uint32_t) {}
+
+    VKAPI_ATTR void VKAPI_CALL vkCmdWriteTimestamp(VkCommandBuffer, VkPipelineStageFlagBits, VkQueryPool, uint32_t) {}
+}
+#endif // !defined(ANDROID) && !defined(__ANDROID__)
 
 using namespace arm;
 
@@ -5832,6 +6133,636 @@ static void TestM3FinalCloseoutVulkanLifetimeAndRecovery()
     std::cout << "PASS: Test 31: M3 Final Closeout - Vulkan Lifetime, Sync Recovery, and State Validation passed perfectly." << std::endl;
 }
 
+void TestM4VulkanPartialInitializationCleanup()
+{
+    std::cout << "Running Test 32: M4 - Android Vulkan Partial-Initialization Cleanup & State Machine..." << std::endl;
+
+    // --- Subtest 32.1: Calling destroy on an empty (uninitialized) context ---
+    {
+        VkContext ctx;
+        VkContext::TestSeam seam;
+        ctx.setTestSeam(&seam);
+
+        TEST_CHECK(ctx.instance() == VK_NULL_HANDLE);
+        TEST_CHECK(ctx.surface() == VK_NULL_HANDLE);
+        TEST_CHECK(ctx.device() == VK_NULL_HANDLE);
+        TEST_CHECK(ctx.swapchain() == VK_NULL_HANDLE);
+        TEST_CHECK(ctx.isInitialized() == false);
+
+        // destroy() on empty context should be completely safe and perform zero destructions
+        ctx.destroy();
+
+        TEST_CHECK(seam.waitIdleCalls == 0);
+        TEST_CHECK(seam.deviceDestructions == 0);
+        TEST_CHECK(seam.surfaceDestructions == 0);
+        TEST_CHECK(seam.instanceDestructions == 0);
+        TEST_CHECK(seam.commandPoolDestructions == 0);
+        TEST_CHECK(seam.swapchainDestructions == 0);
+        TEST_CHECK(seam.semaphoreDestructions == 0);
+        TEST_CHECK(seam.fenceDestructions == 0);
+        TEST_CHECK(ctx.isInitialized() == false);
+    }
+
+    // --- Subtest 32.2: Calling destroy twice (idempotence) ---
+    {
+        VkContext ctx;
+        VkContext::TestSeam seam;
+        ctx.setTestSeam(&seam);
+
+        ANativeWindow dummyWindow;
+        bool ok = ctx.init(&dummyWindow);
+        TEST_CHECK(ok == true);
+        TEST_CHECK(ctx.isInitialized() == true);
+        TEST_CHECK(ctx.instance() != VK_NULL_HANDLE);
+        TEST_CHECK(ctx.device() != VK_NULL_HANDLE);
+
+        // First destroy call
+        seam.resetCounters();
+        ctx.destroy();
+
+        TEST_CHECK(seam.waitIdleCalls == 1);
+        TEST_CHECK(seam.deviceDestructions == 1);
+        TEST_CHECK(seam.surfaceDestructions == 1);
+        TEST_CHECK(seam.instanceDestructions == 1);
+        TEST_CHECK(seam.commandPoolDestructions == 1);
+        TEST_CHECK(seam.swapchainDestructions == 1);
+        TEST_CHECK(ctx.instance() == VK_NULL_HANDLE);
+        TEST_CHECK(ctx.surface() == VK_NULL_HANDLE);
+        TEST_CHECK(ctx.device() == VK_NULL_HANDLE);
+        TEST_CHECK(ctx.swapchain() == VK_NULL_HANDLE);
+        TEST_CHECK(ctx.isInitialized() == false);
+
+        // Second destroy call: idempotent, zero further destructions
+        seam.resetCounters();
+        ctx.destroy();
+
+        TEST_CHECK(seam.waitIdleCalls == 0);
+        TEST_CHECK(seam.deviceDestructions == 0);
+        TEST_CHECK(seam.surfaceDestructions == 0);
+        TEST_CHECK(seam.instanceDestructions == 0);
+        TEST_CHECK(seam.commandPoolDestructions == 0);
+        TEST_CHECK(seam.swapchainDestructions == 0);
+        TEST_CHECK(ctx.isInitialized() == false);
+    }
+
+    // --- Subtest 32.3: Failure after instance creation (instance created, surface fails) ---
+    {
+        VkContext ctx;
+        VkContext::TestSeam seam;
+        seam.failSurfaceCreation = true;
+        ctx.setTestSeam(&seam);
+
+        ANativeWindow dummyWindow;
+        bool ok = ctx.init(&dummyWindow);
+        TEST_CHECK(ok == false); // Transactional rollback
+
+        // Rollback contract: instance was created so it must be destroyed; surface/device were never created
+        TEST_CHECK(seam.instanceDestructions == 1);
+        TEST_CHECK(seam.surfaceDestructions == 0);
+        TEST_CHECK(seam.deviceDestructions == 0);
+        TEST_CHECK(seam.commandPoolDestructions == 0);
+        TEST_CHECK(seam.swapchainDestructions == 0);
+        TEST_CHECK(ctx.instance() == VK_NULL_HANDLE);
+        TEST_CHECK(ctx.surface() == VK_NULL_HANDLE);
+        TEST_CHECK(ctx.device() == VK_NULL_HANDLE);
+        TEST_CHECK(ctx.isInitialized() == false);
+
+        // Teardown called by application after init() failure is harmless
+        ctx.destroy();
+        TEST_CHECK(seam.instanceDestructions == 1); // No double destruction
+    }
+
+    // --- Subtest 32.4: Failure after surface creation (instance & surface created, physical device fails) ---
+    {
+        VkContext ctx;
+        VkContext::TestSeam seam;
+        seam.failPhysicalDevice = true;
+        ctx.setTestSeam(&seam);
+
+        ANativeWindow dummyWindow;
+        bool ok = ctx.init(&dummyWindow);
+        TEST_CHECK(ok == false);
+
+        // Rollback contract: surface and instance must both be destroyed in proper order
+        TEST_CHECK(seam.surfaceDestructions == 1);
+        TEST_CHECK(seam.instanceDestructions == 1);
+        TEST_CHECK(seam.deviceDestructions == 0);
+        TEST_CHECK(ctx.surface() == VK_NULL_HANDLE);
+        TEST_CHECK(ctx.instance() == VK_NULL_HANDLE);
+        TEST_CHECK(ctx.device() == VK_NULL_HANDLE);
+        TEST_CHECK(ctx.isInitialized() == false);
+    }
+
+    // --- Subtest 32.5: Failure during logical device creation ---
+    {
+        VkContext ctx;
+        VkContext::TestSeam seam;
+        seam.failDeviceCreation = true;
+        ctx.setTestSeam(&seam);
+
+        ANativeWindow dummyWindow;
+        bool ok = ctx.init(&dummyWindow);
+        TEST_CHECK(ok == false);
+
+        TEST_CHECK(seam.surfaceDestructions == 1);
+        TEST_CHECK(seam.instanceDestructions == 1);
+        TEST_CHECK(seam.deviceDestructions == 0);
+        TEST_CHECK(ctx.device() == VK_NULL_HANDLE);
+        TEST_CHECK(ctx.surface() == VK_NULL_HANDLE);
+        TEST_CHECK(ctx.instance() == VK_NULL_HANDLE);
+        TEST_CHECK(ctx.isInitialized() == false);
+    }
+
+    // --- Subtest 32.6: Failure during swapchain creation ---
+    {
+        VkContext ctx;
+        VkContext::TestSeam seam;
+        seam.failSwapchainCreation = true;
+        ctx.setTestSeam(&seam);
+
+        ANativeWindow dummyWindow;
+        bool ok = ctx.init(&dummyWindow);
+        TEST_CHECK(ok == false);
+
+        // Rollback contract: device, surface, and instance destroyed
+        TEST_CHECK(seam.swapchainDestructions == 0);
+        TEST_CHECK(seam.deviceDestructions == 1);
+        TEST_CHECK(seam.surfaceDestructions == 1);
+        TEST_CHECK(seam.instanceDestructions == 1);
+        TEST_CHECK(ctx.swapchain() == VK_NULL_HANDLE);
+        TEST_CHECK(ctx.device() == VK_NULL_HANDLE);
+        TEST_CHECK(ctx.isInitialized() == false);
+    }
+
+    // --- Subtest 32.7: Cleanup after partial frame-resource creation ---
+    {
+        VkContext ctx;
+        VkContext::TestSeam seam;
+        // Fail on second semaphore: command pool + frame 0 semaphores were created
+        seam.failSemaphoreIndex = 1;
+        ctx.setTestSeam(&seam);
+
+        ANativeWindow dummyWindow;
+        bool ok = ctx.init(&dummyWindow);
+        TEST_CHECK(ok == false);
+
+        // Rollback contract:
+        // 1. Device wait idle
+        TEST_CHECK(seam.waitIdleCalls == 1);
+        // 2. Command pool destroyed
+        TEST_CHECK(seam.commandPoolDestructions == 1);
+        // 3. Exactly the 2 semaphores created for frame 0 destroyed
+        TEST_CHECK(seam.semaphoreDestructions == 2);
+        // 4. Swapchain destroyed
+        TEST_CHECK(seam.swapchainDestructions == 1);
+        // 5. Logical device destroyed
+        TEST_CHECK(seam.deviceDestructions == 1);
+        // 6. Surface destroyed
+        TEST_CHECK(seam.surfaceDestructions == 1);
+        // 7. Instance destroyed
+        TEST_CHECK(seam.instanceDestructions == 1);
+
+        TEST_CHECK(ctx.instance() == VK_NULL_HANDLE);
+        TEST_CHECK(ctx.surface() == VK_NULL_HANDLE);
+        TEST_CHECK(ctx.device() == VK_NULL_HANDLE);
+        TEST_CHECK(ctx.swapchain() == VK_NULL_HANDLE);
+        TEST_CHECK(ctx.isInitialized() == false);
+    }
+
+    // --- Subtest 32.8: Initializing again after a failed attempt ---
+    {
+        VkContext ctx;
+        VkContext::TestSeam seam;
+        seam.failPhysicalDevice = true;
+        ctx.setTestSeam(&seam);
+
+        ANativeWindow dummyWindow;
+        bool ok1 = ctx.init(&dummyWindow);
+        TEST_CHECK(ok1 == false);
+        TEST_CHECK(ctx.isInitialized() == false);
+
+        // Fix failure condition and reinitialize
+        seam.failPhysicalDevice = false;
+        seam.resetCounters();
+
+        bool ok2 = ctx.init(&dummyWindow);
+        TEST_CHECK(ok2 == true);
+        TEST_CHECK(ctx.isInitialized() == true);
+        TEST_CHECK(ctx.instance() != VK_NULL_HANDLE);
+        TEST_CHECK(ctx.surface() != VK_NULL_HANDLE);
+        TEST_CHECK(ctx.device() != VK_NULL_HANDLE);
+        TEST_CHECK(ctx.swapchain() != VK_NULL_HANDLE);
+
+        ctx.destroy();
+        TEST_CHECK(ctx.isInitialized() == false);
+    }
+
+    // --- Subtest 32.9: Calling init() on an already initialized context ---
+    {
+        VkContext ctx;
+        VkContext::TestSeam seam;
+        ctx.setTestSeam(&seam);
+
+        ANativeWindow dummyWindow;
+        bool ok1 = ctx.init(&dummyWindow);
+        TEST_CHECK(ok1 == true);
+        TEST_CHECK(ctx.isInitialized() == true);
+
+        // Calling init again without destroy() must cleanly reset prior state
+        seam.resetCounters();
+        bool ok2 = ctx.init(&dummyWindow);
+        TEST_CHECK(ok2 == true);
+        TEST_CHECK(ctx.isInitialized() == true);
+        // Verified that prior device was destroyed before recreating
+        TEST_CHECK(seam.deviceDestructions == 1);
+        TEST_CHECK(seam.surfaceDestructions == 1);
+        TEST_CHECK(seam.instanceDestructions == 1);
+
+        ctx.destroy();
+    }
+
+    // --- Subtest 32.10: SwapchainSync::reset() state-clearing contract ---
+    {
+        arm::SwapchainSync sync;
+
+        VkDevice mockDev = makeMockHandle<VkDevice>(0x101);
+        VkQueue mockQueue = makeMockHandle<VkQueue>(0x102);
+        VkSwapchainKHR mockSwapchain = makeMockHandle<VkSwapchainKHR>(0x103);
+        std::vector<VkImage> mockImages = { makeMockHandle<VkImage>(0x201), makeMockHandle<VkImage>(0x202) };
+        VkCommandBuffer mockCmds[2] = { makeMockHandle<VkCommandBuffer>(0x301), makeMockHandle<VkCommandBuffer>(0x302) };
+        VkSemaphore mockAcq[2] = { makeMockHandle<VkSemaphore>(0x401), makeMockHandle<VkSemaphore>(0x402) };
+        VkSemaphore mockRel[2] = { makeMockHandle<VkSemaphore>(0x501), makeMockHandle<VkSemaphore>(0x502) };
+        VkFence mockFences[2] = { makeMockHandle<VkFence>(0x601), makeMockHandle<VkFence>(0x602) };
+
+        sync.init(mockDev, mockQueue, mockSwapchain, mockImages, mockCmds, mockAcq, mockRel, mockFences);
+        sync.notifyDeviceLost();
+
+        TEST_CHECK(sync.device() == mockDev);
+        TEST_CHECK(sync.queue() == mockQueue);
+        TEST_CHECK(sync.swapchain() == mockSwapchain);
+        TEST_CHECK(sync.swapchainImages().size() == 2);
+        TEST_CHECK(sync.callerAcquireSemaphores() == mockAcq);
+        TEST_CHECK(sync.callerReleaseSemaphores() == mockRel);
+        TEST_CHECK(sync.callerInFlightFences() == mockFences);
+        TEST_CHECK(sync.isDeviceLost() == true);
+        TEST_CHECK(sync.isTerminalError() == true);
+
+        // reset() clears all handles and state without destroying resources
+        sync.reset();
+
+        TEST_CHECK(sync.device() == VK_NULL_HANDLE);
+        TEST_CHECK(sync.queue() == VK_NULL_HANDLE);
+        TEST_CHECK(sync.swapchain() == VK_NULL_HANDLE);
+        TEST_CHECK(sync.swapchainImages().empty() == true);
+        TEST_CHECK(sync.callerAcquireSemaphores() == nullptr);
+        TEST_CHECK(sync.callerReleaseSemaphores() == nullptr);
+        TEST_CHECK(sync.callerInFlightFences() == nullptr);
+        TEST_CHECK(sync.frame() == 0);
+        TEST_CHECK(sync.isDeviceLost() == false);
+        TEST_CHECK(sync.isSurfaceLost() == false);
+        TEST_CHECK(sync.isRecoveryFailed() == false);
+        TEST_CHECK(sync.isTerminalError() == false);
+    }
+
+    std::cout << "PASS: Test 32: M4 - Android Vulkan Partial-Initialization Cleanup & State Machine passed perfectly." << std::endl;
+}
+
+void TestM4GpuTimestampArithmetic()
+{
+    std::cout << "Running Test 33: M4 - GPU Timestamp Arithmetic & Conversion..." << std::endl;
+
+    // 1. Normal timestamp differences
+    {
+        uint64_t startTick = 1000000;
+        uint64_t endTick   = 1052000;
+        uint32_t validBits = 36;
+        float period = 1.0f; // 1 ns / tick
+
+        auto res = ffxmCalculateGpuTimestampDelta(startTick, endTick, validBits, period, true, true);
+        TEST_CHECK(res.valid == true);
+        TEST_CHECK(res.deltaTicks == 52000);
+        TEST_CHECK(std::abs(res.durationNs - 52000.0) < 1e-5);
+        TEST_CHECK(std::abs(res.durationUs - 52.0) < 1e-5);
+        TEST_CHECK(std::abs(res.durationMs - 0.052) < 1e-6);
+    }
+
+    // 2. Wraparound with fewer than 64 valid bits (36 valid bits)
+    {
+        uint32_t validBits = 36;
+        const uint64_t mask = (1ULL << validBits) - 1ULL; // 0xFFFFFFFFF
+        uint64_t startTick = mask - 30; // 0xFFFFFFFE1
+        uint64_t endTick   = 20;        // wrapped around past zero
+        float period = 1.0f;
+
+        auto res = ffxmCalculateGpuTimestampDelta(startTick, endTick, validBits, period, true, true);
+        TEST_CHECK(res.valid == true);
+        TEST_CHECK(res.deltaTicks == 51); // (mask - (mask - 30)) + 20 + 1 = 31 + 20 = 51
+        TEST_CHECK(std::abs(res.durationNs - 51.0) < 1e-5);
+    }
+
+    // 3. Wraparound with 48 valid bits
+    {
+        uint32_t validBits = 48;
+        const uint64_t mask = (1ULL << validBits) - 1ULL;
+        uint64_t startTick = mask - 99;
+        uint64_t endTick   = 100;
+        float period = 2.0f; // 2 ns / tick
+
+        auto res = ffxmCalculateGpuTimestampDelta(startTick, endTick, validBits, period, true, true);
+        TEST_CHECK(res.valid == true);
+        TEST_CHECK(res.deltaTicks == 200);
+        TEST_CHECK(std::abs(res.durationNs - 400.0) < 1e-5);
+    }
+
+    // 4. The 64-bit case (no undefined shifts)
+    {
+        uint32_t validBits = 64;
+        uint64_t startTick = 0xFFFFFFFFFFFFFF80ULL;
+        uint64_t endTick   = 0x0000000000000040ULL;
+        float period = 1.0f;
+
+        auto res = ffxmCalculateGpuTimestampDelta(startTick, endTick, validBits, period, true, true);
+        TEST_CHECK(res.valid == true);
+        TEST_CHECK(res.deltaTicks == 0xC0ULL); // 192 ticks
+        TEST_CHECK(std::abs(res.durationNs - 192.0) < 1e-5);
+    }
+
+    // 5. Unsupported timestamp queues & invalid inputs
+    {
+        // validBits == 0 (unsupported queue family)
+        auto res0 = ffxmCalculateGpuTimestampDelta(100, 200, 0, 1.0f, true, true);
+        TEST_CHECK(res0.valid == false);
+        TEST_CHECK(res0.deltaTicks == 0);
+
+        // validBits > 64 (invalid)
+        auto res65 = ffxmCalculateGpuTimestampDelta(100, 200, 65, 1.0f, true, true);
+        TEST_CHECK(res65.valid == false);
+
+        // timestampPeriod <= 0.0f
+        auto resP0 = ffxmCalculateGpuTimestampDelta(100, 200, 64, 0.0f, true, true);
+        TEST_CHECK(resP0.valid == false);
+        auto resNeg = ffxmCalculateGpuTimestampDelta(100, 200, 64, -1.0f, true, true);
+        TEST_CHECK(resNeg.valid == false);
+
+        // Unavailable queries
+        auto resUnavail1 = ffxmCalculateGpuTimestampDelta(100, 200, 64, 1.0f, false, true);
+        TEST_CHECK(resUnavail1.valid == false);
+        auto resUnavail2 = ffxmCalculateGpuTimestampDelta(100, 200, 64, 1.0f, true, false);
+        TEST_CHECK(resUnavail2.valid == false);
+        auto resUnavailBoth = ffxmCalculateGpuTimestampDelta(100, 200, 64, 1.0f, false, false);
+        TEST_CHECK(resUnavailBoth.valid == false);
+    }
+
+    // 6. Conversion using device timestamp periods (e.g. Snapdragon Adreno 19.230769 ns)
+    {
+        uint64_t startTick = 1000;
+        uint64_t endTick   = 101000; // 100,000 ticks
+        float period = 19.230769f;   // Qualcomm Snapdragon Adreno typical
+
+        auto res = ffxmCalculateGpuTimestampDelta(startTick, endTick, 64, period, true, true);
+        TEST_CHECK(res.valid == true);
+        TEST_CHECK(res.deltaTicks == 100000);
+        // 100000 * 19.230769 ns = 1923076.9 ns = 1.9230769 ms = 1923.0769 us
+        TEST_CHECK(std::abs(res.durationMs - 1.9230769) < 1e-5);
+        TEST_CHECK(std::abs(res.durationUs - 1923.0769) < 1e-2);
+    }
+
+    std::cout << "PASS: Test 33: M4 - GPU Timestamp Arithmetic & Conversion passed perfectly." << std::endl;
+}
+
+void TestM4BackendProfilingInterface()
+{
+    std::cout << "Running Test 34: M4 - Vulkan Backend Profiling Interface & Test Hooks..." << std::endl;
+    ffxmTestResetBackendRefCountVK();
+
+    // 1. Parameter validation
+    {
+        TEST_CHECK(ffxmSetProfilingDescriptionVK(nullptr, nullptr) == FFXM_ERROR_INVALID_POINTER);
+        FfxmVkProfilingDescription desc{};
+        TEST_CHECK(ffxmGetProfilingDescriptionVK(nullptr, &desc) == FFXM_ERROR_INVALID_POINTER);
+    }
+
+    // 2. Set and Get profiling description on backend interface
+    {
+        size_t scratchSize = ffxmGetScratchMemorySizeVK(VK_NULL_HANDLE, 1);
+        std::vector<uint8_t> scratch(scratchSize);
+        FfxmInterface iface{};
+        FfxmUInt32 effectContextId = 0;
+        TEST_CHECK(ffxmTestSetupBackendContextVK(&iface, scratch.data(), scratch.size(), 1, &effectContextId) == FFXM_OK);
+
+        // Initially disabled
+        FfxmVkProfilingDescription initialDesc{};
+        TEST_CHECK(ffxmGetProfilingDescriptionVK(&iface, &initialDesc) == FFXM_OK);
+        TEST_CHECK(initialDesc.mode == FFXM_GPU_PROFILING_MODE_DISABLED);
+
+        // Configure Total-only profiling
+        FfxmVkProfilingDescription setDesc{};
+        setDesc.mode = FFXM_GPU_PROFILING_MODE_TOTAL_ONLY;
+        setDesc.queryPool = (VkQueryPool)(uintptr_t)0x200;
+        setDesc.startQueryIndex = 0;
+        setDesc.maxQueryCount = 2;
+        TEST_CHECK(ffxmSetProfilingDescriptionVK(&iface, &setDesc) == FFXM_OK);
+
+        FfxmVkProfilingDescription getDesc{};
+        TEST_CHECK(ffxmGetProfilingDescriptionVK(&iface, &getDesc) == FFXM_OK);
+        TEST_CHECK(getDesc.mode == FFXM_GPU_PROFILING_MODE_TOTAL_ONLY);
+        TEST_CHECK(getDesc.queryPool == (VkQueryPool)(uintptr_t)0x200);
+        TEST_CHECK(getDesc.startQueryIndex == 0);
+        TEST_CHECK(getDesc.maxQueryCount == 2);
+
+        // Clear profiling by passing nullptr
+        TEST_CHECK(ffxmSetProfilingDescriptionVK(&iface, nullptr) == FFXM_OK);
+        FfxmVkProfilingDescription clearedDesc{};
+        TEST_CHECK(ffxmGetProfilingDescriptionVK(&iface, &clearedDesc) == FFXM_OK);
+        TEST_CHECK(clearedDesc.mode == FFXM_GPU_PROFILING_MODE_DISABLED);
+        TEST_CHECK(clearedDesc.queryPool == VK_NULL_HANDLE);
+
+        ffxmTestResetBackendRefCountVK();
+    }
+
+    // 3. Test timestamp emission hooks during ExecuteGpuJobsVK
+    {
+        size_t scratchSize = ffxmGetScratchMemorySizeVK(VK_NULL_HANDLE, 1);
+        std::vector<uint8_t> scratch(scratchSize);
+        FfxmInterface iface{};
+        FfxmUInt32 effectContextId = 0;
+        TEST_CHECK(ffxmTestSetupBackendContextVK(&iface, scratch.data(), scratch.size(), 1, &effectContextId) == FFXM_OK);
+
+        struct WrittenTimestamp {
+            VkCommandBuffer cmd;
+            VkPipelineStageFlagBits stage;
+            VkQueryPool pool;
+            uint32_t query;
+        };
+        static std::vector<WrittenTimestamp> s_written;
+        s_written.clear();
+
+        ffxmSetTestWriteTimestampHookVK([](VkCommandBuffer cmd, VkPipelineStageFlagBits stage, VkQueryPool pool, uint32_t query) {
+            s_written.push_back({cmd, stage, pool, query});
+        });
+
+        // Test with profiling disabled: exactly 0 timestamps written
+        {
+            s_written.clear();
+            FfxmCommandList cmdList = ffxmGetCommandListVK((VkCommandBuffer)(uintptr_t)0x500);
+            TEST_CHECK(ExecuteGpuJobsVK(&iface, cmdList) == FFXM_OK);
+            TEST_CHECK(s_written.empty() == true);
+        }
+
+        // Test Total-only mode: exactly 2 timestamps written (start at query 0, end at query 1)
+        {
+            s_written.clear();
+            FfxmVkProfilingDescription desc{};
+            desc.mode = FFXM_GPU_PROFILING_MODE_TOTAL_ONLY;
+            desc.queryPool = (VkQueryPool)(uintptr_t)0x300;
+            desc.startQueryIndex = 0;
+            desc.maxQueryCount = 2;
+            TEST_CHECK(ffxmSetProfilingDescriptionVK(&iface, &desc) == FFXM_OK);
+
+            FfxmCommandList cmdList = ffxmGetCommandListVK((VkCommandBuffer)(uintptr_t)0x500);
+            TEST_CHECK(ExecuteGpuJobsVK(&iface, cmdList) == FFXM_OK);
+            TEST_CHECK(s_written.size() == 2);
+            if (s_written.size() == 2) {
+                TEST_CHECK(s_written[0].query == FFXM_PROFILING_QUERY_TOTAL_START);
+                TEST_CHECK(s_written[0].stage == VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT);
+                TEST_CHECK(s_written[0].pool == (VkQueryPool)(uintptr_t)0x300);
+
+                TEST_CHECK(s_written[1].query == FFXM_PROFILING_QUERY_TOTAL_END);
+                TEST_CHECK(s_written[1].stage == VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+                TEST_CHECK(s_written[1].pool == (VkQueryPool)(uintptr_t)0x300);
+            }
+
+            // ScopedProfilingCleanup should ensure profiling was disabled after ExecuteGpuJobsVK
+            FfxmVkProfilingDescription afterDesc{};
+            TEST_CHECK(ffxmGetProfilingDescriptionVK(&iface, &afterDesc) == FFXM_OK);
+            TEST_CHECK(afterDesc.mode == FFXM_GPU_PROFILING_MODE_DISABLED);
+        }
+
+        ffxmSetTestWriteTimestampHookVK(nullptr);
+        ffxmTestResetBackendRefCountVK();
+    }
+
+    std::cout << "PASS: Test 34: M4 - Vulkan Backend Profiling Interface & Test Hooks passed perfectly." << std::endl;
+}
+
+void TestM4GpuProfilerStatisticsAndLifecycle()
+{
+    std::cout << "Running Test 35: M4 - GPU Profiler Statistics & Lifecycle..." << std::endl;
+
+    // 1. Statistics computation on known dataset: [1.0, 2.0, ..., 100.0]
+    {
+        std::vector<double> values;
+        for (int i = 1; i <= 100; ++i) {
+            values.push_back((double)i);
+        }
+
+        auto stats = GpuProfiler::computeStats(values, 100, 0);
+        TEST_CHECK(stats.totalMeasuredFrames == 100);
+        TEST_CHECK(stats.validFrames == 100);
+        TEST_CHECK(stats.unavailableFrames == 0);
+        TEST_CHECK(std::abs(stats.minMs - 1.0) < 1e-5);
+        TEST_CHECK(std::abs(stats.maxMs - 100.0) < 1e-5);
+        TEST_CHECK(std::abs(stats.medianMs - 50.5) < 1e-5);
+        TEST_CHECK(std::abs(stats.meanMs - 50.5) < 1e-5);
+        TEST_CHECK(std::abs(stats.p95Ms - 95.0) < 1e-5);
+        TEST_CHECK(std::abs(stats.p99Ms - 99.0) < 1e-5);
+    }
+
+    // 2. Lifecycle: warmup frames, frame completion, and abortion
+    {
+        GpuProfiler profiler;
+        GpuProfilerConfig cfg;
+        cfg.mode = FFXM_GPU_PROFILING_MODE_TOTAL_ONLY;
+        cfg.warmupFrames = 2;
+        cfg.targetMeasuredFrames = 3;
+        profiler.init(cfg);
+
+        TEST_CHECK(profiler.isComplete() == false);
+        TEST_CHECK(profiler.sampleCount() == 0);
+
+        VkContext ctx;
+        VkContext::TestSeam seam{};
+        seam.timestampValidBitsOverride = 64;
+        ctx.setTestSeam(&seam);
+        TEST_CHECK(ctx.init((ANativeWindow*)(uintptr_t)0x1) == true);
+
+        // Frame 0: begin, submit
+        FfxmVkProfilingDescription desc0{};
+        bool active0 = profiler.onBeginFrame(0, (VkCommandBuffer)(uintptr_t)0x60, ctx, &desc0);
+        TEST_CHECK(active0 == true);
+        TEST_CHECK(desc0.mode == FFXM_GPU_PROFILING_MODE_TOTAL_ONLY);
+        profiler.onFrameSubmitted(0, FFXM_GPU_PROFILING_MODE_TOTAL_ONLY, 0);
+
+        // Frame 1: begin, abort
+        FfxmVkProfilingDescription desc1{};
+        bool active1 = profiler.onBeginFrame(1, (VkCommandBuffer)(uintptr_t)0x61, ctx, &desc1);
+        TEST_CHECK(active1 == true);
+        profiler.onFrameAborted(1);
+
+        // Next frame slot 1 should not have pending submission from aborted frame
+        FfxmVkProfilingDescription desc1_b{};
+        bool active1_b = profiler.onBeginFrame(1, (VkCommandBuffer)(uintptr_t)0x61, ctx, &desc1_b);
+        TEST_CHECK(active1_b == true);
+
+        // Reset context
+        profiler.onContextReset();
+    }
+
+    // 3. Query count helper
+    {
+        TEST_CHECK(GpuProfiler::queryCountForMode(FFXM_GPU_PROFILING_MODE_DISABLED) == 0);
+        TEST_CHECK(GpuProfiler::queryCountForMode(FFXM_GPU_PROFILING_MODE_TOTAL_ONLY) == 2);
+        TEST_CHECK(GpuProfiler::queryCountForMode(FFXM_GPU_PROFILING_MODE_PER_PASS) == 24);
+    }
+
+    std::cout << "PASS: Test 35: M4 - GPU Profiler Statistics & Lifecycle passed perfectly." << std::endl;
+}
+
+void TestM4VkContextQueryPoolLifecycle()
+{
+    std::cout << "Running Test 36: M4 - VkContext Query Pool Lifecycle & Teardown..." << std::endl;
+
+    // 1. Query pool creation and destruction under test seam
+    {
+        VkContext ctx;
+        VkContext::TestSeam seam{};
+        seam.timestampValidBitsOverride = 64;
+        ctx.setTestSeam(&seam);
+
+        TEST_CHECK(ctx.init((ANativeWindow*)(uintptr_t)0x1) == true);
+        TEST_CHECK(ctx.queryPool(0) != VK_NULL_HANDLE);
+        TEST_CHECK(ctx.queryPool(1) != VK_NULL_HANDLE);
+        TEST_CHECK(ctx.queryPool(2) == VK_NULL_HANDLE); // out of bounds
+
+        ctx.destroy();
+        // kFramesInFlight = 2, so 2 query pools destroyed
+        TEST_CHECK(seam.queryPoolDestructions == 2);
+        TEST_CHECK(seam.deviceDestructions == 1);
+        TEST_CHECK(ctx.queryPool(0) == VK_NULL_HANDLE);
+        TEST_CHECK(ctx.queryPool(1) == VK_NULL_HANDLE);
+    }
+
+    // 2. Graceful degradation when queue family has timestampValidBits == 0
+    {
+        s_MockTimestampValidBits = 0;
+        VkContext ctx;
+        VkContext::TestSeam seam{};
+        seam.timestampValidBitsOverride = 0;
+        ctx.setTestSeam(&seam);
+
+        TEST_CHECK(ctx.init((ANativeWindow*)(uintptr_t)0x1) == true);
+        TEST_CHECK(ctx.timestampValidBits() == 0);
+        TEST_CHECK(ctx.queryPool(0) == VK_NULL_HANDLE);
+        TEST_CHECK(ctx.queryPool(1) == VK_NULL_HANDLE);
+
+        ctx.destroy();
+        TEST_CHECK(seam.queryPoolDestructions == 0); // No query pools created, so 0 destroyed
+        s_MockTimestampValidBits = 64; // Restore default
+    }
+
+    std::cout << "PASS: Test 36: M4 - VkContext Query Pool Lifecycle & Teardown passed perfectly." << std::endl;
+}
+
 int main()
 {
     std::cout << "============================================================" << std::endl;
@@ -5870,6 +6801,11 @@ int main()
     TestM39VulkanBackendTransactionalRecovery();
     TestM3FinalizationVerification();
     TestM3FinalCloseoutVulkanLifetimeAndRecovery();
+    TestM4VulkanPartialInitializationCleanup();
+    TestM4GpuTimestampArithmetic();
+    TestM4BackendProfilingInterface();
+    TestM4GpuProfilerStatisticsAndLifecycle();
+    TestM4VkContextQueryPoolLifecycle();
 
     std::cout << "============================================================" << std::endl;
     std::cout << "Summary: " << g_TestPasses << " checks PASSED, " << g_TestFailures << " FAILED." << std::endl;

@@ -107,6 +107,38 @@ public:
         lastPresentResult_ = PresentResult::Success;
     }
 
+    /// Clears all retained Vulkan handles, caller pointers, and sync state without
+    /// destroying resources owned by VkContext.
+    void reset()
+    {
+        device_ = VK_NULL_HANDLE;
+        queue_ = VK_NULL_HANDLE;
+        swapchain_ = VK_NULL_HANDLE;
+        swapchainImages_.clear();
+        pCallerAcquireSemaphores_ = nullptr;
+        pCallerReleaseSemaphores_ = nullptr;
+        pCallerInFlightFences_ = nullptr;
+
+        for (uint32_t i = 0; i < kFramesInFlight; ++i) {
+            commandBuffers_[i] = VK_NULL_HANDLE;
+            acquireSemaphores_[i] = VK_NULL_HANDLE;
+            releaseSemaphores_[i] = VK_NULL_HANDLE;
+            inFlightFences_[i] = VK_NULL_HANDLE;
+        }
+
+        frame_ = 0;
+        swapchainSuboptimal_ = false;
+        imageAcquired_ = false;
+        acquiredImageIndex_ = 0;
+        acquireSemaphoreConsumed_ = false;
+        fenceReset_ = false;
+        submissionQueued_ = false;
+        deviceLost_ = false;
+        recoveryFailed_ = false;
+        surfaceLost_ = false;
+        lastPresentResult_ = PresentResult::Success;
+    }
+
     void onSwapchainRecreated()
     {
         if (isTerminalError()) {
@@ -140,6 +172,14 @@ public:
     VkSemaphore acquireSemaphore(uint32_t i) const { return (i < kFramesInFlight) ? acquireSemaphores_[i] : VK_NULL_HANDLE; }
     VkSemaphore releaseSemaphore(uint32_t i) const { return (i < kFramesInFlight) ? releaseSemaphores_[i] : VK_NULL_HANDLE; }
     VkCommandBuffer commandBuffer(uint32_t i) const { return (i < kFramesInFlight) ? commandBuffers_[i] : VK_NULL_HANDLE; }
+
+    VkDevice device() const { return device_; }
+    VkQueue queue() const { return queue_; }
+    VkSwapchainKHR swapchain() const { return swapchain_; }
+    const std::vector<VkImage>& swapchainImages() const { return swapchainImages_; }
+    const VkSemaphore* callerAcquireSemaphores() const { return pCallerAcquireSemaphores_; }
+    const VkSemaphore* callerReleaseSemaphores() const { return pCallerReleaseSemaphores_; }
+    const VkFence* callerInFlightFences() const { return pCallerInFlightFences_; }
 
     bool resetFrameSyncObjects(uint32_t frameIndex)
     {

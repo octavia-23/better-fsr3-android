@@ -6,9 +6,14 @@
 #include "swapchain_sync.h"
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 struct ANativeWindow;
+
+#ifdef DeviceCapabilities
+#undef DeviceCapabilities
+#endif
 
 // Everything Arm ASR and FSR 3.1.4 need to know about the device. Checked once
 // at startup and logged, because the prebuilt SPIR-V blobs shipped with the
@@ -36,6 +41,55 @@ class VkContext {
 public:
     static constexpr uint32_t kFramesInFlight = 2;
 
+#if defined(FFXM_VK_CONTEXT_TESTING)
+    struct TestSeam {
+        bool failInstanceCreation        = false;
+        bool failSurfaceCreation         = false;
+        bool failPhysicalDevice          = false;
+        bool failDeviceCreation          = false;
+        bool failSwapchainCreation       = false;
+        bool failFrameResources          = false;
+        int  timestampValidBitsOverride  = -1;
+        int  failSemaphoreIndex          = -1;
+        int  failFenceIndex              = -1;
+
+        uint32_t waitIdleCalls           = 0;
+        uint32_t semaphoreDestructions   = 0;
+        uint32_t fenceDestructions       = 0;
+        uint32_t commandPoolDestructions = 0;
+        uint32_t queryPoolDestructions   = 0;
+        uint32_t imageViewDestructions   = 0;
+        uint32_t swapchainDestructions   = 0;
+        uint32_t deviceDestructions      = 0;
+        uint32_t surfaceDestructions     = 0;
+        uint32_t instanceDestructions    = 0;
+
+        void resetCounters() {
+            waitIdleCalls           = 0;
+            semaphoreDestructions   = 0;
+            fenceDestructions       = 0;
+            commandPoolDestructions = 0;
+            queryPoolDestructions   = 0;
+            imageViewDestructions   = 0;
+            swapchainDestructions   = 0;
+            deviceDestructions      = 0;
+            surfaceDestructions     = 0;
+            instanceDestructions    = 0;
+        }
+    };
+
+    void setTestSeam(TestSeam* seam) { testSeam_ = seam; }
+    TestSeam* testSeam() const { return testSeam_; }
+    bool isInitialized() const { return device_ != VK_NULL_HANDLE && swapchain_ != VK_NULL_HANDLE; }
+#endif
+
+    VkContext();
+    ~VkContext();
+    VkContext(const VkContext&) = delete;
+    VkContext& operator=(const VkContext&) = delete;
+    VkContext(VkContext&&) = delete;
+    VkContext& operator=(VkContext&&) = delete;
+
     bool init(ANativeWindow* window);
     void destroy();
 
@@ -48,10 +102,13 @@ public:
     bool recreateSwapchain(ANativeWindow* window);
 
     VkInstance       instance()       const { return instance_; }
+    VkSurfaceKHR     surface()        const { return surface_; }
     VkPhysicalDevice physicalDevice() const { return physicalDevice_; }
     VkDevice         device()         const { return device_; }
     VkQueue          queue()          const { return queue_; }
     uint32_t         queueFamily()    const { return queueFamily_; }
+    VkSwapchainKHR   swapchain()      const { return swapchain_; }
+    uint32_t         currentFrameSlot() const { return sync_.frame(); }
     VkCommandBuffer  commandBuffer()  const { return commandBuffers_[sync_.frame()]; }
     VkExtent2D       swapchainExtent()const { return swapchainExtent_; }
     VkFormat         swapchainFormat()const { return swapchainFormat_; }
@@ -67,6 +124,21 @@ public:
     arm::SwapchainSync& sync() { return sync_; }
     const arm::SwapchainSync& sync() const { return sync_; }
 
+    // GPU timestamp profiling support
+    VkQueryPool queryPool(uint32_t frameSlot) const {
+        return (frameSlot < kFramesInFlight) ? queryPools_[frameSlot] : VK_NULL_HANDLE;
+    }
+    uint32_t timestampValidBits() const { return timestampValidBits_; }
+    float    timestampPeriod()    const { return timestampPeriod_; }
+    const std::string& deviceName() const { return deviceName_; }
+    uint32_t driverVersion()      const { return driverVersion_; }
+    uint32_t apiVersion()         const { return apiVersion_; }
+
+    VkResult getQueryPoolResults(uint32_t frameSlot, uint32_t firstQuery, uint32_t queryCount,
+                                 size_t dataSize, void* data, VkDeviceSize stride,
+                                 VkQueryResultFlags flags) const;
+    void cmdResetQueryPool(VkCommandBuffer cmd, uint32_t frameSlot, uint32_t firstQuery, uint32_t queryCount) const;
+
 private:
     bool createInstance();
     bool createSurface(ANativeWindow* window);
@@ -76,6 +148,9 @@ private:
     void destroySwapchain();
     bool createFrameResources();
 
+#if defined(FFXM_VK_CONTEXT_TESTING)
+    TestSeam*        testSeam_       = nullptr;
+#endif
     VkInstance       instance_       = VK_NULL_HANDLE;
     VkSurfaceKHR     surface_        = VK_NULL_HANDLE;
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
@@ -94,6 +169,13 @@ private:
     VkSemaphore     acquireSemaphores_[kFramesInFlight] = {};
     VkSemaphore     releaseSemaphores_[kFramesInFlight] = {};
     VkFence         inFlightFences_[kFramesInFlight] = {};
+
+    VkQueryPool     queryPools_[kFramesInFlight] = {};
+    uint32_t        timestampValidBits_ = 0;
+    float           timestampPeriod_    = 0.0f;
+    std::string     deviceName_;
+    uint32_t        driverVersion_      = 0;
+    uint32_t        apiVersion_         = 0;
 
     arm::SwapchainSync sync_;
     DeviceCapabilities caps_;

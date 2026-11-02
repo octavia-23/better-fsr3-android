@@ -7,6 +7,7 @@
 
 #include "common.h"
 #include "fsr3_upscaler.h"
+#include "gpu_profiler.h"
 #include "scene.h"
 #include "swapchain_recovery.h"
 #include "vk_context.h"
@@ -20,9 +21,10 @@
 namespace {
 
 struct App {
-    VkContext    ctx;
-    Scene        scene;
-    Fsr3Upscaler upscaler;
+    VkContext       ctx;
+    Scene           scene;
+    Fsr3Upscaler    upscaler;
+    arm::GpuProfiler profiler;
 
     bool     vulkanReady = false;
     bool     renderReady = false;
@@ -75,6 +77,7 @@ bool createSizedResources(App& app)
 void destroySizedResources(App& app)
 {
     app.ctx.waitIdle();
+    app.profiler.onContextReset();
     app.upscaler.destroy();
     app.scene.destroy(app.ctx);
 }
@@ -142,6 +145,7 @@ bool initRendering(App& app, ANativeWindow* window)
     if (!createSizedResources(app))
         return false;
 
+    app.profiler.initFromEnvironmentOrDefaults();
     app.lastTimeSeconds = nowSeconds();
     app.renderReady     = true;
     app.swapchainDirty  = false;
@@ -153,6 +157,10 @@ void teardownRendering(App& app)
 {
     if (app.vulkanReady)
         app.ctx.waitIdle();
+    if (app.profiler.sampleCount() > 0 && !app.profiler.isComplete()) {
+        app.profiler.saveReports(app.ctx, app.renderExtent, app.displayExtent);
+    }
+    app.profiler.onContextReset();
     app.upscaler.destroy();
     if (app.vulkanReady)
         app.scene.destroy(app.ctx);
@@ -211,7 +219,15 @@ void drawFrame(App& app)
         return;
     }
 
+    const uint32_t frameSlot = app.ctx.currentFrameSlot();
     VkCommandBuffer cmd = app.ctx.commandBuffer();
+
+    arm::FfxmVkProfilingDescription profilingDesc{};
+    const bool profilingActive = app.profiler.onBeginFrame(frameSlot, cmd, app.ctx, &profilingDesc);
+
+    if (app.profiler.isComplete()) {
+        app.profiler.saveReports(app.ctx, app.renderExtent, app.displayExtent);
+    }
 
     float jitterX = 0.0f, jitterY = 0.0f;
     app.upscaler.jitterForFrame(app.frameIndex, &jitterX, &jitterY);
@@ -234,8 +250,10 @@ void drawFrame(App& app)
     app.scene.barrierForUpscale(cmd);
 
     const bool dispatchOk = app.upscaler.dispatch(cmd, app.scene, app.renderExtent, delta * 1000.0f, app.frameIndex,
-                                                  app.frameIndex == 0);
+                                                  app.frameIndex == 0,
+                                                  profilingActive ? &profilingDesc : nullptr);
     if (!dispatchOk) {
+        app.profiler.onFrameAborted(frameSlot);
         LOGE("FSR 3.1.4 dispatch failed at frame %d; recovering via abortFrame", app.frameIndex);
         if (!app.ctx.abortFrame(imageIndex)) {
             if (app.ctx.sync().isTerminalError()) {
@@ -255,6 +273,7 @@ void drawFrame(App& app)
                          app.ctx.swapchainExtent());
 
     if (!app.ctx.endFrame(imageIndex)) {
+        app.profiler.onFrameAborted(frameSlot);
         if (app.ctx.sync().isTerminalError()) {
             LOGE("Terminal Vulkan error (%s) during Android endFrame; aborting rendering loop",
                  app.ctx.sync().isDeviceLost() ? "device lost" :
@@ -264,6 +283,10 @@ void drawFrame(App& app)
             return;
         }
         app.swapchainDirty = true;
+    } else {
+        if (profilingActive) {
+            app.profiler.onFrameSubmitted(frameSlot, profilingDesc.mode, app.frameIndex);
+        }
     }
 
     if (app.frameIndex == 0)

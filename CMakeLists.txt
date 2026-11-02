@@ -151,9 +151,13 @@ if(BUILD_TESTING)
             src/components)
         target_compile_definitions(test_milestone2 PRIVATE FFXM_FSR=1)
     endif()
+    target_compile_definitions(test_milestone2 PRIVATE FFXM_VK_CONTEXT_TESTING=1)
+    target_sources(test_milestone2 PRIVATE
+        samples/android/app/src/main/cpp/vk_context.cpp)
     target_include_directories(test_milestone2 PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/samples/common
+        ${CMAKE_CURRENT_SOURCE_DIR}/samples/android/app/src/main/cpp
         ${FFXM_INCLUDE_PATH}
         ${FFXM_HOST_PATH}
         ${FFXM_GPU_PATH}

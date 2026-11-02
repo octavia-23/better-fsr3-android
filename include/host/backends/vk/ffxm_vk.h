@@ -44,6 +44,7 @@
 #include <vulkan/vulkan.h>
 #endif
 
+#include <host/ffxm_gpu_timestamps.h>
 #include <host/ffxm_interface.h>
 
 namespace arm
@@ -153,14 +154,35 @@ FFXM_API FfxmErrorCode ExecuteGpuJobsVK(FfxmInterface* backendInterface, FfxmCom
 /// @ingroup VKBackend
 FFXM_API FfxmErrorCode UnregisterResourcesVK(FfxmInterface* backendInterface, FfxmCommandList commandList, FfxmUInt32 effectContextId);
 
+/// Structure specifying active GPU timestamp profiling parameters for a dispatch.
+typedef struct FfxmVkProfilingDescription {
+    FfxmGpuProfilingMode mode;             ///< Disabled, Total-only, or Per-pass
+    VkQueryPool          queryPool;        ///< Active query pool for this frame slot
+    uint32_t             startQueryIndex;  ///< Starting query index in queryPool
+    uint32_t             maxQueryCount;    ///< Available queries in queryPool
+} FfxmVkProfilingDescription;
+
+/// Configure or clear profiling on the Vulkan backend context for the upcoming dispatch.
+/// Passing NULL or a description with mode == FFXM_GPU_PROFILING_MODE_DISABLED disables profiling.
+FFXM_API FfxmErrorCode ffxmSetProfilingDescriptionVK(
+    FfxmInterface* backendInterface,
+    const FfxmVkProfilingDescription* profilingDesc);
+
+/// Query current profiling configuration on the Vulkan backend context.
+FFXM_API FfxmErrorCode ffxmGetProfilingDescriptionVK(
+    const FfxmInterface* backendInterface,
+    FfxmVkProfilingDescription* outProfilingDesc);
+
 #if defined(FFXM_ENABLE_TEST_HOOKS)
 // Test inspection and injection helpers (gated for testing only)
 typedef FfxmErrorCode (*FfxmTestJobExecutionHook)(FfxmUInt32 jobIndex, const FfxmGpuJobDescription* job);
 typedef VkResult (VKAPI_PTR *FfxmTestCreateImageViewHook)(VkDevice device, const VkImageViewCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkImageView* pView);
 typedef void (VKAPI_PTR *FfxmTestDestroyImageViewHook)(VkDevice device, VkImageView imageView, const VkAllocationCallbacks* pAllocator);
+typedef void (*FfxmTestWriteTimestampHook)(VkCommandBuffer cmd, VkPipelineStageFlagBits stage, VkQueryPool pool, uint32_t query);
 
 FFXM_API void ffxmSetTestJobExecutionHookVK(FfxmTestJobExecutionHook hook);
 FFXM_API void ffxmTestSetImageViewHooksVK(FfxmTestCreateImageViewHook createHook, FfxmTestDestroyImageViewHook destroyHook);
+FFXM_API void ffxmSetTestWriteTimestampHookVK(FfxmTestWriteTimestampHook hook);
 FFXM_API FfxmUInt32 ffxmTestGetNextDynamicResourceViewVK(FfxmInterface* backendInterface, FfxmUInt32 effectContextId, FfxmUInt32 frameIndex);
 FFXM_API FfxmResourceStates ffxmTestGetResourceCurrentStateVK(FfxmInterface* backendInterface, FfxmUInt32 resourceIndex);
 FFXM_API FfxmResourceStates ffxmTestGetResourceCommittedStateVK(FfxmInterface* backendInterface, FfxmUInt32 resourceIndex);

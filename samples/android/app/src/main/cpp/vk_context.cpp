@@ -3,7 +3,9 @@
 
 #include "vk_context.h"
 
+#if defined(__ANDROID__)
 #include <android/native_window.h>
+#endif
 #include <vulkan/vulkan_android.h>
 
 #include <cstring>
@@ -22,8 +24,25 @@ bool hasExtension(const std::vector<VkExtensionProperties>& list, const char* na
 
 } // namespace
 
+VkContext::VkContext() = default;
+
+VkContext::~VkContext()
+{
+    destroy();
+}
+
 bool VkContext::createInstance()
 {
+#if defined(FFXM_VK_CONTEXT_TESTING)
+    if (testSeam_) {
+        if (testSeam_->failInstanceCreation) {
+            return false;
+        }
+        instance_ = (VkInstance)(uintptr_t)0x1;
+        return true;
+    }
+#endif
+
     uint32_t loaderVersion = VK_API_VERSION_1_0;
     auto enumerateInstanceVersion = (PFN_vkEnumerateInstanceVersion)vkGetInstanceProcAddr(
         VK_NULL_HANDLE, "vkEnumerateInstanceVersion");
@@ -56,6 +75,16 @@ bool VkContext::createInstance()
 
 bool VkContext::createSurface(ANativeWindow* window)
 {
+#if defined(FFXM_VK_CONTEXT_TESTING)
+    if (testSeam_) {
+        if (testSeam_->failSurfaceCreation || !window) {
+            return false;
+        }
+        surface_ = (VkSurfaceKHR)(uintptr_t)0x2;
+        return true;
+    }
+#endif
+
     VkAndroidSurfaceCreateInfoKHR ci = {VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR};
     ci.window = window;
     VK_CHECK(vkCreateAndroidSurfaceKHR(instance_, &ci, nullptr, &surface_));
@@ -64,6 +93,34 @@ bool VkContext::createSurface(ANativeWindow* window)
 
 bool VkContext::pickPhysicalDevice()
 {
+#if defined(FFXM_VK_CONTEXT_TESTING)
+    if (testSeam_) {
+        if (testSeam_->failPhysicalDevice) {
+            return false;
+        }
+        physicalDevice_ = (VkPhysicalDevice)(uintptr_t)0x3;
+        queueFamily_    = 0;
+        caps_.apiVersion               = VK_API_VERSION_1_2;
+        caps_.spirv14                  = true;
+        caps_.shaderFloat16            = true;
+        caps_.storage16bit             = true;
+        caps_.storageExtendedFormats   = true;
+        caps_.storageWriteWithoutFormat= true;
+        caps_.storageFormatsSupported  = true;
+        caps_.sampledFormatsSupported  = true;
+        if (testSeam_->timestampValidBitsOverride >= 0) {
+            timestampValidBits_ = static_cast<uint32_t>(testSeam_->timestampValidBitsOverride);
+        } else {
+            timestampValidBits_ = 64;
+        }
+        timestampPeriod_ = 1.0f;
+        deviceName_      = "Mock Device";
+        driverVersion_   = VK_MAKE_VERSION(1, 0, 0);
+        apiVersion_      = VK_API_VERSION_1_2;
+        return true;
+    }
+#endif
+
     uint32_t count = 0;
     VK_CHECK(vkEnumeratePhysicalDevices(instance_, &count, nullptr));
     if (count == 0) {
@@ -105,6 +162,28 @@ bool VkContext::pickPhysicalDevice()
          VK_API_VERSION_MAJOR(deviceProps.apiVersion),
          VK_API_VERSION_MINOR(deviceProps.apiVersion),
          VK_API_VERSION_PATCH(deviceProps.apiVersion));
+
+    deviceName_      = deviceProps.deviceName;
+    driverVersion_   = deviceProps.driverVersion;
+    apiVersion_      = deviceProps.apiVersion;
+    timestampPeriod_ = deviceProps.limits.timestampPeriod;
+
+    uint32_t qfCount = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice_, &qfCount, nullptr);
+    if (qfCount > 0) {
+        std::vector<VkQueueFamilyProperties> qfProps(qfCount);
+        vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice_, &qfCount, qfProps.data());
+        if (queueFamily_ < qfCount) {
+            timestampValidBits_ = qfProps[queueFamily_].timestampValidBits;
+        }
+    }
+
+    if (timestampValidBits_ == 0) {
+        LOGI("GPU timestamp profiling: unsupported (timestampValidBits == 0)");
+    } else {
+        LOGI("GPU timestamp profiling: supported (%u valid bits, period %.3f ns)",
+             timestampValidBits_, timestampPeriod_);
+    }
 
     // Arm ASR ships prebuilt SPIR-V 1.4 blobs built with -enable-16bit-types.
     // Establish up front whether this device can consume them at all.
@@ -219,6 +298,17 @@ bool VkContext::pickPhysicalDevice()
 
 bool VkContext::createDevice()
 {
+#if defined(FFXM_VK_CONTEXT_TESTING)
+    if (testSeam_) {
+        if (testSeam_->failDeviceCreation) {
+            return false;
+        }
+        device_ = (VkDevice)(uintptr_t)0x4;
+        queue_  = (VkQueue)(uintptr_t)0x5;
+        return true;
+    }
+#endif
+
     uint32_t extCount = 0;
     vkEnumerateDeviceExtensionProperties(physicalDevice_, nullptr, &extCount, nullptr);
     std::vector<VkExtensionProperties> available(extCount);
@@ -281,6 +371,20 @@ bool VkContext::createDevice()
 
 bool VkContext::createSwapchain()
 {
+#if defined(FFXM_VK_CONTEXT_TESTING)
+    if (testSeam_) {
+        if (testSeam_->failSwapchainCreation) {
+            return false;
+        }
+        swapchain_           = (VkSwapchainKHR)(uintptr_t)0x10;
+        swapchainExtent_     = {1920, 1080};
+        swapchainFormat_     = VK_FORMAT_R8G8B8A8_UNORM;
+        swapchainImages_     = {(VkImage)(uintptr_t)0x20, (VkImage)(uintptr_t)0x21};
+        swapchainImageViews_ = {(VkImageView)(uintptr_t)0x30, (VkImageView)(uintptr_t)0x31};
+        return true;
+    }
+#endif
+
     VkSurfaceCapabilitiesKHR surfaceCaps = {};
     VkResult capsRes = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice_, surface_, &surfaceCaps);
     if (capsRes != VK_SUCCESS) {
@@ -344,7 +448,7 @@ bool VkContext::createSwapchain()
     swapchainImages_.resize(count);
     VK_CHECK(vkGetSwapchainImagesKHR(device_, swapchain_, &count, swapchainImages_.data()));
 
-    swapchainImageViews_.resize(count);
+    swapchainImageViews_.assign(count, VK_NULL_HANDLE);
     for (uint32_t i = 0; i < count; ++i) {
         VkImageViewCreateInfo viewCi = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
         viewCi.image                       = swapchainImages_[i];
@@ -363,19 +467,68 @@ bool VkContext::createSwapchain()
 
 void VkContext::destroySwapchain()
 {
-    for (VkImageView view : swapchainImageViews_)
-        vkDestroyImageView(device_, view, nullptr);
+    if (device_ != VK_NULL_HANDLE) {
+        for (VkImageView view : swapchainImageViews_) {
+            if (view != VK_NULL_HANDLE) {
+#if defined(FFXM_VK_CONTEXT_TESTING)
+                if (testSeam_) {
+                    testSeam_->imageViewDestructions++;
+                } else
+#endif
+                {
+                    vkDestroyImageView(device_, view, nullptr);
+                }
+            }
+        }
+        if (swapchain_ != VK_NULL_HANDLE) {
+#if defined(FFXM_VK_CONTEXT_TESTING)
+            if (testSeam_) {
+                testSeam_->swapchainDestructions++;
+            } else
+#endif
+            {
+                vkDestroySwapchainKHR(device_, swapchain_, nullptr);
+            }
+        }
+    }
     swapchainImageViews_.clear();
     swapchainImages_.clear();
-
-    if (swapchain_ != VK_NULL_HANDLE) {
-        vkDestroySwapchainKHR(device_, swapchain_, nullptr);
-        swapchain_ = VK_NULL_HANDLE;
-    }
+    swapchain_       = VK_NULL_HANDLE;
+    swapchainFormat_ = VK_FORMAT_UNDEFINED;
+    swapchainExtent_ = {0, 0};
 }
 
 bool VkContext::createFrameResources()
 {
+#if defined(FFXM_VK_CONTEXT_TESTING)
+    if (testSeam_) {
+        if (testSeam_->failFrameResources) {
+            return false;
+        }
+        commandPool_ = (VkCommandPool)(uintptr_t)0x50;
+        for (uint32_t i = 0; i < kFramesInFlight; ++i) {
+            commandBuffers_[i] = (VkCommandBuffer)(uintptr_t)(0x60 + i);
+            if (testSeam_->failSemaphoreIndex >= 0 && (int)i == testSeam_->failSemaphoreIndex) {
+                return false;
+            }
+            acquireSemaphores_[i] = (VkSemaphore)(uintptr_t)(0x70 + i);
+            releaseSemaphores_[i] = (VkSemaphore)(uintptr_t)(0x80 + i);
+            if (testSeam_->failFenceIndex >= 0 && (int)i == testSeam_->failFenceIndex) {
+                return false;
+            }
+            inFlightFences_[i] = (VkFence)(uintptr_t)(0x90 + i);
+            if (timestampValidBits_ > 0) {
+                queryPools_[i] = (VkQueryPool)(uintptr_t)(0x100 + i);
+            } else {
+                queryPools_[i] = VK_NULL_HANDLE;
+            }
+        }
+        sync_.init(device_, queue_, swapchain_, swapchainImages_, commandBuffers_,
+                   acquireSemaphores_, releaseSemaphores_, inFlightFences_);
+        return true;
+    }
+#endif
+
     VkCommandPoolCreateInfo poolCi = {VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
     poolCi.flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     poolCi.queueFamilyIndex = queueFamily_;
@@ -397,6 +550,24 @@ bool VkContext::createFrameResources()
         VK_CHECK(vkCreateFence(device_, &fenceCi, nullptr, &inFlightFences_[i]));
     }
 
+    if (timestampValidBits_ > 0) {
+        VkQueryPoolCreateInfo qpCi = {VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+        qpCi.queryType  = VK_QUERY_TYPE_TIMESTAMP;
+        qpCi.queryCount = 32;
+        for (uint32_t i = 0; i < kFramesInFlight; ++i) {
+            VkResult qpRes = vkCreateQueryPool(device_, &qpCi, nullptr, &queryPools_[i]);
+            if (qpRes != VK_SUCCESS) {
+                LOGW("vkCreateQueryPool failed for frame slot %u (VkResult %d); profiling disabled", i, (int)qpRes);
+                for (uint32_t j = 0; j < i; ++j) {
+                    vkDestroyQueryPool(device_, queryPools_[j], nullptr);
+                    queryPools_[j] = VK_NULL_HANDLE;
+                }
+                timestampValidBits_ = 0;
+                break;
+            }
+        }
+    }
+
     sync_.init(device_, queue_, swapchain_, swapchainImages_, commandBuffers_, acquireSemaphores_, releaseSemaphores_, inFlightFences_);
     sync_.initStandardFunctions();
     return true;
@@ -404,8 +575,53 @@ bool VkContext::createFrameResources()
 
 bool VkContext::init(ANativeWindow* window)
 {
-    return createInstance() && createSurface(window) && pickPhysicalDevice() &&
-           createDevice() && createSwapchain() && createFrameResources();
+    if (instance_ != VK_NULL_HANDLE || device_ != VK_NULL_HANDLE || surface_ != VK_NULL_HANDLE) {
+        LOGW("VkContext::init called on existing or partial context; resetting prior state");
+        destroy();
+    }
+
+    if (!window) {
+        LOGE("VkContext::init failed: invalid window pointer");
+        return false;
+    }
+
+    if (!createInstance()) {
+        LOGE("VkContext::init failed at stage: createInstance");
+        destroy();
+        return false;
+    }
+
+    if (!createSurface(window)) {
+        LOGE("VkContext::init failed at stage: createSurface");
+        destroy();
+        return false;
+    }
+
+    if (!pickPhysicalDevice()) {
+        LOGE("VkContext::init failed at stage: pickPhysicalDevice");
+        destroy();
+        return false;
+    }
+
+    if (!createDevice()) {
+        LOGE("VkContext::init failed at stage: createDevice");
+        destroy();
+        return false;
+    }
+
+    if (!createSwapchain()) {
+        LOGE("VkContext::init failed at stage: createSwapchain");
+        destroy();
+        return false;
+    }
+
+    if (!createFrameResources()) {
+        LOGE("VkContext::init failed at stage: createFrameResources");
+        destroy();
+        return false;
+    }
+
+    return true;
 }
 
 bool VkContext::recreateSwapchain(ANativeWindow*)
@@ -414,15 +630,22 @@ bool VkContext::recreateSwapchain(ANativeWindow*)
         return false;
     }
 
-    VkResult waitRes = vkDeviceWaitIdle(device_);
-    if (waitRes != VK_SUCCESS) {
-        LOGE("vkDeviceWaitIdle failed during swapchain recreation with VkResult %d", (int)waitRes);
-        if (waitRes == VK_ERROR_DEVICE_LOST) {
-            sync_.notifyDeviceLost();
-        } else {
-            sync_.notifyRecoveryFailed();
+#if defined(FFXM_VK_CONTEXT_TESTING)
+    if (testSeam_) {
+        testSeam_->waitIdleCalls++;
+    } else
+#endif
+    {
+        VkResult waitRes = vkDeviceWaitIdle(device_);
+        if (waitRes != VK_SUCCESS) {
+            LOGE("vkDeviceWaitIdle failed during swapchain recreation with VkResult %d", (int)waitRes);
+            if (waitRes == VK_ERROR_DEVICE_LOST) {
+                sync_.notifyDeviceLost();
+            } else {
+                sync_.notifyRecoveryFailed();
+            }
+            return false;
         }
-        return false;
     }
 
     destroySwapchain();
@@ -463,28 +686,188 @@ uint32_t VkContext::findMemoryType(uint32_t typeBits, VkMemoryPropertyFlags prop
 
 bool VkContext::waitIdle() const
 {
+    if (device_ == VK_NULL_HANDLE) {
+        return false;
+    }
+#if defined(FFXM_VK_CONTEXT_TESTING)
+    if (testSeam_) {
+        testSeam_->waitIdleCalls++;
+        return true;
+    }
+#endif
     VK_CHECK(vkDeviceWaitIdle(device_));
     return true;
 }
 
 void VkContext::destroy()
 {
-    if (device_ == VK_NULL_HANDLE)
-        return;
-
-    vkDeviceWaitIdle(device_);
-
-    for (uint32_t i = 0; i < kFramesInFlight; ++i) {
-        vkDestroySemaphore(device_, acquireSemaphores_[i], nullptr);
-        vkDestroySemaphore(device_, releaseSemaphores_[i], nullptr);
-        vkDestroyFence(device_, inFlightFences_[i], nullptr);
+    // 1. Wait for the device to become idle when a valid device exists.
+    if (device_ != VK_NULL_HANDLE) {
+#if defined(FFXM_VK_CONTEXT_TESTING)
+        if (testSeam_) {
+            testSeam_->waitIdleCalls++;
+        } else
+#endif
+        {
+            vkDeviceWaitIdle(device_);
+        }
     }
-    vkDestroyCommandPool(device_, commandPool_, nullptr);
-    destroySwapchain();
-    vkDestroyDevice(device_, nullptr);
-    device_ = VK_NULL_HANDLE;
 
-    vkDestroySurfaceKHR(instance_, surface_, nullptr);
-    vkDestroyInstance(instance_, nullptr);
-    instance_ = VK_NULL_HANDLE;
+    // 2. Destroy valid device-owned synchronization objects and command resources.
+    if (device_ != VK_NULL_HANDLE) {
+        for (uint32_t i = 0; i < kFramesInFlight; ++i) {
+            if (acquireSemaphores_[i] != VK_NULL_HANDLE) {
+#if defined(FFXM_VK_CONTEXT_TESTING)
+                if (testSeam_) {
+                    testSeam_->semaphoreDestructions++;
+                } else
+#endif
+                {
+                    vkDestroySemaphore(device_, acquireSemaphores_[i], nullptr);
+                }
+                acquireSemaphores_[i] = VK_NULL_HANDLE;
+            }
+            if (releaseSemaphores_[i] != VK_NULL_HANDLE) {
+#if defined(FFXM_VK_CONTEXT_TESTING)
+                if (testSeam_) {
+                    testSeam_->semaphoreDestructions++;
+                } else
+#endif
+                {
+                    vkDestroySemaphore(device_, releaseSemaphores_[i], nullptr);
+                }
+                releaseSemaphores_[i] = VK_NULL_HANDLE;
+            }
+            if (inFlightFences_[i] != VK_NULL_HANDLE) {
+#if defined(FFXM_VK_CONTEXT_TESTING)
+                if (testSeam_) {
+                    testSeam_->fenceDestructions++;
+                } else
+#endif
+                {
+                    vkDestroyFence(device_, inFlightFences_[i], nullptr);
+                }
+                inFlightFences_[i] = VK_NULL_HANDLE;
+            }
+            commandBuffers_[i] = VK_NULL_HANDLE;
+        }
+
+        if (commandPool_ != VK_NULL_HANDLE) {
+#if defined(FFXM_VK_CONTEXT_TESTING)
+            if (testSeam_) {
+                testSeam_->commandPoolDestructions++;
+            } else
+#endif
+            {
+                vkDestroyCommandPool(device_, commandPool_, nullptr);
+            }
+            commandPool_ = VK_NULL_HANDLE;
+        }
+
+        for (uint32_t i = 0; i < kFramesInFlight; ++i) {
+            if (queryPools_[i] != VK_NULL_HANDLE) {
+#if defined(FFXM_VK_CONTEXT_TESTING)
+                if (testSeam_) {
+                    testSeam_->queryPoolDestructions++;
+                } else
+#endif
+                {
+                    vkDestroyQueryPool(device_, queryPools_[i], nullptr);
+                }
+                queryPools_[i] = VK_NULL_HANDLE;
+            }
+        }
+    } else {
+        for (uint32_t i = 0; i < kFramesInFlight; ++i) {
+            acquireSemaphores_[i] = VK_NULL_HANDLE;
+            releaseSemaphores_[i] = VK_NULL_HANDLE;
+            inFlightFences_[i]    = VK_NULL_HANDLE;
+            commandBuffers_[i]    = VK_NULL_HANDLE;
+            queryPools_[i]        = VK_NULL_HANDLE;
+        }
+        commandPool_ = VK_NULL_HANDLE;
+    }
+
+    // 3. Destroy swapchain image views and the swapchain when a valid device exists.
+    destroySwapchain();
+
+    // 4. Destroy the logical device.
+    if (device_ != VK_NULL_HANDLE) {
+#if defined(FFXM_VK_CONTEXT_TESTING)
+        if (testSeam_) {
+            testSeam_->deviceDestructions++;
+        } else
+#endif
+        {
+            vkDestroyDevice(device_, nullptr);
+        }
+        device_ = VK_NULL_HANDLE;
+    }
+    physicalDevice_ = VK_NULL_HANDLE;
+    queue_          = VK_NULL_HANDLE;
+    queueFamily_    = 0;
+
+    // 5. Destroy the surface when both surface and instance are valid.
+    if (instance_ != VK_NULL_HANDLE && surface_ != VK_NULL_HANDLE) {
+#if defined(FFXM_VK_CONTEXT_TESTING)
+        if (testSeam_) {
+            testSeam_->surfaceDestructions++;
+        } else
+#endif
+        {
+            vkDestroySurfaceKHR(instance_, surface_, nullptr);
+        }
+        surface_ = VK_NULL_HANDLE;
+    } else {
+        surface_ = VK_NULL_HANDLE;
+    }
+
+    // 6. Destroy the instance.
+    if (instance_ != VK_NULL_HANDLE) {
+#if defined(FFXM_VK_CONTEXT_TESTING)
+        if (testSeam_) {
+            testSeam_->instanceDestructions++;
+        } else
+#endif
+        {
+            vkDestroyInstance(instance_, nullptr);
+        }
+        instance_ = VK_NULL_HANDLE;
+    }
+
+    // 7. Reset capability and synchronization state.
+    caps_ = DeviceCapabilities{};
+    timestampValidBits_ = 0;
+    timestampPeriod_    = 0.0f;
+    deviceName_.clear();
+    driverVersion_      = 0;
+    apiVersion_         = 0;
+    sync_.reset();
+}
+
+VkResult VkContext::getQueryPoolResults(uint32_t frameSlot, uint32_t firstQuery, uint32_t queryCount,
+                                        size_t dataSize, void* data, VkDeviceSize stride,
+                                        VkQueryResultFlags flags) const
+{
+    if (frameSlot >= kFramesInFlight || queryPools_[frameSlot] == VK_NULL_HANDLE || device_ == VK_NULL_HANDLE) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+#if defined(FFXM_VK_CONTEXT_TESTING)
+    if (testSeam_) {
+        return VK_SUCCESS;
+    }
+#endif
+    return vkGetQueryPoolResults(device_, queryPools_[frameSlot], firstQuery, queryCount, dataSize, data, stride, flags);
+}
+
+void VkContext::cmdResetQueryPool(VkCommandBuffer cmd, uint32_t frameSlot, uint32_t firstQuery, uint32_t queryCount) const
+{
+    if (frameSlot < kFramesInFlight && queryPools_[frameSlot] != VK_NULL_HANDLE && cmd != VK_NULL_HANDLE) {
+#if defined(FFXM_VK_CONTEXT_TESTING)
+        if (testSeam_) {
+            return;
+        }
+#endif
+        vkCmdResetQueryPool(cmd, queryPools_[frameSlot], firstQuery, queryCount);
+    }
 }

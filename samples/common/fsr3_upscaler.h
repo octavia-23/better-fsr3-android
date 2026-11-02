@@ -88,8 +88,13 @@ public:
 
     // Records the upscale for this frame across all seven compute passes.
     // `frameIndex` drives the jitter sequence; `reset` should be true on camera cuts.
+    // `profilingDesc` optionally supplies active query pool and range for GPU timestamp profiling.
     bool dispatch(VkCommandBuffer cmd, const Scene& scene, VkExtent2D renderExtent,
-                  float frameTimeMs, int32_t frameIndex, bool reset);
+                  float frameTimeMs, int32_t frameIndex, bool reset,
+                  const arm::FfxmVkProfilingDescription* profilingDesc = nullptr);
+
+    const arm::FfxmInterface& backendInterface() const { return interface_; }
+    arm::FfxmInterface& backendInterface() { return interface_; }
 
     // Sub-pixel jitter in pixels for `frameIndex`, to be folded into the camera.
     void jitterForFrame(int32_t frameIndex, float* outX, float* outY) const;

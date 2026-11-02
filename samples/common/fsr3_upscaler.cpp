@@ -260,10 +260,36 @@ void Fsr3Upscaler::jitterForFrame(int32_t frameIndex, float* outX, float* outY) 
 }
 
 bool Fsr3Upscaler::dispatch(VkCommandBuffer cmd, const Scene& scene, VkExtent2D renderExtent,
-                            float frameTimeMs, int32_t frameIndex, bool reset)
+                            float frameTimeMs, int32_t frameIndex, bool reset,
+                            const arm::FfxmVkProfilingDescription* profilingDesc)
 {
     if (!contextCreated_)
         return false;
+
+    // Scoped session to safely configure and automatically clear profiling on interface_
+    class ScopedVkProfilingSession {
+    public:
+        ScopedVkProfilingSession(arm::FfxmInterface* iface, const arm::FfxmVkProfilingDescription* desc)
+            : iface_(iface)
+        {
+            if (iface_ && desc && desc->mode != FFXM_GPU_PROFILING_MODE_DISABLED) {
+                arm::ffxmSetProfilingDescriptionVK(iface_, desc);
+                active_ = true;
+            }
+        }
+        ~ScopedVkProfilingSession() {
+            if (iface_ && active_) {
+                arm::ffxmSetProfilingDescriptionVK(iface_, nullptr);
+            }
+        }
+        ScopedVkProfilingSession(const ScopedVkProfilingSession&) = delete;
+        ScopedVkProfilingSession& operator=(const ScopedVkProfilingSession&) = delete;
+    private:
+        arm::FfxmInterface* iface_ = nullptr;
+        bool active_ = false;
+    };
+
+    ScopedVkProfilingSession profilingSession(&interface_, profilingDesc);
 
     float jitterX = 0.0f, jitterY = 0.0f;
     jitterForFrame(frameIndex, &jitterX, &jitterY);

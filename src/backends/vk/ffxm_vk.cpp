@@ -251,6 +251,7 @@ typedef struct BackendContext_VK {
         PFN_vkCmdBeginRenderPass            vkCmdBeginRenderPass = 0;
         PFN_vkCmdEndRenderPass              vkCmdEndRenderPass = 0;
         PFN_vkCmdDraw                       vkCmdDraw = 0;
+        PFN_vkCmdWriteTimestamp             vkCmdWriteTimestamp = 0;
     } VkFunctionTable;
 
     VkDevice                device = nullptr;
@@ -310,6 +311,8 @@ typedef struct BackendContext_VK {
 
     FfxmUInt32               numDeviceExtensions = 0;
     VkExtensionProperties*  extensionProperties = nullptr;
+
+    FfxmVkProfilingDescription profilingDesc = {};
 
 } BackendContext_VK;
 
@@ -1234,6 +1237,7 @@ FfxmErrorCode CreateBackendContextVK(FfxmInterface* backendInterface, FfxmUInt32
         backendContext->vkFunctionTable.vkCmdBeginRenderPass = vkCmdBeginRenderPass;
         backendContext->vkFunctionTable.vkCmdEndRenderPass = vkCmdEndRenderPass;
         backendContext->vkFunctionTable.vkCmdDraw = vkCmdDraw;
+        backendContext->vkFunctionTable.vkCmdWriteTimestamp = vkCmdWriteTimestamp;
 #else
         // load vulkan functions
         backendContext->vkFunctionTable.vkSetDebugUtilsObjectNameEXT = (PFN_vkSetDebugUtilsObjectNameEXT)vkDeviceContext->vkDeviceProcAddr(backendContext->device, "vkSetDebugUtilsObjectNameEXT");
@@ -1284,6 +1288,7 @@ FfxmErrorCode CreateBackendContextVK(FfxmInterface* backendInterface, FfxmUInt32
         backendContext->vkFunctionTable.vkCmdBeginRenderPass = (PFN_vkCmdBeginRenderPass)vkDeviceContext->vkDeviceProcAddr(backendContext->device, "vkCmdBeginRenderPass");
         backendContext->vkFunctionTable.vkCmdEndRenderPass = (PFN_vkCmdEndRenderPass)vkDeviceContext->vkDeviceProcAddr(backendContext->device, "vkCmdEndRenderPass");
         backendContext->vkFunctionTable.vkCmdDraw = (PFN_vkCmdDraw)vkDeviceContext->vkDeviceProcAddr(backendContext->device, "vkCmdDraw");
+        backendContext->vkFunctionTable.vkCmdWriteTimestamp = (PFN_vkCmdWriteTimestamp)vkDeviceContext->vkDeviceProcAddr(backendContext->device, "vkCmdWriteTimestamp");
 #endif // FFXM_VKLOADER_VOLK
 
         // enumerate all the device extensions
@@ -4080,11 +4085,52 @@ FFXM_API void ffxmSetTestJobExecutionHookVK(FfxmTestJobExecutionHook hook)
 }
 #endif
 
+FFXM_API FfxmErrorCode ffxmSetProfilingDescriptionVK(
+    FfxmInterface* backendInterface,
+    const FfxmVkProfilingDescription* profilingDesc)
+{
+    FFXM_RETURN_ON_ERROR(backendInterface != NULL, FFXM_ERROR_INVALID_POINTER);
+    BackendContext_VK* backendContext = (BackendContext_VK*)backendInterface->scratchBuffer;
+    FFXM_RETURN_ON_ERROR(backendContext != NULL, FFXM_ERROR_INVALID_POINTER);
+
+    if (profilingDesc != nullptr) {
+        backendContext->profilingDesc = *profilingDesc;
+    } else {
+        memset(&backendContext->profilingDesc, 0, sizeof(FfxmVkProfilingDescription));
+    }
+    return FFXM_OK;
+}
+
+FFXM_API FfxmErrorCode ffxmGetProfilingDescriptionVK(
+    const FfxmInterface* backendInterface,
+    FfxmVkProfilingDescription* outProfilingDesc)
+{
+    FFXM_RETURN_ON_ERROR(backendInterface != NULL, FFXM_ERROR_INVALID_POINTER);
+    FFXM_RETURN_ON_ERROR(outProfilingDesc != NULL, FFXM_ERROR_INVALID_POINTER);
+    BackendContext_VK* backendContext = (BackendContext_VK*)backendInterface->scratchBuffer;
+    FFXM_RETURN_ON_ERROR(backendContext != NULL, FFXM_ERROR_INVALID_POINTER);
+
+    *outProfilingDesc = backendContext->profilingDesc;
+    return FFXM_OK;
+}
+
 FFXM_API FfxmErrorCode ExecuteGpuJobsVK(FfxmInterface* backendInterface, FfxmCommandList commandList)
 {
     FFXM_RETURN_ON_ERROR(backendInterface != NULL, FFXM_ERROR_INVALID_POINTER);
     BackendContext_VK* backendContext = (BackendContext_VK*)backendInterface->scratchBuffer;
     FFXM_RETURN_ON_ERROR(backendContext != NULL, FFXM_ERROR_INVALID_POINTER);
+
+    // Scoped cleanup ensures profiling configuration is safely reset upon any exit,
+    // including aborted frames, errors, or successful execution.
+    struct ScopedProfilingCleanup {
+        BackendContext_VK* ctx;
+        ~ScopedProfilingCleanup() {
+            if (ctx) {
+                memset(&ctx->profilingDesc, 0, sizeof(FfxmVkProfilingDescription));
+            }
+        }
+    };
+    ScopedProfilingCleanup profilingCleanup{ backendContext };
 
     const FfxmUInt32 initialRingBufferBase = backendContext->ringBufferBase;
 
@@ -4161,7 +4207,22 @@ FFXM_API FfxmErrorCode ExecuteGpuJobsVK(FfxmInterface* backendInterface, FfxmCom
         return FFXM_ERROR_INVALID_POINTER;
     }
 
+    const bool isTotalProfiling = (backendContext->profilingDesc.mode == FFXM_GPU_PROFILING_MODE_TOTAL_ONLY ||
+                                   backendContext->profilingDesc.mode == FFXM_GPU_PROFILING_MODE_PER_PASS);
+    const bool isPerPassProfiling = (backendContext->profilingDesc.mode == FFXM_GPU_PROFILING_MODE_PER_PASS);
+    const VkQueryPool qp = backendContext->profilingDesc.queryPool;
+    const uint32_t baseQ = backendContext->profilingDesc.startQueryIndex;
+    const PFN_vkCmdWriteTimestamp writeTimestamp = backendContext->vkFunctionTable.vkCmdWriteTimestamp;
+    VkCommandBuffer vkCmdBuf = reinterpret_cast<VkCommandBuffer>(commandList);
+
+    // Place the start timestamp immediately before the GPU job execution loop
+    if (isTotalProfiling && qp != VK_NULL_HANDLE && writeTimestamp != nullptr && vkCmdBuf != VK_NULL_HANDLE)
+    {
+        writeTimestamp(vkCmdBuf, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, qp, baseQ + FFXM_PROFILING_QUERY_TOTAL_START);
+    }
+
     FfxmErrorCode firstErrorCode = FFXM_OK;
+    uint32_t clearJobIndex = 0;
 
     // execute all renderjobs
     for (FfxmUInt32 i = 0; i < backendContext->gpuJobCount; ++i)
@@ -4169,6 +4230,48 @@ FFXM_API FfxmErrorCode ExecuteGpuJobsVK(FfxmInterface* backendInterface, FfxmCom
         FfxmGpuJobDescription* gpuJob = &backendContext->pGpuJobs[i];
         VkCommandBuffer vkCommandBuffer = reinterpret_cast<VkCommandBuffer>(commandList);
         FfxmErrorCode jobError = FFXM_OK;
+        uint32_t passStartQ = UINT32_MAX;
+        uint32_t passEndQ   = UINT32_MAX;
+
+        if (isPerPassProfiling && qp != VK_NULL_HANDLE && writeTimestamp != nullptr)
+        {
+            if (gpuJob->jobType == FFXM_GPU_JOB_COMPUTE)
+            {
+                auto* pl = reinterpret_cast<BackendContext_VK::PipelineLayout*>(gpuJob->computeJobDescriptor.pipeline.rootSignature);
+                if (pl && pl->effect == FFXM_EFFECT_FSR3UPSCALER)
+                {
+                    uint32_t passIdx = UINT32_MAX;
+                    if (pl->pass >= FFXM_FSR3UPSCALER_PASS_PREPARE_INPUTS && pl->pass <= FFXM_FSR3UPSCALER_PASS_LUMA_INSTABILITY)
+                    {
+                        passIdx = static_cast<uint32_t>(pl->pass);
+                    }
+                    else if (pl->pass == FFXM_FSR3UPSCALER_PASS_ACCUMULATE || pl->pass == FFXM_FSR3UPSCALER_PASS_ACCUMULATE_SHARPEN)
+                    {
+                        passIdx = 6;
+                    }
+
+                    if (passIdx < FFXM_PROFILING_PASS_COUNT)
+                    {
+                        passStartQ = baseQ + FFXM_PROFILING_QUERY_PASS_START(passIdx);
+                        passEndQ   = baseQ + FFXM_PROFILING_QUERY_PASS_END(passIdx);
+                    }
+                }
+            }
+            else if (gpuJob->jobType == FFXM_GPU_JOB_CLEAR_FLOAT)
+            {
+                if (clearJobIndex < FFXM_PROFILING_CLEAR_JOB_COUNT)
+                {
+                    passStartQ = baseQ + FFXM_PROFILING_QUERY_CLEAR_START(clearJobIndex);
+                    passEndQ   = baseQ + FFXM_PROFILING_QUERY_CLEAR_END(clearJobIndex);
+                }
+                clearJobIndex++;
+            }
+
+            if (passStartQ != UINT32_MAX)
+            {
+                writeTimestamp(vkCommandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, qp, passStartQ);
+            }
+        }
 
 #if defined(FFXM_ENABLE_TEST_HOOKS)
         if (s_TestJobExecutionHook != nullptr)
@@ -4211,6 +4314,11 @@ FFXM_API FfxmErrorCode ExecuteGpuJobsVK(FfxmInterface* backendInterface, FfxmCom
             }
         }
 
+        if (jobError == FFXM_OK && passEndQ != UINT32_MAX && isPerPassProfiling)
+        {
+            writeTimestamp(vkCommandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, qp, passEndQ);
+        }
+
         if (jobError != FFXM_OK)
         {
             firstErrorCode = jobError;
@@ -4224,6 +4332,12 @@ FFXM_API FfxmErrorCode ExecuteGpuJobsVK(FfxmInterface* backendInterface, FfxmCom
     }
     else
     {
+        // Place the end timestamp after successful execution of all jobs
+        if (isTotalProfiling && qp != VK_NULL_HANDLE && writeTimestamp != nullptr && vkCmdBuf != VK_NULL_HANDLE)
+        {
+            writeTimestamp(vkCmdBuf, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, qp, baseQ + FFXM_PROFILING_QUERY_TOTAL_END);
+        }
+
         // Transactional Commit for participating contexts:
         for (FfxmUInt32 c = 0; c < s_MaxEffectContexts; ++c)
         {
@@ -4254,6 +4368,7 @@ FFXM_API FfxmErrorCode ExecuteGpuJobsVK(FfxmInterface* backendInterface, FfxmCom
 #if defined(FFXM_ENABLE_TEST_HOOKS)
 static FfxmTestCreateImageViewHook s_TestCreateImageViewHook = nullptr;
 static FfxmTestDestroyImageViewHook s_TestDestroyImageViewHook = nullptr;
+static FfxmTestWriteTimestampHook s_TestWriteTimestampHook = nullptr;
 
 static void VKAPI_PTR testStubVkCmdPipelineBarrier(VkCommandBuffer, VkPipelineStageFlags, VkPipelineStageFlags, VkDependencyFlags, uint32_t, const VkMemoryBarrier*, uint32_t, const VkBufferMemoryBarrier*, uint32_t, const VkImageMemoryBarrier*) {}
 static void VKAPI_PTR testStubVkCmdClearColorImage(VkCommandBuffer, VkImage, VkImageLayout, const VkClearColorValue*, uint32_t, const VkImageSubresourceRange*) {}
@@ -4261,6 +4376,11 @@ static void VKAPI_PTR testStubVkCmdFillBuffer(VkCommandBuffer, VkBuffer, VkDevic
 static void VKAPI_PTR testStubVkCmdBindPipeline(VkCommandBuffer, VkPipelineBindPoint, VkPipeline) {}
 static void VKAPI_PTR testStubVkCmdBindDescriptorSets(VkCommandBuffer, VkPipelineBindPoint, VkPipelineLayout, uint32_t, uint32_t, const VkDescriptorSet*, uint32_t, const uint32_t*) {}
 static void VKAPI_PTR testStubVkCmdDispatch(VkCommandBuffer, uint32_t, uint32_t, uint32_t) {}
+static void VKAPI_PTR testStubVkCmdWriteTimestamp(VkCommandBuffer cmd, VkPipelineStageFlagBits stage, VkQueryPool pool, uint32_t query) {
+    if (s_TestWriteTimestampHook) {
+        s_TestWriteTimestampHook(cmd, stage, pool, query);
+    }
+}
 static void VKAPI_PTR testStubVkUpdateDescriptorSets(VkDevice, uint32_t, const VkWriteDescriptorSet*, uint32_t, const VkCopyDescriptorSet*) {}
 static VkResult VKAPI_PTR testStubVkCreateImageView(VkDevice device, const VkImageViewCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkImageView* pView) {
     if (s_TestCreateImageViewHook) {
@@ -4279,6 +4399,11 @@ FFXM_API void ffxmTestSetImageViewHooksVK(FfxmTestCreateImageViewHook createHook
 {
     s_TestCreateImageViewHook = createHook;
     s_TestDestroyImageViewHook = destroyHook;
+}
+
+FFXM_API void ffxmSetTestWriteTimestampHookVK(FfxmTestWriteTimestampHook hook)
+{
+    s_TestWriteTimestampHook = hook;
 }
 
 FFXM_API FfxmUInt32 ffxmTestGetNextDynamicResourceViewVK(FfxmInterface* backendInterface, FfxmUInt32 effectContextId, FfxmUInt32 frameIndex)
@@ -4414,6 +4539,7 @@ FFXM_API FfxmErrorCode ffxmTestSetupBackendContextVK(
         backendContext->vkFunctionTable.vkCmdBindPipeline = testStubVkCmdBindPipeline;
         backendContext->vkFunctionTable.vkCmdBindDescriptorSets = testStubVkCmdBindDescriptorSets;
         backendContext->vkFunctionTable.vkCmdDispatch = testStubVkCmdDispatch;
+        backendContext->vkFunctionTable.vkCmdWriteTimestamp = testStubVkCmdWriteTimestamp;
         backendContext->vkFunctionTable.vkUpdateDescriptorSets = testStubVkUpdateDescriptorSets;
         backendContext->vkFunctionTable.vkCreateImageView = testStubVkCreateImageView;
         backendContext->vkFunctionTable.vkDestroyImageView = testStubVkDestroyImageView;
@@ -4464,6 +4590,7 @@ FFXM_API void ffxmTestResetBackendRefCountVK()
     s_TestJobExecutionHook = nullptr;
     s_TestCreateImageViewHook = nullptr;
     s_TestDestroyImageViewHook = nullptr;
+    s_TestWriteTimestampHook = nullptr;
 }
 
 FFXM_API void* ffxmTestGetPipelineLayoutVK(FfxmInterface* backendInterface, FfxmUInt32 pipelineIndex)
