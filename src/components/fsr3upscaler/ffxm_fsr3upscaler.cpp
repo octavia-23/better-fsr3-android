@@ -1004,7 +1004,7 @@ FfxmErrorCode fsr3UpscalerCreate(
         FFXM_EFFECT_FSR3UPSCALER,
         FFXM_FSR3UPSCALER_PASS_ACCUMULATE,
         0,
-        getPipelinePermutationFlags(contextDescription->flags, FFXM_FSR3UPSCALER_PASS_ACCUMULATE, supportedFP16, canForceWave64, useLut),
+        getPipelinePermutationFlags(contextDescription->flags, FFXM_FSR3UPSCALER_PASS_ACCUMULATE, supportedFP16, canForceWave64, /*useLut=*/true),
         &pipelineDescription,
         context->effectContextId,
         &context->pipelineAccumulate);
@@ -1022,6 +1022,12 @@ FfxmErrorCode fsr3UpscalerCreate(
 #endif
         return pipelineErr;
     }
+
+#if defined(__ANDROID__)
+    __android_log_print(ANDROID_LOG_INFO, "ArmASR", "FSR3-ACCUMULATE pipeline created (permutation: 0x%08X, srvTextureCount: %u, useLut: true)",
+        getPipelinePermutationFlags(contextDescription->flags, FFXM_FSR3UPSCALER_PASS_ACCUMULATE, supportedFP16, canForceWave64, /*useLut=*/true),
+        context->pipelineAccumulate.srvTextureCount);
+#endif
 
     return FFXM_OK;
 }

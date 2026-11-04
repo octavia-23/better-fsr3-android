@@ -2055,16 +2055,24 @@ void TestM3PrepareInputsPassExecution()
 
     // Verify Accumulate pipeline
     TEST_CHECK(priv->pipelineAccumulate.pipeline != nullptr);
-    TEST_CHECK(priv->pipelineAccumulate.srvTextureCount == 7);
+    const bool accUsesLut = (priv->pipelineAccumulate.srvTextureCount == 8);
+    TEST_CHECK(accUsesLut || priv->pipelineAccumulate.srvTextureCount == 7);
     TEST_CHECK(priv->pipelineAccumulate.uavTextureCount == 3);
     TEST_CHECK(priv->pipelineAccumulate.constCount == 1);
     TEST_CHECK(priv->pipelineAccumulate.srvTextureBindings[0].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_EXPOSURE);
     TEST_CHECK(priv->pipelineAccumulate.srvTextureBindings[1].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_REACTIVE_MASKS);
     TEST_CHECK(priv->pipelineAccumulate.srvTextureBindings[2].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_MOTION_VECTORS);
     TEST_CHECK(priv->pipelineAccumulate.srvTextureBindings[3].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_UPSCALED_COLOR);
-    TEST_CHECK(priv->pipelineAccumulate.srvTextureBindings[4].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FARTHEST_DEPTH_MIP1);
-    TEST_CHECK(priv->pipelineAccumulate.srvTextureBindings[5].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_INSTABILITY);
-    TEST_CHECK(priv->pipelineAccumulate.srvTextureBindings[6].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_COLOR);
+    if (accUsesLut) {
+        TEST_CHECK(priv->pipelineAccumulate.srvTextureBindings[4].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LANCZOS_LUT);
+        TEST_CHECK(priv->pipelineAccumulate.srvTextureBindings[5].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FARTHEST_DEPTH_MIP1);
+        TEST_CHECK(priv->pipelineAccumulate.srvTextureBindings[6].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_INSTABILITY);
+        TEST_CHECK(priv->pipelineAccumulate.srvTextureBindings[7].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_COLOR);
+    } else {
+        TEST_CHECK(priv->pipelineAccumulate.srvTextureBindings[4].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FARTHEST_DEPTH_MIP1);
+        TEST_CHECK(priv->pipelineAccumulate.srvTextureBindings[5].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LUMA_INSTABILITY);
+        TEST_CHECK(priv->pipelineAccumulate.srvTextureBindings[6].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INPUT_COLOR);
+    }
     TEST_CHECK(priv->pipelineAccumulate.uavTextureBindings[0].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_UPSCALED_COLOR);
     TEST_CHECK(priv->pipelineAccumulate.uavTextureBindings[1].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_UPSCALED_OUTPUT);
     TEST_CHECK(priv->pipelineAccumulate.uavTextureBindings[2].resourceIdentifier == FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_NEW_LOCKS);
@@ -3799,9 +3807,16 @@ static void TestM3ComputeLumaInstabilityAndAccumulate()
     TEST_CHECK(accJobFrame1.computeJobDescriptor.srvTextures[1].internalIndex == priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_DILATED_REACTIVE_MASKS].internalIndex);
     TEST_CHECK(accJobFrame1.computeJobDescriptor.srvTextures[2].internalIndex != -1); // r_dilated_motion_vectors (dynamic)
     TEST_CHECK(accJobFrame1.computeJobDescriptor.srvTextures[3].internalIndex == priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_UPSCALED_COLOR_2].internalIndex);
-    TEST_CHECK(accJobFrame1.computeJobDescriptor.srvTextures[4].internalIndex == priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FARTHEST_DEPTH_MIP1].internalIndex);
-    TEST_CHECK(accJobFrame1.computeJobDescriptor.srvTextures[5].internalIndex == priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERMEDIATE_FP16x1].internalIndex); // LumaInstability
-    TEST_CHECK(accJobFrame1.computeJobDescriptor.srvTextures[6].internalIndex != -1); // r_input_color_jittered (dynamic)
+    if (priv->pipelineAccumulate.srvTextureCount == 8) {
+        TEST_CHECK(accJobFrame1.computeJobDescriptor.srvTextures[4].internalIndex == priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_LANCZOS_LUT].internalIndex);
+        TEST_CHECK(accJobFrame1.computeJobDescriptor.srvTextures[5].internalIndex == priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FARTHEST_DEPTH_MIP1].internalIndex);
+        TEST_CHECK(accJobFrame1.computeJobDescriptor.srvTextures[6].internalIndex == priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERMEDIATE_FP16x1].internalIndex); // LumaInstability
+        TEST_CHECK(accJobFrame1.computeJobDescriptor.srvTextures[7].internalIndex != -1); // r_input_color_jittered (dynamic)
+    } else {
+        TEST_CHECK(accJobFrame1.computeJobDescriptor.srvTextures[4].internalIndex == priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_FARTHEST_DEPTH_MIP1].internalIndex);
+        TEST_CHECK(accJobFrame1.computeJobDescriptor.srvTextures[5].internalIndex == priv->srvResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERMEDIATE_FP16x1].internalIndex); // LumaInstability
+        TEST_CHECK(accJobFrame1.computeJobDescriptor.srvTextures[6].internalIndex != -1); // r_input_color_jittered (dynamic)
+    }
 
     // Accumulate UAVs in Frame 1 (current is INTERNAL_UPSCALED_COLOR_1, output is UPSCALED_OUTPUT, new_locks is NEW_LOCKS)
     TEST_CHECK(accJobFrame1.computeJobDescriptor.uavTextures[0].internalIndex == priv->uavResources[FFXM_FSR3UPSCALER_RESOURCE_IDENTIFIER_INTERNAL_UPSCALED_COLOR_1].internalIndex);
