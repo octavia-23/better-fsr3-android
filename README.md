@@ -1,429 +1,517 @@
 <!-- Copyright © 2024-2026 Arm Limited.
+Copyright © 2024 Advanced Micro Devices, Inc.
 SPDX-License-Identifier: MIT -->
 
-![Arm ASR Logo](res/logo.png)
+# Better FSR3 Android
 
-> **Unofficial fork.** This is a personal fork of
-> [arm/accuracy-super-resolution-generic-library](https://github.com/arm/accuracy-super-resolution-generic-library)
-> that adds Android and Vulkan build support (NDK r29, API 35) together with a
-> Gradle sample application. It is **not affiliated with, endorsed by, or
-> supported by Arm Limited**. For the official releases, please use the upstream
-> repository. See [Building for Android](#building-for-android) for what this
-> fork adds, and `CLAUDE.md` for notes on working in this tree.
+**Production-grade AMD FidelityFX™ Super Resolution (FSR) 3.1.4 upscaling for Android via Vulkan, built upon Arm ASR's lightweight, mobile-first runtime architecture.**
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSES/MIT.txt)
+[![Vulkan 1.1+](https://img.shields.io/badge/Vulkan-1.1%2B%20%7C%20SPIR--V%201.4-red.svg)](https://www.vulkan.org/)
+[![Android NDK r29](https://img.shields.io/badge/NDK-r29%20(API%2035)-green.svg)](https://developer.android.com/ndk)
+[![Shader Precision: fp16](https://img.shields.io/badge/Precision-Explicit%20fp16-orange.svg)](#vulkan-hardware-and-driver-requirements)
+[![Status: Physical Hardware Verified](https://img.shields.io/badge/Hardware%20Telemetry-Adreno%20650%20%7C%20735-purple.svg)](#physical-hardware-benchmarks)
 
-# Arm® Accuracy Super Resolution™ (Arm ASR) Generic Library
+> **Project Notice**: This is an open-source engineering research project bringing AMD's FSR 3.1.4 temporal upscaler to mobile Vulkan by adapting the mobile backend architecture established in [Arm ASR (Accuracy Super Resolution)](https://github.com/arm/accuracy-super-resolution-generic-library). This project is **not affiliated with, endorsed by, or supported by Arm Limited, Advanced Micro Devices, Inc. (AMD), or Qualcomm Technologies, Inc.** All trademarks belong to their respective owners. See [Attribution and Licensing](#attribution-and-licensing).
 
-## Table of contents
+---
 
-- [Introduction](#introduction)
-- [Integration steps](#integration-steps)
-    - [Quick integration](#quick-integration)
-    - [Tight integration](#tight-integration)
-- [Integration guidelines](#integration-guidelines)
-    - [Quality presets](#quality-presets)
-    - [Performance](#performance)
-    - [Shader variants and Extensions](#shader-variants-and-extensions)
-    - [Input resources](#input-resources)
-    - [Providing motion vectors](#providing-motion-vectors)
-    - [Reactive mask](#reactive-mask)
-    - [Automatically generating reactivity](#automatically-generating-reactivity)
-	- [Modular backend](#modular-backend)
-    - [Camera jitter](#camera-jitter)
-	- [Camera jump cuts](#camera-jump-cuts)
-    - [Mipmap biasing](#mipmap-biasing)
-    - [Frame Time Delta Input](#frame-time-delta-input)
-    - [HDR support](#hdr-support)
-    - [API Debug Checker](#debug-checker)
-- [Building for Android](#building-for-android)
-- [Building for Windows](#building-for-windows)
-- [Sample applications](#sample-applications)
-- [Extended ffx_shader_compiler](#extended-ffx_shader_compiler)
-- [Generate prebuilt shaders](#generate-prebuilt-shaders)
-- [Targeting OpenGL® ES 3.2](#targeting-opengl-es-32)
-- [License](#license)
-- [Trademarks and Copyrights](#trademarks-and-copyrights)
-- [Contact](#contact)
-- [Security Issues](#security-issues)
+## Table of Contents
 
-## Introduction
+- [Overview](#overview)
+  - [What is FSR 3.1.4?](#what-is-fsr-314)
+  - [What This Repository Implements](#what-this-repository-implements)
+  - [What is Out of Scope](#what-is-out-of-scope)
+- [Feature and Implementation Status](#feature-and-implementation-status)
+  - [The Seven FSR 3.1.4 Compute Passes](#the-seven-fsr-314-compute-passes)
+  - [Clear Operations](#clear-operations)
+  - [Resource Lifecycle and Temporal History](#resource-lifecycle-and-temporal-history)
+  - [16-Bit SPIR-V Shader Packaging](#16-bit-spir-v-shader-packaging)
+  - [Camera Jitter and Motion Vectors](#camera-jitter-and-motion-vectors)
+- [Architecture Overview](#architecture-overview)
+  - [System Architecture Diagram](#system-architecture-diagram)
+  - [Repository Directory Structure](#repository-directory-structure)
+- [Physical Hardware Benchmarks](#physical-hardware-benchmarks)
+  - [Controlled Benchmark Configuration](#controlled-benchmark-configuration)
+  - [Controlled Comparison Matrix](#controlled-comparison-matrix)
+  - [Key Performance Findings](#key-performance-findings)
+  - [Reconciliation with Historical Baseline](#reconciliation-with-historical-baseline)
+- [Profiling and Engineering Methodology](#profiling-and-engineering-methodology)
+  - [Vulkan GPU Timestamp Profiling](#vulkan-gpu-timestamp-profiling)
+  - [Profiler Hardening and Query Invariants](#profiler-hardening-and-query-invariants)
+  - [Observed Telemetry Anomalies (POCO F6 Preemption)](#observed-telemetry-anomalies-poco-f6-preemption)
+- [Building and Installation](#building-and-installation)
+  - [Prerequisites](#prerequisites)
+  - [Vulkan Hardware and Driver Requirements](#vulkan-hardware-and-driver-requirements)
+  - [Building the Android Sample APK](#building-the-android-sample-apk)
+  - [Installing and Launching on Device](#installing-and-launching-on-device)
+  - [Running GPU Profiling Runs via ADB](#running-gpu-profiling-runs-via-adb)
+  - [Building Static Libraries via CMake](#building-static-libraries-via-cmake)
+  - [Host Testing and Validation (MSVC)](#host-testing-and-validation-msvc)
+- [Development Principles](#development-principles)
+- [Roadmap](#roadmap)
+- [Attribution and Licensing](#attribution-and-licensing)
 
-## Introduction
+---
 
-**Arm® Accuracy Super Resolution™** is a mobile-optimized temporal upscaling technique derived from AMD's [FidelityFX™ Super Resolution 2 v2.2.2](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/blob/main/docs/techniques/super-resolution-temporal.md). Arm ASR includes multiple optimizations on top of the original **FidelityFX™ Super Resolution 2** to make the technique suited for the more resource-constrained environment of mobile gaming. The team would like to express their gratitude to AMD and the engineers behind the original technique for their work and releasing it publicly to the world.
+## Overview
 
-Arm ASR uses temporal accumulation to reconstruct high-resolution images while maintaining fine geometric and texture details compared to native rendering. It can enable "practical performance" for costly render operations, such as hardware ray tracing.
+### What is FSR 3.1.4?
 
-## Integration steps
+**AMD FidelityFX™ Super Resolution 3.1.4 (FSR 3.1.4)** is AMD's latest temporal upscaling technology. It reconstructs sharp, high-resolution output frames from lower-resolution render targets using:
+- **Temporal Accumulation**: Combining color information across consecutive frames using motion vector re-projection.
+- **Luminance and Shading Change Detection**: Discerning lighting changes and material specular variations from moving geometry to eliminate ghosting.
+- **Luminance Instability Detection**: Identifying temporal flickering and sub-pixel edge ringing.
+- **Lanczos Sampling & History Clamping**: Preserving edge contrast while preventing disocclusion smear.
 
-### Quick integration
+### What This Repository Implements
 
-To quickly integrate Arm ASR, which means the built-in standalone backend is used, you could follow the steps below:
+This repository ports the **FSR 3.1.4 Upscaler core** into the mobile-optimized, single-file Vulkan backend and clean runtime architecture pioneered by **Arm ASR**:
+- **Mobile Vulkan Runtime**: Full C/C++ host implementation of the FSR 3.1.4 upscaler (`src/components/fsr3upscaler/`), decoupled from heavyweight desktop frameworks.
+- **Lean Vulkan Backend (`src/backends/vk/ffxm_vk.cpp`)**: A standalone, ~3.6k-line Vulkan backend executing through a 15-callback vtable (`FfxmInterface`).
+- **Explicit 16-Bit Half-Precision Shaders**: Prebuilt SPIR-V binaries compiled with explicit 16-bit floating point arithmetic (`-enable-16bit-types -DFFXM_HALF=1`) to exploit mobile GPU FP16 ALUs, lower memory traffic, and reduce thermal load.
+- **Hardened GPU Timestamp Profiler (`samples/common/gpu_profiler.h`)**: Non-blocking Vulkan timestamp profiling providing microsecond-accurate per-pass hardware execution telemetry.
+- **Android NativeActivity Validation Sample (`samples/android/`)**: Complete testbed rendering a procedural infinite-checkerboard ray-traced scene, generating ground-truth motion vectors and depth, and presenting 2× upscaled frames via Vulkan swapchain.
 
-1. Copy **Arm_ASR** directory into your project, and add **Arm_ASR/src/backends/shared/blob_accessors/prebuilt_shaders** in include path if you want to use prebuilt shaders.
+### What is Out of Scope
 
-2. Include the [`ffxm_fsr2.h`](./include/host/ffxm_fsr2.h#L1) and [`ffxm_vk.h`](./include/host/backends/vk/ffxm_vk.h#L1) header file in your codebase where you wish to interact with the technique.
+To prevent misunderstanding of the current codebase:
+- **No Frame Generation / Optical Flow**: This project implements the **temporal upscaler component** of FSR 3.1.4. Frame Generation (Optical Flow vector calculation and frame interpolation swapchain proxying) is not implemented.
+- **Not a Game Mod / Hook**: This is an engine-level SDK and validation sample. It is not an arbitrary OpenGL ES or Vulkan injection layer for commercial Android APKs.
 
-3. Create a Vulkan backend. Allocate Vulkan scratch buffer of the size returned by [`ffxmGetScratchMemorySizeVK`](./include/host/backends/vk/ffxm_vk.h#L65). Create `FfxmDevice` via [`ffxmGetDeviceVK`](./include/host/backends/vk/ffxm_vk.h#L65). Create `FfxmInterface` by calling [`ffxmGetInterfaceVK`](./include/host/backends/vk/ffxm_vk.h#L99).
+---
 
-4. Create a context by calling [`ffxmFsr2ContextCreate`](./include/host/ffxm_fsr2.h#L296). The parameters structure should be filled out matching the configuration of your application. See [Integration guidelines](#integration-guidelines) for more details.
+## Feature and Implementation Status
 
-5. Each frame call [`ffxmFsr2ContextDispatch`](./include/host/ffxm_fsr2.h#L337) to record/execute the technique's workloads. The parameters structure should be filled out matching the configuration of your application. See [Integration guidelines](#integration-guidelines) for more details.
+### The Seven FSR 3.1.4 Compute Passes
 
-6. When your application is terminating (or you wish to destroy the context for another reason) you should call [`ffxmFsr2ContextDestroy`](./include/host/ffxm_fsr2.h#L360). The GPU should be idle before calling this function.
+The FSR 3.1.4 temporal upscaling pipeline is composed of seven sequential compute passes dispatched each frame:
 
-7. Sub-pixel jittering should be applied to your application's projection matrix. This should be done when performing the main rendering of your application. You should use the [`ffxmFsr2GetJitterOffset`](./include/host/ffxm_fsr2.h#L504) function to compute the precise jitter offsets. See [Camera jitter](#camera-jitter) section for more details.
-
-8. A global mip bias should be applied when texturing. See [Mipmap biasing](#mipmap-biasing) section for more details.
-
-9. For the best upscaling quality it is strongly advised that you populate the [Reactive mask](#reactive-mask) according to our guidelines. You can also use [`ffxmFsr2ContextGenerateReactiveMask`](./include/host/ffxm_fsr2.h#L348) as a starting point.
-
-10. Finally link the two built libraries (**Arm_ASR_api** & **Arm_ASR_backend**).
-
-### Tight integration
-
-If you wish to use your own backend/renderer, a tight integration with your engine is required. For this a similar process to the "quick integration" described above will be done with the main difference being filling the [`FfxmInterface`](./include/host/ffxm_interface.h#L438) with functions implemented on your end:
-
-1. Include [`ffxm_interface.h`](./include/host/ffxm_interface.h#L1) header file in your codebase.
-
-2. Implement your own functions (assume the names are `xxxGetInterfacexxx`, `xxxGetScratchMemorySizexxx`) and callbacks in [`FfxmInterface`](./include/host/ffxm_interface.h#L438) to link Arm ASR with the engine's renderer.
-
-3. Create your own backend by calling `xxxGetInterfacexxx`. A scratch buffer should be allocated of the size returned by calling `xxxGetScratchMemorySizexxx` and the pointer to that buffer passed to `xxxGetInterfacexxx`.
-
-4. The rest are the same as quick integration start from creating a Arm ASR context (starting at step 4) except only linking **Arm_ASR_api** is enough.
-
-In this approach the shaders are expected to be built by the engine. Arm ASR's shaders have been micro-optimized to use explicit 16b types so it is advisable that the shaders are built using such types (i.e min16float in hlsl or float16_t in glsl). For this you should define the symbols `#define FFXM_HLSL_6_2 1` and `#define FFXM_HALF 1` (FFXM_HALF is already defined in the provided shader sources) enabled with a value of `1`.
-
-In an HLSL-based workflow using DirectX Shader Compiler to cross-compile to SPIRV, the following flags should be used when building:
 ```
--fspv-target-env=vulkan1.1spirv1.4 -enable-16bit-types
-```
-and the extension **VK_KHR_shader_float16_int8** used at runtime.
-
-## Integration guidelines
-
-### Quality presets
-
-Arm ASR API provides a number of shader quality presets, that can be used to select a more efficient version of the technique that applies some reasonable quality/performance tradeoffs:
-
-**Quality**: This is in essence an extremely optimized version of Fsr2 maintaining the same image quality as the original technique.
-
-**Balanced**: This preset gives a significant improvement in both bandwidth savings and performance uplift while maintaining close image quality to the 'quality' preset.
-
-**Performance**: A more aggressive preset that will give you the highest performance with some quality sacrifices.
-
-When creating context, a [`FfxmFsr2ShaderQualityMode`](./include/host/ffxm_fsr2.h#L119) needs to be provided as part of the input settings in [`FfxmFsr2ContextDescription`](./include/host/ffxm_fsr2.h#L181).
-
-### Upscaling ratios
-
-To improve the flexbility when working with the technique, we decided to leave the door open for having separately the shader quality presets and the upscaling ratio. So, developers are free to choose any combination of **FfxmFsr2ShaderQualityMode** and **FfxmFsr2UpscalingRatio** based on their needs to fine tune the quality/performance of their applications.
-
-We provide a couple of utilities to get the corresponding src resolution the frame should be using for rendering pre-upscaling based on the desired upscaling ratio [`FfxmFsr2UpscalingRatio`](./include/host/ffxm_fsr2.h#L128).
-
-``` CPP
-float ffxmFsr2GetUpscaleRatioFactor(FfxmFsr2UpscalingRatio upscalingRatio)
-FfxErrorCode ffxmFsr2GetRenderResolutionFromUpscalingRatio(
-    uint32_t* renderWidth,
-    uint32_t* renderHeight,
-    uint32_t displayWidth,
-    uint32_t displayHeight,
-    FfxmFsr2UpscalingRatio upscalingRatio)
-```
-
-### Performance
-Depending on your target hardware and operating configuration Arm ASR will operate at different performance levels.
-
-
-| Target resolution | Quality | Upscaling Ratio | Immortalis-G715 | Immortalis-G720 |
-|-------------------|--------------------|-----------|-----------------|-----------------|
-| 2800x1260 | Quality     | 1.5x | <span style="color: #FF0000;">6.5 ms</span> | <span style="color: #feff00;">4.1 ms</span> |
-|           |             | 1.7x | <span style="color: #FF0000;">6.3 ms</span> | <span style="color: #8fff00;">3.8 ms</span> |
-|           |             | 2x   | <span style="color: #FF0000;">6.1 ms</span> | <span style="color: #8fff00;">3.3 ms</span> |
-|           | Balanced    | 1.5x | <span style="color: #FFAC00;">5.8 ms</span> | <span style="color: #8fff00;">3.3 ms</span> |
-|           |             | 1.7x | <span style="color: #FFAC00;">5.4 ms</span> | <span style="color: #8fff00;">3.1 ms</span> |
-|           |             | 2x   | <span style="color: #feff00;">4.7 ms</span> | <span style="color: #55ff00;">2.8 ms</span> |
-|           | Performance | 1.5x | <span style="color: #FFAC00;">5.4 ms</span> | <span style="color: #8fff00;">3.2 ms</span> |
-|           |             | 1.7x | <span style="color: #FFAC00;">5.3 ms</span> | <span style="color: #55ff00;">2.9 ms</span> |
-|           |             | 2x   | <span style="color: #feff00;">4.6 ms</span> | <span style="color: #55ff00;">2.5 ms</span> |
-| 2400x1080 | Quality     | 1.5x | <span style="color: #FFAC00;">5.3 ms</span> | <span style="color: #55ff00;">2.9 ms</span> |
-|           |             | 1.7x | <span style="color: #feff00;">4.8 ms</span> | <span style="color: #55ff00;">2.7 ms</span> |
-|           |             | 2x   | <span style="color: #feff00;">4.3 ms</span> | <span style="color: #55ff00;">2.5 ms</span> |
-|           | Balanced    | 1.5x | <span style="color: #feff00;">4.2 ms</span> | <span style="color: #55ff00;">2.5 ms</span> |
-|           |             | 1.7x | <span style="color: #feff00;">4.0 ms</span> | <span style="color: #55ff00;">2.3 ms</span> |
-|           |             | 2x   | <span style="color: #8fff00;">3.6 ms</span> | <span style="color: #55ff00;">2.2 ms</span> |
-|           | Performance | 1.5x | <span style="color: #feff00;">4.1 ms</span> | <span style="color: #55ff00;">2.4 ms</span> |
-|           |             | 1.7x | <span style="color: #8fff00;">3.7 ms</span> | <span style="color: #55ff00;">2.1 ms</span> |
-|           |             | 2x   | <span style="color: #8fff00;">3.6 ms</span> | <span style="color: #55ff00;">2 ms  </span> |
-
-### Shader variants and Extensions
-
-**Unless you are using the prebuilt shaders with the standalone VK backend**, when doing the integration of the Arm ASR shaders there are some defines you need to be aware of:
-- **FFXM_GPU**. Needs to be defined globally when including the shader headers.
-- **FFXM_HLSL**. If defined, the logic will fallback to use the **HLSL** specific syntax (i.e types, resource declaration ...).
-- **FFXM_GLSL**. If defined, the logic will fallback to use the **GLSL** specific syntax (i.e types, resource declaration ...).
-
-The following table shows the list of the different shader mutators that can be used. All of them must be defined either with a value of 0 or 1. Which shader variant to use is guided internally by **getPipelinePermutationFlags(...)** based on things like user's flags and shader quality.
-
-| Define | Description |
-| -------- | ------- |
-| FFXM_FSR2_OPTION_HDR_COLOR_INPUT | If **1**, will assume that the input color is in linear RGB. |
-| FFXM_FSR2_OPTION_LOW_RESOLUTION_MOTION_VECTORS | If **1**, will assume the input motion vectors texture is in low resolution |
-| FFXM_FSR2_OPTION_JITTERED_MOTION_VECTORS | If **1**, will assume jittered motion vectors using the same jitter offsets as the input color and depth. |
-| FFXM_FSR2_OPTION_INVERTED_DEPTH | If **1**, it will assume the input depth containing reversed depth values (far == 0.0f) |
-| FFXM_FSR2_OPTION_APPLY_SHARPENING | If **1**, informs the shaders that RCAS (sharpening) pass will be used. |
-| FFXM_FSR2_OPTION_SHADER_OPT_BALANCED | If **1**, enables a batch of optimizations when the **Balanced** quality preset is selected. |
-| FFXM_FSR2_OPTION_SHADER_OPT_PERFORMANCE | If **1**,  enables a batch of optimizations when the **Performance** quality preset is selected. When this is enabled then **FFXM_FSR2_OPTION_SHADER_OPT_BALANCED** will be enabled too. |
-| FFXM_FSR2_OPTION_SHADER_OPT_ULTRA_PERFORMANCE | If **1**,  enables a batch of optimizations when the **Ultra Performance** quality preset is selected.
-
-Lastly, when using an HLSL-based workflow, we also have the **FFXM_HLSL_6_2** global define. If defined with a value of **1**, this will enable the use of explicit 16 bit types instead of relying in **half** (RelaxedPrecision). The **VK_KHR_shader_float16_int8** extension is required on Vulkan.
-
-### Input resources
-Arm ASR is a temporal algorithm, and therefore requires access to data from both the current and previous frame. The following table enumerates all external inputs required by it.
-
-The resolution column indicates if the data should be at 'rendered' resolution or 'presentation' resolution. 'Rendered' resolution indicates that the resource should match the resolution at which the application is performing its rendering. Conversely, 'presentation' indicates that the resolution of the target should match that which is to be presented to the user. All resources are from the current rendered frame, for Vulkan applications all input resources should be transitioned to [`VK_ACCESS_SHADER_READ_BIT`](https://www.khronos.org/registry/vulkan/specs/1.3-extensions/man/html/VkAccessFlagBits.html) respectively before calling [`ffxmFsr2ContextDispatch`](./include/host/ffxm_fsr2.h#L337).
-
-| Name            | Resolution                   |  Format                            | Type      | Notes                                          |
-| ----------------|------------------------------|------------------------------------|-----------|------------------------------------------------|
-| Color buffer    | Render                       | `APPLICATION SPECIFIED`            | Texture   | The render resolution color buffer for the current frame provided by the application. If the contents of the color buffer are in high dynamic range (HDR), then the [`FFXM_FSR2_ENABLE_HIGH_DYNAMIC_RANGE`](./include/host/ffxm_fsr2.h#L140) flag should be set in  the [`flags`](./include/host/ffxm_fsr2.h#L183) field of the [`FfxmFsr2ContextDescription`](./include/host/ffxm_fsr2.h#L181) structure. |
-| Depth buffer    | Render                       | `APPLICATION SPECIFIED (1x FLOAT)` | Texture   | The render resolution depth buffer for the current frame provided by the application. The data should be provided as a single floating point value, the precision of which is under the application's control. The configuration of the depth should be communicated to Arm ASR via the [`flags`](./include/host/ffxm_fsr2.h#L183) field of the [`FfxmFsr2ContextDescription`](./include/host/ffxm_fsr2.h#L181) structure when creating the [`FfxmFsr2Context`](./include/host/ffxm_fsr2.h#L247). You should set the [`FFXM_FSR2_ENABLE_DEPTH_INVERTED`](./include/host/ffxm_fsr2.h#L145) flag if your depth buffer is inverted (that is [1..0] range), and you should set the [`FFXM_FSR2_ENABLE_DEPTH_INFINITE`](./include/host/ffxm_fsr2.h#L146) flag if your depth buffer has an infinite far plane. If the application provides the depth buffer in `D32S8` format, then it will ignore the stencil component of the buffer, and create an `R32_FLOAT` resource to address the depth buffer. |
-| Motion vectors  | Render or presentation       | `APPLICATION SPECIFIED (2x FLOAT)` | Texture   | The 2D motion vectors for the current frame provided by the application in **[<-width, -height> ... <width, height>]** range. If your application renders motion vectors with a different range, you may use the [`motionVectorScale`](./include/host/ffxm_fsr2.h#L205) field of the [`FfxmFsr2DispatchDescription`](./include/host/ffxm_fsr2.h#L194) structure to adjust them to match the expected range for Arm ASR. Internally, Arm ASR uses 16-bit quantities to represent motion vectors in many cases, which means that while motion vectors with greater precision can be provided, Arm ASR will not benefit from the increased precision. The resolution of the motion vector buffer should be equal to the render resolution, unless the [`FFXM_FSR2_ENABLE_DISPLAY_RESOLUTION_MOTION_VECTORS`](./include/host/ffxm_fsr2.h#L143) flag is set in the [`flags`](./include/host/ffxm_fsr2.h#L183) field of the [`FfxmFsr2ContextDescription`](./include/host/ffxm_fsr2.h#L181) structure when creating the [`FfxmFsr2Context`](./include/host/ffxm_fsr2.h#L246), in which case it should be equal to the presentation resolution. |
-| Reactive mask   | Render                       | `R8_UNORM`                         | Texture   | As some areas of a rendered image do not leave a footprint in the depth buffer or include motion vectors, Arm ASR provides support for a reactive mask texture which can be used to indicate to the technique where such areas are. Good examples of these are particles, or alpha-blended objects which do not write depth or motion vectors. If this resource is not set, then Arm ASR's shading change detection logic will handle these cases as best it can, but for optimal results, this resource should be set. For more information on the reactive mask please refer to the [Reactive mask](#reactive-mask) section.  |
-| Exposure        | 1x1                          | `R32_FLOAT/ R16_FLOAT`                        | Texture   | A 1x1 texture containing the exposure value computed for the current frame. This resource is optional, and may be omitted if the [`FFXM_FSR2_ENABLE_AUTO_EXPOSURE`](./include/host/ffxm_fsr2.h#L147) flag is set in the [`flags`](./include/host/ffxm_fsr2.h#L183) field of the [`FfxmFsr2ContextDescription`](./include/host/ffxm_fsr2.h#L181) structure when creating the [`FfxmFsr2Context`](./include/host/ffxm_fsr2.h#L246).  |
-
-All inputs that are provided at Render Resolution, except for motion vectors, should be rendered with jitter. By default, Motion vectors are expected to be unjittered unless the [`FFXM_FSR2_ENABLE_MOTION_VECTORS_JITTER_CANCELLATION`](./include/host/ffxm_fsr2.h#L144) flag is present.
-
-### Providing motion vectors
-
-#### Space
-A key part of a temporal algorithm (be it antialiasing or upscaling) is the provision of motion vectors. Arm ASR accepts motion vectors in 2D which encode the motion from a pixel in the current frame to the position of that same pixel in the previous frame. It expects that motion vectors are provided by the application in [**<-width, -height>**..**<width, height>**] range; this matches Screen-Space. For example, a motion vector for a pixel in the upper-left corner of the screen with a value of <width, height> would represent a motion that traversed the full width and height of the input surfaces, originating from the bottom-right corner.
-
-If your application computes motion vectors in another space - for example normalized device coordinate space - then you may use the [`motionVectorScale`](./include/host/ffxm_fsr2.h#L205) field of the [`FfxmFsr2DispatchDescription`](./include/host/ffxm_fsr2.h#L194) structure to instruct the technique to adjust them to match the expected range. The code examples below illustrate how motion vectors may be scaled to screen space. The example HLSL and C++ code below illustrates how NDC-space motion vectors can be scaled using the Arm ASR host API.
-
-```HLSL
-// GPU: Example of application NDC motion vector computation
-float2 motionVector = (previousPosition.xy / previousPosition.w) - (currentPosition.xy / currentPosition.w);
-
-// CPU: Matching Arm ASR motionVectorScale configuration
-dispatchParameters.motionVectorScale.x = (float)renderWidth;
-dispatchParameters.motionVectorScale.y = (float)renderHeight;
++----------------------------------------------------------------------------------------------------+
+|                                    FSR 3.1.4 COMPUTE PIPELINE                                      |
++----------------------------------------------------------------------------------------------------+
+  [Input Depth]       [Input Motion Vectors]      [Input Color (1200x540)]
+        |                       |                            |
+        +------------+----------+                            |
+                     |                                       |
+                     v                                       v
+         +-----------------------+               +-----------------------+
+         |     PrepareInputs     |               |      LumaPyramid      |
+         | (Recon Depth, Dilate) |               |  (SPD 5-Level Mips)   |
+         +-----------------------+               +-----------------------+
+                     |                                       |
+                     +-------------------+-------------------+
+                                         |
+                                         v
+                         +-------------------------------+
+                         |     ShadingChangePyramid      |
+                         |      (SPD Diff Mip Chain)     |
+                         +-------------------------------+
+                                         |
+                                         v
+                         +-------------------------------+
+                         |         ShadingChange         |
+                         |  (Pixel-Level Light Tracking) |
+                         +-------------------------------+
+                                         |
+                                         v
+                         +-------------------------------+
+                         |       PrepareReactivity       |
+                         | (Transparency / Ghost Masking)|
+                         +-------------------------------+
+                                         |
+                                         v
+                         +-------------------------------+
+                         |        LumaInstability        |
+                         |    (Flicker / Ringing Damp)   |
+                         +-------------------------------+
+                                         |
+                                         v
+                         +-------------------------------+
+                         |          Accumulate           |
+                         | (Lanczos Reconstruction / LUT)|
+                         +-------------------------------+
+                                         |
+                                         v
+                             [Upscaled Output (2400x1080)]
 ```
 
-#### Precision & resolution
+1. **`PrepareInputs`** ([`src/components/fsr3upscaler/ffxm_fsr3upscaler.cpp`](src/components/fsr3upscaler/ffxm_fsr3upscaler.cpp#L845-L870)):
+   Prepares raw engine inputs for temporal processing. Reconstructs previous nearest depth from current depth and motion vectors, and performs 3×3 dilation on motion vectors and depth to ensure foreground edges take precedence during disocclusion.
+2. **`LumaPyramid`** ([`ffxm_fsr3upscaler.cpp`](src/components/fsr3upscaler/ffxm_fsr3upscaler.cpp#L872-L897)):
+   Computes current-frame color luminance and uses AMD's Single Pass Downsampler (SPD) to generate a 5-level mipmap pyramid in a single dispatch pass.
+3. **`ShadingChangePyramid`** ([`ffxm_fsr3upscaler.cpp`](src/components/fsr3upscaler/ffxm_fsr3upscaler.cpp#L899-L924)):
+   Generates a downsampled pyramid of luminance variance between previous history and current frame across multiple spatial scales to detect illumination changes.
+4. **`ShadingChange`** ([`ffxm_fsr3upscaler.cpp`](src/components/fsr3upscaler/ffxm_fsr3upscaler.cpp#L926-L948)):
+   Evaluates shading change confidence per pixel, distinguishing moving geometric edges from dynamic lighting and shadowing shifts.
+5. **`PrepareReactivity`** ([`ffxm_fsr3upscaler.cpp`](src/components/fsr3upscaler/ffxm_fsr3upscaler.cpp#L950-L974)):
+   Calculates accumulation reactivity weights and dilates transparency/reactive masks to protect alpha-blended particles and translucent surfaces from ghosting artifacts.
+6. **`LumaInstability`** ([`ffxm_fsr3upscaler.cpp`](src/components/fsr3upscaler/ffxm_fsr3upscaler.cpp#L976-L1000)):
+   Measures temporal instability in luminance changes to suppress disocclusion latency and ringing on high-contrast sub-pixel edges.
+7. **`Accumulate`** ([`ffxm_fsr3upscaler.cpp`](src/components/fsr3upscaler/ffxm_fsr3upscaler.cpp#L1002-L1031)):
+   The core upscaling kernel, consuming **70.7% to 73.3%** of total upscaler GPU time. Applies a Lanczos spatial reconstruction filter (optionally accelerated with precomputed weights via `useLut: true`), rect clipping, temporal history clamping, and bicubic sampling to generate the final 2400×1080 image.
 
-Internally, Arm ASR uses 16bit quantities to represent motion vectors in many cases, which means that while motion vectors with greater precision can be provided, it will not currently benefit from the increased precision. The resolution of the motion vector buffer should be equal to the render resolution, unless the [`FFXM_FSR2_ENABLE_DISPLAY_RESOLUTION_MOTION_VECTORS`](./include/host/ffxm_fsr2.h#L143) flag is set in the [`flags`](./include/host/ffxm_fsr2.h#L183) field of the [`FfxmFsr2ContextDescription`](./include/host/ffxm_fsr2.h#L181) structure when creating the [`FfxmFsr2Context`](./include/host/ffxm_fsr2.h#L246), in which case it should be equal to the presentation resolution.
+### Clear Operations
 
-#### Coverage
+Four lightweight clear operations are orchestrated between dispatches to maintain atomic counters and mip targets:
+- `ClearReconstructedDepth`: Clears nearest reconstructed depth buffer prior to input preparation.
+- `ClearSpdAtomicCounterInitial`: Resets the 32-bit atomic counter for the luminance SPD pass.
+- `ClearSpdMips`: Clears intermediate luminance SPD mip storage.
+- `ClearSpdAtomicCounterSecondary`: Resets the atomic counter for the shading change SPD pass.
 
-Arm ASR will perform better quality upscaling when more objects provide their motion vectors. It is therefore advised that all opaque, alpha-tested and alpha-blended objects should write their motion vectors for all covered pixels. If vertex shader effects are applied - such as scrolling UVs - these calculations should also be factored into the calculation of motion for the best results. For alpha-blended objects it is also strongly advised that the alpha value of each covered pixel is stored to the corresponding pixel in the [reactive mask](#reactive-mask). This will allow the technique to perform better handling of alpha-blended objects during upscaling. The reactive mask is especially important for alpha-blended objects where writing motion vectors might be prohibitive, such as particles.
+### Resource Lifecycle and Temporal History
 
-### Reactive mask
+The FSR 3.1.4 context manages **19 internal surfaces** and allocates **3 shared resources** designed to be consumed by downstream frame generation pipelines:
+- `dilatedDepth` (`1200x540`, `VK_FORMAT_R32_SFLOAT`)
+- `dilatedMotionVectors` (`1200x540`, `VK_FORMAT_R16G16_SFLOAT`)
+- `reconstructedPrevNearestDepth` (`1200x540`, `VK_FORMAT_R32_UINT`)
 
-In the context of Arm ASR, the term "reactivity" means how much influence the samples rendered for the current frame have over the production of the final upscaled image. Typically, samples rendered for the current frame contribute a relatively modest amount to the result computed by the algorithm; however, there are exceptions. As there is no good way to determine from either color, depth or motion vectors which pixels have been rendered using alpha blending, Arm ASR performs best when applications explicitly mark such areas.
+All temporal ping-pong buffers (`accumulation`, `internalUpscaledColor`, `lumaHistory`) are maintained internally and transitioned across states transactionally with full double-destruction and out-of-memory rollback safety.
 
-Therefore, it is strongly encouraged that applications provide a reactive mask as an input. The reactive mask guides Arm ASR on where it should reduce its reliance on historical information when compositing the current pixel, and instead allow the current frame's samples to contribute more to the final result. The reactive mask allows the application to provide a value from [0.0..1.0] where 0.0 indicates that the pixel is not at all reactive (and should use the default composition strategy), and a value of 1.0 indicates the pixel should be fully reactive. This is a floating point range and can be tailored to different situations.
+### 16-Bit SPIR-V Shader Packaging
 
-While there are other applications for the reactive mask, the primary application for the reactive mask is producing better results of upscaling images which include alpha-blended objects. A good proxy for reactiveness is actually the alpha value used when compositing an alpha-blended object into the scene, therefore, applications should write `alpha` to the reactive mask. It should be noted that it is unlikely that a reactive value of close to 1 will ever produce good results. Therefore, we recommend clamping the maximum reactive value to around 0.9.
+- Shaders are precompiled to **SPIR-V 1.4** with explicit 16-bit storage and half-precision math (`-enable-16bit-types -DFFXM_HALF=1`).
+- Permutation selection is baked into dedicated C++ header blobs (`src/backends/shared/blob_accessors/prebuilt_shaders/`).
+- The current Accumulate pass runs pipeline permutation `0x00000085` (`useLut: true`, 8 SRV bindings) to utilize precomputed Lanczos weight textures.
+- Building on non-Windows platforms does not require Windows PE shader compiler binaries (`FidelityFX_SC.exe`); the runtime directly embeds byte-identical prebuilt SPIR-V blobs.
 
-If a reactive mask is not provided (by setting the [`reactive`](./include/host/ffxm_fsr2.h#L201) field of [`FfxmFsr2DispatchDescription`](./include/host/ffxm_fsr2.h#L194) to `NULL`) then an internally generated 1x1 texture with a cleared reactive value will be used.
+### Camera Jitter and Motion Vectors
 
-### Automatically generating reactivity
+- **Sub-Pixel Jitter**: Driven by a 32-phase Halton(2, 3) sequence calculated via [`ffxmFsr3UpscalerGetJitterOffset`](include/host/ffxm_fsr3upscaler.h#L518). Jitter is applied to the camera projection matrix in render-resolution pixel space.
+- **Motion Vectors**: Emitted in render-resolution pixel coordinates. `motionVectorScale` is configured as `{1.0f, 1.0f}`, and depth coordinates use reverse-Z floating-point representations (`[1.0 .. 0.0]`).
 
-To help applications generate the reactive mask, we provide an optional utility pass. Under the hood, the API launches a fragment shader which computes these values for each pixel using a luminance-based heuristic.
+---
 
-Applications wishing to do this can call the [`ffxmFsr2ContextGenerateReactiveMask`](./include/host/ffxm_fsr2.h#L348) function and should pass two versions of the color buffer, one containing opaque only geometry, and the other containing both opaque and alpha-blended objects.
+## Architecture Overview
 
-### Exposure
-Arm ASR provides two values which control the exposure used when performing upscaling. They are as follows:
+### System Architecture Diagram
 
-1. **Pre-exposure**: a value by which we divide the input signal to get back to the original signal produced by the game before any packing into lower precision render targets.
-2. **Exposure**: a value which is multiplied against the result of the pre-exposed color value.
+```mermaid
+flowchart TD
+    subgraph AppLayer["Application Layer"]
+        App["Android Sample App<br>(main.cpp / NativeActivity)"]
+        Scene["Procedural Scene Renderer<br>(scene.cpp / scene.frag)"]
+        Sync["Swapchain Synchronizer<br>(swapchain_sync.h)"]
+    end
 
-The exposure value should match that which the application uses during any subsequent tonemapping passes performed by the application. This means Arm ASR will operate consistently with what is likely to be visible in the final tonemapped image.
+    subgraph IntegrationLayer["Sample Integration Layer"]
+        UpscalerWrapper["Fsr3Upscaler Wrapper<br>(fsr3_upscaler.cpp)"]
+        Profiler["Vulkan GPU Profiler<br>(gpu_profiler.h)"]
+    end
 
-> In various stages of the algorithm, the technique will compute its own exposure value for internal use. It is worth noting that all outputs will have this internal tonemapping reversed before the final output is written. Meaning that Arm ASR returns results in the same domain as the original input signal.
+    subgraph PublicAPI["Public API (Host)"]
+        API["ffxmFsr3Upscaler API<br>(ffxm_fsr3upscaler.h)"]
+    end
 
-Poorly selected exposure values can have a drastic impact on the final quality of Arm ASR's upscaling. Therefore, it is recommended that [`FFXM_FSR2_ENABLE_AUTO_EXPOSURE`](./include/host/ffxm_fsr2.h#L147) is used by the application, unless there is a particular reason not to. When [`FFXM_FSR2_ENABLE_AUTO_EXPOSURE`](./include/host/ffxm_fsr2.h#L147) is set in the [`flags`](./include/host/ffxm_fsr2.h#L183) field of the [`FfxmFsr2ContextDescription`](./include/host/ffxm_fsr2.h#L181) structure, the exposure calculation in [`ComputeAutoExposureFromLavg`](./include/gpu/fsr2/ffxm_fsr2_common.h#L412) is used to compute the exposure value, which matches the exposure response of ISO 100 film stock.
+    subgraph RuntimeComponent["FSR 3.1.4 Runtime Component"]
+        Core["Orchestration Engine<br>(ffxm_fsr3upscaler.cpp)"]
+        State["Context & Resource State<br>(ffxm_fsr3upscaler_private.h)"]
+        Adapter["Inline CB Staging Adapter<br>(Constant Buffers 0-3)"]
+    end
 
-### Modular backend
+    subgraph InterfaceAbstraction["Backend Abstraction"]
+        VTable["FfxmInterface VTable<br>(15 Function Pointers)"]
+    end
 
-The design of the Arm ASR API means that the core implementation of the algorithm is unaware upon which rendering API it sits. Instead, it calls functions provided to it through an interface, allowing different backends to be used with the technique. Applications which have their own rendering abstractions can implement their own backend, taking control of all aspects of Arm ASR's underlying function, including memory management, resource creation, shader compilation, shader resource bindings, and the submission of the workloads to the graphics device.
+    subgraph VulkanBackend["Vulkan Backend Layer"]
+        VK["Vulkan Backend<br>(ffxm_vk.cpp)"]
+        Blobs["Prebuilt SPIR-V Blobs<br>(ffxm_fsr3upscaler_shaderblobs.cpp)"]
+        VKCtx["VkContext Runtime<br>(vk_context.cpp)"]
+    end
 
-Out of the box, the API will compile into multiple libraries following the separation already outlined between the core API and the backends. This means if you wish to use the backends provided, you should link both the core API lib (Arm_ASR_api) as well the backend (Arm_ASR_backend) matching your requirements.
+    subgraph HardwareExecution["Physical GPU Execution"]
+        GPU["Adreno / Mali GPU Hardware<br>(Vulkan Compute Queue)"]
+        TS["Vulkan Timestamp Query Pool<br>(64-bit Non-Blocking Queries)"]
+    end
 
-Arm ASR only provides a built-in Vulkan backend as it targets Vulkan mobile apps.
-
-### Camera jitter
-Arm ASR relies on the application to apply sub-pixel jittering while rendering - this is typically included in the projection matrix of the camera. To make the application of camera jitter simple, the API provides a small set of utility function which computes the sub-pixel jitter offset for a particular frame within a sequence of separate jitter offsets.
-
-``` CPP
-int32_t ffxmFsr2GetJitterPhaseCount(int32_t renderWidth, int32_t displayWidth);
-FfxErrorCode ffxmFsr2GetJitterOffset(float* outX, float* outY, int32_t jitterPhase, int32_t sequenceLength);
+    App --> Scene
+    App --> Sync
+    App --> UpscalerWrapper
+    UpscalerWrapper --> Profiler
+    UpscalerWrapper --> API
+    API --> Core
+    Core --> State
+    Core --> Adapter
+    Core --> VTable
+    VTable --> VK
+    VK --> Blobs
+    VK --> VKCtx
+    VKCtx --> GPU
+    Profiler --> TS
+    TS --> GPU
 ```
 
-Internally, these functions implement a **Halton[2,3]** sequence. The goal of the Halton sequence is to provide spatially separated points, which cover the available space.
+### Repository Directory Structure
 
-It is important to understand that the values returned from the [`ffxmFsr2GetJitterOffset`](./include/host/ffxm_fsr2.h#L504) are in unit pixel space, and in order to composite this correctly into a projection matrix we must convert them into projection offsets. The code listing below shows how to correctly composite the sub-pixel jitter offset value into a projection matrix.
+| Directory | Responsibility |
+|---|---|
+| [`include/host/`](include/host/) | Public host C/C++ API (`ffxm_fsr3upscaler.h`, `ffxm_interface.h`, `ffxm_types.h`, `ffxm_gpu_timestamps.h`) |
+| [`include/gpu/`](include/gpu/) | Dual-use CPU/GPU definitions (`ffxm_fsr3upscaler_resources.h`, `ffxm_core_gpu_common.h`) |
+| [`src/components/fsr3upscaler/`](src/components/fsr3upscaler/) | Core FSR 3.1.4 runtime, context state machine, constant buffer staging, and pass dispatch |
+| [`src/backends/vk/`](src/backends/vk/) | Lean, standalone Vulkan backend implementing `FfxmInterface` (`ffxm_vk.cpp`) |
+| [`src/backends/vk/shaders/fsr3upscaler/`](src/backends/vk/shaders/fsr3upscaler/) | GLSL compute shader entry points for all 7 passes and utilities |
+| [`src/backends/shared/blob_accessors/`](src/backends/shared/blob_accessors/) | Prebuilt SPIR-V blob accessors and permutation arrays |
+| [`samples/common/`](samples/common/) | Reusable sample code: `fsr3_upscaler.*`, `gpu_profiler.h`, `scene.*`, `swapchain_sync.h` |
+| [`samples/android/`](samples/android/) | Android NativeActivity Gradle project and Android-specific Vulkan context (`vk_context.*`) |
+| [`samples/windows/`](samples/windows/) | Win32 x64 MSVC standalone sample application |
+| [`tests/`](tests/) | Comprehensive unit and regression test suite (`test_milestone2.cpp`, 11,846 assertions) |
+| [`tools/`](tools/) | Automated physical benchmark runners, anomaly analyzers, and shader compilation utilities |
+| [`artifacts/`](artifacts/) | Raw physical GPU telemetry datasets, CSVs, JSON summaries, and comparative reports |
 
-``` CPP
-const int32_t jitterPhaseCount = ffxmFsr2GetJitterPhaseCount(renderWidth, displayWidth);
+---
 
-float jitterX = 0;
-float jitterY = 0;
-ffxmFsr2GetJitterOffset(&jitterX, &jitterY, index, jitterPhaseCount);
+## Physical Hardware Benchmarks
 
-// Calculate the jittered projection matrix.
-const float jitterX = 2.0f * jitterX / (float)renderWidth;
-const float jitterY = -2.0f * jitterY / (float)renderHeight;
-const Matrix4 jitterTranslationMatrix = translateMatrix(Matrix3::identity, Vector3(jitterX, jitterY, 0));
-const Matrix4 jitteredProjectionMatrix = jitterTranslationMatrix * projectionMatrix;
-```
+### Controlled Benchmark Configuration
 
-Jitter should be applied to *all* rendering. This includes opaque, alpha transparent, and raytraced objects. For rasterized objects, the sub-pixel jittering values calculated by the [`ffxmFsr2GetJitterOffset`](./include/host/ffxm_fsr2.h#L504) function can be applied to the camera projection matrix which is ultimately used to perform transformations during vertex shading. For raytraced rendering, the sub-pixel jitter should be applied to the ray's origin - often the camera's position.
+Performance was evaluated using identical binary artifacts across two physical Android devices:
+- **Workload**: FSR 3.1.4 upscaling from **1200 × 540** (Render) to **2400 × 1080** (Display) at **2.00× ratio**.
+- **Shader Permutation**: `0x00000085` (`useLut: true`, 8 SRV textures).
+- **Binary Identity**: Byte-identical APK (`SHA-256: 905ce086f4115c9c3c037add49da29b1503a2d4ae6519b800aecfadba6bc5b14`).
+- **Telemetry Protocol**: 3 independent runs per device; 200 warmup frames discarded; exactly 500 measured frames collected per run (**1,500 total measured frames per device**).
+- **Measurement Tool**: Non-blocking Vulkan GPU timestamp queries (`vkGetQueryPoolResults`).
 
-Whether you elect to use the recommended [`ffxmFsr2GetJitterOffset`](./include/host/ffxm_fsr2.h#L504) function or your own sequence generator, you must set the [`jitterOffset`](./include/host/ffxm_fsr2.h#L204) field of the [`FfxmFsr2DispatchDescription`](./include/host/ffxm_fsr2.h#L194) structure to inform the algorithm of the jitter offset that has been applied in order to render each frame. Moreover, if not using the recommended [`ffxmFsr2GetJitterOffset`](./include/host/ffxm_fsr2.h#L504) function, care should be taken that your jitter sequence never generates a null vector; that is value of 0 in both the X and Y dimensions.
+| Parameter | Xiaomi Mi 11X | POCO F6 |
+|---|---|---|
+| **SoC** | Qualcomm Snapdragon 870 (`SM8250`) | Qualcomm Snapdragon 8s Gen 3 (`SM8635`) |
+| **GPU Hardware** | Qualcomm Adreno (TM) 650 | Qualcomm Adreno (TM) 735 |
+| **Clock Frequency** | 670 MHz (Sustained active) | Dynamic DVFS (Active) |
+| **Vulkan API** | 1.1.295 | 1.3.128 |
+| **Vulkan Driver** | `0.512.530` | `0.762.1` |
+| **Android Version** | Android 17 (API 37) | Android 16 (API 36) |
+| **Timestamp Period** | 52.0833 ns/tick (48 valid bits) | 52.0833 ns/tick (48 valid bits) |
+| **Thermal State** | Status 0 (Normal, 34.7°C -> 35.2°C) | Status 0 (Normal, 37.1°C -> 37.8°C) |
 
-### Camera jump cuts
+> **Measurement Context**: These figures represent isolated **GPU compute execution durations** of the FSR 3.1.4 upscaler passes as recorded by hardware timestamp counters. They do not represent end-to-end game framerates, which include game simulation, raster scene rendering, CPU dispatch, and display composition. The comparison is controlled for binary and workload, but reflects differing Android OS versions and GPU driver baselines.
 
-Most applications with real-time rendering have a large degree of temporal consistency between any two consecutive frames. However, there are cases where a change to a camera's transformation might cause an abrupt change in what is rendered. In such cases, ASR is unlikely to be able to reuse any data it has accumulated from previous frames, and should clear this data such to exclude it from consideration in the compositing process. In order to indicate that a jump cut has occurred with the camera you should set the [`reset`](./include/host/ffxm_fsr2.h#L211) field of the [`FfxmFsr2DispatchDescription`](./include/host/ffxm_fsr2.h#L194) structure to `true` for the first frame of the discontinuous camera transformation.
+### Controlled Comparison Matrix
 
-Rendering performance may be slightly less than typical frame-to-frame operation when using the reset flag, as Arm ASR will clear some additional internal resources.
+The table below summarizes median GPU execution latencies aggregated across 1,500 physical frames per device. Full raw datasets are available in [`artifacts/gpu-profiling/controlled-comparison/`](artifacts/gpu-profiling/controlled-comparison/):
 
-### Mipmap biasing
+| Stage / Operation | Type | Mi 11X (Adreno 650)<br>Median ms | POCO F6 (Adreno 735)<br>Median ms | Speedup % | Speedup Ratio | Mi 11X % Total | POCO F6 % Total |
+|---|---|---|---|---|---|---|---|
+| **TOTAL FSR 3.1.4 GPU TIME** | **Total** | **19.2500** | **8.5851** | **55.40%** | **2.24x** | **100.00%** | **100.00%** |
+| `PrepareInputs` | Compute Pass | 2.1998 | 1.0121 | 53.99% | 2.17x | 11.43% | 11.79% |
+| `LumaPyramid` | Compute Pass | 0.2740 | 0.1569 | 42.74% | 1.75x | 1.42% | 1.83% |
+| `ShadingChangePyramid` | Compute Pass | 0.7132 | 0.3834 | 46.24% | 1.86x | 3.70% | 4.47% |
+| `ShadingChange` | Compute Pass | 0.0602 | 0.0466 | 22.59% | 1.29x | 0.31% | 0.54% |
+| `PrepareReactivity` | Compute Pass | 1.1199 | 0.6040 | 46.07% | 1.85x | 5.82% | 7.04% |
+| `LumaInstability` | Compute Pass | 0.6164 | 0.2693 | 56.31% | 2.29x | 3.20% | 3.14% |
+| `Accumulate` | Compute Pass | **14.1102** | **6.0660** | **57.01%** | **2.33x** | **73.30%** | **70.66%** |
+| `ClearReconstructedDepth` | Clear Job | 0.0867 | 0.0189 | 78.20% | 4.59x | 0.45% | 0.22% |
+| `ClearSpdAtomicCounterInitial` | Clear Job | 0.0029 | 0.0019 | 34.48% | 1.53x | 0.02% | 0.02% |
+| `ClearSpdMips` | Clear Job | 0.0438 | 0.0132 | 69.86% | 3.32x | 0.23% | 0.15% |
+| `ClearSpdAtomicCounterSecondary`| Clear Job | 0.0044 | 0.0046 | -4.55% | 0.96x | 0.02% | 0.05% |
 
-Applying a negative mipmap biasing will typically generate an upscaled image with better texture detail. We recommend applying the following formula to your Mipmap bias:
+#### Aggregate Frame Distribution:
+- **Xiaomi Mi 11X (Adreno 650)**: Median: `19.250 ms` | Mean: `19.268 ms` | P95: `19.507 ms` | P99: `19.645 ms` | StdDev: `0.133 ms`
+- **POCO F6 (Adreno 735)**: Median: `8.585 ms` | Mean: `8.628 ms` | P95: `8.915 ms` | P99: `9.507 ms` | StdDev: `0.193 ms`
 
-``` CPP
-mipBias = log2(renderResolution/displayResolution) - 1.0;
-```
+### Key Performance Findings
 
-### Frame Time Delta Input
+1. **Generational Scaling (2.24× Speedup)**: The Adreno 735 reduces total upscaling time by **55.4%** compared to the Adreno 650, moving the upscaler's theoretical execution ceiling from ~52 FPS to ~116 FPS.
+2. **Accumulate Dominance (71–73% of Execution)**: On both GPUs, `Accumulate` represents over seven-tenths of all upscaling latency. It scales by **2.33×** (14.11 ms -> 6.07 ms), reflecting the increased FP16 vector ALU throughput and memory subsystem of the Snapdragon 8s Gen 3.
+3. **Memory Clear Optimization (3.3× – 4.6× Speedup)**: Dedicated texture and depth clears (`ClearReconstructedDepth`, `ClearSpdMips`) drop to negligible fractions on Adreno 735 (total clear time: 0.038 ms vs 0.138 ms).
 
-The API requires [`frameTimeDelta`](./include/host/ffxm_fsr2.h#L209) be provided by the application through the [`FfxmFsr2DispatchDescription`](./include/host/ffxm_fsr2.h#L194) structure. This value is in __milliseconds__: if running at 60fps, the value passed should be around __16.6f__.
+### Reconciliation with Historical Baseline
 
-The value is used within the temporal component of the auto-exposure feature. This allows for tuning of the history accumulation for quality purposes.
+Historical documentation reported a Mi 11X baseline of **24.24 ms** (`artifacts/gpu-profiling/mi11x/fsr3_mi11x_diagnostic.json`) with Accumulate taking **18.11 ms**. 
+Controlled testing revealed that enabling precomputed Lanczos lookup tables (`useLut: true`, permutation `0x85`) dropped Accumulate execution from 18.11 ms to **14.11 ms** on the Adreno 650—a **22.1% pass speedup** solely from lookup-table math reduction. Both historical unoptimized and modern controlled datasets are preserved in the repository.
 
-### HDR support
+---
 
-High dynamic range images are supported. To enable this, you should set the [`FFXM_FSR2_ENABLE_HIGH_DYNAMIC_RANGE`](./include/host/ffxm_fsr2.h#L142) bit in the [`flags`](./include/host/ffxm_fsr2.h#L183) field of the [`FfxmFsr2ContextDescription`](./include/host/ffxm_fsr2.h#L181) structure. When using this flag, the input color image should be provided in linear RGB color space.
+## Profiling and Engineering Methodology
 
-### Debug Checker
+### Vulkan GPU Timestamp Profiling
 
-The context description structure can be provided with a callback function for passing textual warnings from the runtime to the underlying application. The `fpMessage` member of the description is of type `FfxmFsr2Message` which is a function pointer for passing string messages of various types. Assigning this variable to a suitable function, and passing the [`FFXM_FSR2_ENABLE_DEBUG_CHECKING`](./include/host/ffxm_fsr2.h#L150) flag within the flags member of [`FfxmFsr2ContextDescription`](./include/host/ffxm_fsr2.h#L181) will enable the feature. It is recommended this is enabled only in debug development builds.
+Measuring GPU compute passes on mobile systems requires bypassing CPU dispatch duration and Vulkan queue submission overhead:
+- **Hardware Timestamp Queries**: Uses `vkCmdWriteTimestamp` at `VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT` and `VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT`.
+- **64-Bit Arithmetic & Wraparound**: Implements precise 64-bit tick delta calculation in [`ffxm_gpu_timestamps.h`](include/host/ffxm_gpu_timestamps.h#L70-L100) using bitmask arithmetic (`(e - s) & mask`) across the queue family's valid bits (48 bits on Adreno).
+- **Non-Blocking Query Retrieval**: Queries are fetched using `VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT` without `VK_QUERY_RESULT_WAIT_BIT` to prevent CPU stalls or artificial GPU pipeline bubbles.
 
-## Extended ffx_shader_compiler
+### Profiler Hardening and Query Invariants
 
-Most of the workloads in the upscalers have been converted to Fragment Shaders. Since the workflow using the standalone VK backend relies in reflection data generated with [`AMD's Shader Compiler`](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/blob/main/docs/tools/ffx-sc.md), it become necessary to do an ad-hoc extension of the tool to provide reflection data for the RenderTargets so resources could be resolved automatically in the backend. Users might want to evolve the algorithm potentially changing the RenderTargets in the process, to do so we provide a diff file with the changes that were applied locally [`ffx_shader_compiler`](./tools/ffx_shader_compiler.diff) for the latest version of the technique.
+The profiler harness ([`samples/common/gpu_profiler.h`](samples/common/gpu_profiler.h#L482-L575)) enforces strict data integrity invariants:
+1. **Full Query Pair Validation**: Every compute pass (7 pairs) and clear operation (4 pairs), plus total start/end (24 queries in `PER_PASS` mode), must be fully available and valid.
+2. **Zero Partial Timing Substitution**: If any single query is missing or not ready, the entire frame is rejected (`unavailableCount_++`). **0.0 ms is never substituted for missing passes.**
+3. **Warmup Quota Preservation**: Warmup frames with incomplete queries do not decrement the warmup counter.
+4. **Unit-Tested Contracts**: Test 35 in [`tests/test_milestone2.cpp`](tests/test_milestone2.cpp#L6730-L6840) validates rejection of partial queries, 48-bit wraparound, and stats accounting across 11,846 checks.
 
-## Generate prebuilt shaders
+### Observed Telemetry Anomalies (POCO F6 Preemption)
 
-We provide a helper script to generate prebuilt shaders which are used for standalone backend, you can just run [`generate_prebuilt_shaders.py`](./tools/generate_prebuilt_shaders.py), and output path is **src/backends/shared/blob_accessors/prebuilt_shaders**.
+During testing on the POCO F6 (Adreno 735), timestamp telemetry exhibited periodic frame spikes where total GPU execution jumped by ~0.89 ms (from ~8.58 ms to ~9.48 ms).
 
-Note that regenerating the shaders **requires a Windows host**: the compiler binaries under [`tools/bin`](./tools/bin) (`FidelityFX_SC.exe`, `dxcompiler.dll` and `glslangValidator.exe`) are Windows x86-64 executables. On macOS and Linux the build consumes the prebuilt blobs that are already checked in, which is what `FFXM_USE_PREBUILT_SHADERS` selects (see [Building for Android](#building-for-android)).
+Quantitative analysis across 1,500 frames ([`anomaly_analysis.json`](artifacts/gpu-profiling/controlled-comparison/anomaly_analysis.json)) revealed:
+- **Strict Periodicity**: Spikes occur at a rigid **23 to 25 frame interval** (average 24.1 frames $\times$ 8.58 ms $\approx$ **206 ms / ~5 Hz cadence**).
+- **Pass Mutual Exclusion**: In each spiking frame, **exactly one pass** absorbs the ~0.9 ms latency penalty (predominantly `PrepareInputs` [71%] or `Accumulate` [15%]), while remaining passes run at nominal speed.
+- **Absence on Mi 11X**: The Adreno 650 exhibited zero periodic spikes (standard deviation 0.13 ms vs 0.19 ms on F6).
 
-## Building for Android
+> **Working Hypothesis**: The current working hypothesis is that the spikes originate from **Android SurfaceFlinger / Display Hardware Composer GPU preemption** occurring at a 5 Hz system cadence on Android 16. However, until verified with kernel scheduler traces (Perfetto / ftrace), this remains an observational hypothesis rather than a closed finding.
 
-Arm ASR builds for Android with the NDK's CMake toolchain. The Android defaults enable the standalone Vulkan backend, consume the checked-in prebuilt SPIR-V, and link the NDK's `libvulkan.so` directly, so no extra options are required:
+---
 
-```sh
-cmake -B build/android-arm64 -G Ninja \
-  -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake \
-  -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-35
-cmake --build build/android-arm64
-```
-
-This produces `libArm_ASR_api.a` and `libArm_ASR_backend.a`. Link both, as described in [Quick integration](#quick-integration).
+## Building and Installation
 
 ### Prerequisites
 
-- Android NDK **r29** (`29.0.14206865`), targeting **API level 35**
-- CMake 3.22 or newer
+| Component | Verified Requirement |
+|---|---|
+| **Operating System** | Linux (Ubuntu 22.04+), macOS 13+, or Windows 11 |
+| **Android NDK** | `29.0.14206865` (r29) or r27+ |
+| **Android SDK** | Platform 35 (`android-35`), Build-Tools 35.0.0 |
+| **JDK** | OpenJDK 17 or 21 |
+| **CMake** | 3.22.1+ |
+| **Ninja** | 1.11+ |
+| **Host Toolchain** | MSVC 2022 (Windows) or Clang 16+ (Linux/macOS) |
 
-### Build options
+### Vulkan Hardware and Driver Requirements
 
-| Option | Default | Meaning |
-|---|---|---|
-| `FFXM_REMOVE_ARM_ASR_VK_STANDALONE_BACKEND` | `ON`, `OFF` on Android | Compiles the standalone Vulkan backend away |
-| `FFXM_USE_PREBUILT_SHADERS` | `ON` on non-Windows hosts | Use the checked-in SPIR-V blobs instead of invoking the Windows-only shader compiler |
-| `FFXM_VKLOADER_VOLK` | `ON`, `OFF` on Android | Resolve Vulkan entry points through volk instead of linking the loader directly |
+The library enforces a strict runtime capability gate ([`samples/android/app/src/main/cpp/vk_context.cpp`](samples/android/app/src/main/cpp/vk_context.cpp#L200-L295)). Target devices must support:
+- **Vulkan API**: 1.1 with `VK_KHR_spirv_1_4`, or native Vulkan 1.2+.
+- **Shader Float16**: `VK_KHR_shader_float16_int8` (`shaderFloat16 = VK_TRUE`). Required because prebuilt SPIR-V blobs utilize explicit half-precision arithmetic without FP32 fallbacks.
+- **16-Bit Storage**: `VK_KHR_16bit_storage` (`storageBuffer16BitAccess = VK_TRUE`).
+- **Storage Image Formats**: `VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT` for `R32_SFLOAT`, `R16G16_SFLOAT`, `R32_UINT`, `R16G16B16A16_SFLOAT`, `R8_UNORM`, `R8G8B8A8_UNORM`, `R16_SFLOAT`, `R32G32B32A32_SFLOAT`.
+- **Target ABI**: `arm64-v8a` is the primary production target. (`x86_64` builds for CI compile verification; Android emulators running SwiftShader will fail the capability gate due to lack of `shaderFloat16`).
 
-### Device requirements
+### Building the Android Sample APK
 
-The prebuilt shader blobs are **SPIR-V 1.4 compiled with explicit 16-bit types**, and there is no fp32 permutation set. A device must therefore support:
+To assemble the debug validation application using the Gradle wrapper:
 
-- Vulkan 1.2, or Vulkan 1.1 with [`VK_KHR_spirv_1_4`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/VK_KHR_spirv_1_4.html)
-- [`VK_KHR_shader_float16_int8`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/VK_KHR_shader_float16_int8.html) with `shaderFloat16`
-- 16-bit storage
+```bash
+cd samples/android
+./gradlew :app:assembleDebug
+```
 
-`arm64-v8a` is the supported ABI. `x86_64` builds for emulator and CI coverage, but SwiftShader does not advertise `shaderFloat16`. `armeabi-v7a` compiles but is untested on device.
+The compiled APK will be staged at:
+`samples/android/app/build/outputs/apk/debug/app-debug.apk`
 
-## Building for Windows
+### Installing and Launching on Device
 
-The Windows defaults differ from Android in three ways that matter, so a host project has to be explicit:
+Ensure your device is connected via ADB with USB debugging authorized:
 
-```sh
-cmake -B build -A x64 ^
-  -DFFXM_REMOVE_ARM_ASR_VK_STANDALONE_BACKEND=OFF ^
-  -DFFXM_USE_PREBUILT_SHADERS=ON ^
-  -DFFXM_VKLOADER_VOLK=OFF ^
-  -DFFXM_VULKAN_PATH="%VULKAN_SDK%/Include"
+```bash
+# Install APK
+adb install -r samples/android/app/build/outputs/apk/debug/app-debug.apk
+
+# Launch NativeActivity
+adb shell am start -n com.arm.asr.sample/android.app.NativeActivity
+
+# Monitor logcat output
+adb logcat -s ArmASR
+```
+
+Expected logcat output upon successful startup:
+```text
+ArmASR: Vulkan loader reports instance version 1.4.0
+ArmASR: Using device 'Adreno (TM) 735' (Vulkan 1.3.128)
+ArmASR: GPU timestamp profiling: supported (48 valid bits, period 52.083 ns)
+ArmASR: Arm ASR / FSR 3.1.4 device gate: SPIR-V 1.4 yes | shaderFloat16 yes | 16-bit storage yes | ...
+ArmASR: Swapchain: 2400x1080, 5 images, format 37
+ArmASR: FSR 3.1.4: Rendering at 1200x540, presenting at 2400x1080 (ratio 2.00)
+ArmASR: FSR3-ACCUMULATE pipeline created (permutation: 0x00000085, srvTextureCount: 8, useLut: true)
+ArmASR: First FSR 3.1.4 frame dispatched successfully
+```
+
+### Running GPU Profiling Runs via ADB
+
+The runtime exposes configuration properties to automate benchmark collection:
+
+```bash
+# Configure 200 warmup frames, 500 measured frames, per-pass diagnostic profiling
+adb shell setprop debug.fsr3.profiling diagnostic
+adb shell setprop debug.fsr3.run 1
+adb shell setprop debug.fsr3.warmup 200
+adb shell setprop debug.fsr3.frames 500
+adb shell setprop debug.fsr3.prefix diagnostic
+
+# Launch application and collect telemetry
+adb shell am force-stop com.arm.asr.sample
+adb logcat -c
+adb shell am start -n com.arm.asr.sample/android.app.NativeActivity
+
+# Pull generated JSON and CSV reports from app internal storage
+adb exec-out run-as com.arm.asr.sample cat files/diagnostic.json > run_diagnostic.json
+adb exec-out run-as com.arm.asr.sample cat files/diagnostic.csv > run_diagnostic.csv
+```
+
+### Building Static Libraries via CMake
+
+To compile the standalone static libraries (`libArm_ASR_api.a` and `libArm_ASR_backend.a`) for integration into external game engines:
+
+```bash
+cmake -B build/android-arm64 -G Ninja \
+  -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK/build/cmake/android.toolchain.cmake" \
+  -DANDROID_ABI=arm64-v8a \
+  -DANDROID_PLATFORM=android-35 \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_TESTING=OFF
+
+cmake --build build/android-arm64
+```
+
+### Host Testing and Validation (MSVC)
+
+The unit test suite exercises resource allocation, transactional rollback, swapchain recovery, and profiler query invariants:
+
+```powershell
+# Configure MSVC Release build with testing enabled
+cmake -B build -A x64 `
+  -DFFXM_REMOVE_ARM_ASR_VK_STANDALONE_BACKEND=OFF `
+  -DFFXM_USE_PREBUILT_SHADERS=ON `
+  -DFFXM_VKLOADER_VOLK=OFF `
+  -DBUILD_TESTING=ON
+
+# Build test runner
 cmake --build build --config Release
+
+# Execute test suite
+ctest --test-dir build -C Release --output-on-failure
+# Or run directly: .\build\Release\test_milestone2.exe
 ```
 
-| Override | Why |
-|---|---|
-| `FFXM_REMOVE_ARM_ASR_VK_STANDALONE_BACKEND=OFF` | The backend is compiled away by default off Android, leaving no `Arm_ASR_backend` target |
-| `FFXM_USE_PREBUILT_SHADERS=ON` | Consumes the committed SPIR-V rather than invoking `tools/bin/FidelityFX_SC.exe`, so every platform ships byte-identical blobs. Leave it `OFF` to exercise the shader compiler |
-| `FFXM_VKLOADER_VOLK=OFF` | This tree never calls `volkInitialize`/`volkLoadDevice` and does not vendor volk, so the volk path links but leaves the backend's function table full of nulls at dispatch time. With volk off, the backend resolves entry points through the `vkDeviceProcAddr` you supply in `VkDeviceContext` |
-| `FFXM_VULKAN_PATH` | The backend uses directory-scoped `include_directories()`, so nothing propagates to your target |
+---
 
-`Arm_ASR_backend` is a static library and links no Vulkan loader itself. Your executable must link `vulkan-1.lib`, which resolves the seven `vk*` symbols the backend calls directly rather than through its `VKFunctionTable`: `vkGetDeviceProcAddr`, `vkEnumerateDeviceExtensionProperties`, `vkGetPhysicalDeviceMemoryProperties`, `vkGetPhysicalDeviceProperties2`, `vkGetPhysicalDeviceFeatures2`, `vkCmdSetViewport` and `vkCmdSetScissor`.
+## Development Principles
 
-Note that MSVC defines `_DEBUG` in Debug configurations, which enables Arm ASR's internal asserts and debug resource naming. Note also that `wchar_t` is 2 bytes on Windows against 4 on Android; it is pervasive in the public ABI, so `ffxmGetScratchMemorySizeVK` returns a substantially smaller number here. It is `sizeof`-based and adapts on its own.
+This repository adheres to strict engineering directives:
+1. **Correctness Before Performance**: Functional correctness and image stability take priority over premature shader tweaking.
+2. **Measure Before Optimizing**: Optimization proposals must be justified and validated through reproducible GPU timestamp measurements.
+3. **Preserve Upstream Algorithmic Semantics**: Mathematical filtering invariants (such as Lanczos windowing and rect clamping) must not be compromised for speed.
+4. **Zero Vibe-Coding / Speculative Hacks**: No arbitrary constants or heuristic hacks; implementations must be grounded in physical GPU architecture.
+5. **Physical Device Verification**: CI compilation does not substitute for real hardware verification. Features must be validated on physical silicon.
+6. **Isolated and Measurable Diffs**: Shader and harness modifications must be kept minimal, surgical, and individually benchmarkable.
+7. **Complete Dataset Preservation**: Raw CSV measurements and environment logs must be preserved alongside aggregated statistics.
 
-## Sample applications
+---
 
-Both samples render the same procedural scene at reduced resolution and upscale it with Arm ASR. They share `scene.*`, `asr_upscaler.*` and their GLSL shaders through [`samples/common`](./samples/common); only the window/surface setup and entry point are per-platform.
+## Roadmap
 
-| Sample | What |
-|---|---|
-| [`samples/android`](./samples/android) | Gradle/NativeActivity Vulkan app. See its [README](./samples/android/README.md) |
-| [`samples/windows`](./samples/windows) | Win32 Vulkan app, x64/MSVC. See its [README](./samples/windows/README.md) |
+- [x] **Milestone 1**: FSR 3.1.4 Upscaler core integration within `ffxm` architecture.
+- [x] **Milestone 2**: Transactional resource management and physical Vulkan validation sample.
+- [x] **Milestone 3**: Physical hardware profiling and controlled baseline telemetry (Adreno 650 vs 735).
+- [x] **Milestone 4**: Vulkan profiler hardening and query invariant validation.
+- [ ] **Milestone 5**: System-level kernel trace profiling (Perfetto / ftrace) to analyze POCO F6 SurfaceFlinger preemption cadence.
+- [ ] **Milestone 6**: Hardware profiling expansion across additional mobile architectures (ARM Immortalis / Mali-G720, Samsung Xclipse).
+- [ ] **Milestone 7**: Automated image quality verification harness (PSNR, SSIM, and LPIPS against reference renders).
+- [ ] **Milestone 8**: Sub-pass shader instruction analysis and ALU occupancy tuning of the `Accumulate` kernel.
+- [ ] **Milestone 9**: Empirical evaluation of Tile-Based Deferred Rendering (TBDR) fragment/subpass alternatives against compute dispatch baselines.
+- [ ] **Milestone 10**: Phase 2 Frame Generation exploratory architecture (Optical Flow and Frame Interpolation swapchain integration).
 
-[`samples/common/asr_upscaler.cpp`](./samples/common/asr_upscaler.cpp) is the integration proper and follows the [quick integration](#quick-integration) path end to end.
+---
 
-## Targeting OpenGL ES 3.2
+## Attribution and Licensing
 
-Running Arm ASR on GLES is possible when using the [tight integration](#tight-integration) approach. In this scenario, the user will have to apply two minor changes on their side:
-1. When creating the context, in [`flags`](./include/host/ffxm_fsr2.h#L183) field of the [`FfxmFsr2ContextDescription`](./include/host/ffxm_fsr2.h#L181) the user will have to specify the flag [`FFXM_FSR2_OPENGL_ES_3_2`](./include/host/ffxm_fsr2.h#L149). This will trigger some minor changes internally so Arm ASR adapts to a GLES friendly approach.
-2. The [`permutationOptions`](./include/host/ffxm_interface.h#L307) provided when creating the pipelines will now include the new permutation option [`FSR2_SHADER_PERMUTATION_PLATFORM_GLES_3_2`](./src/components/fsr2/ffxm_fsr2_private.h#L47). This is a hint to the user that they will need to use the shader variants for the technique with the following symbol defined:
-```
-#define FFXM_SHADER_PLATFORM_GLES_3_2 1
-```
+### License
+This repository is licensed under the **MIT License**. See [LICENSES/MIT.txt](LICENSES/MIT.txt) for full license terms.
 
-## License
+### Upstream Attribution and Acknowledgments
+- **Arm Limited**: Maintainers of the [Arm ASR Generic Library](https://github.com/arm/accuracy-super-resolution-generic-library), which provided the foundational mobile Vulkan backend architecture, shader packaging, and lightweight runtime design.
+- **Advanced Micro Devices, Inc. (AMD)**: Creators of [FidelityFX™ Super Resolution (FSR)](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK), providing the temporal upscaling algorithms, Lanczos reconstruction filters, and Single Pass Downsampler (SPD) technology.
+- **Khronos Group**: Vulkan API specifications and headers.
 
-Please see the [LICENSE file](./LICENSES/MIT.txt) for details.
-
-## Trademarks and Copyrights
-
-AMD is a trademark of Advanced Micro Devices, Inc.
-
-AMD FidelityFX™ is a trademark of Advanced Micro Devices, Inc.
-
-Arm® is a registered trademark of Arm Limited (or its subsidiaries) in the US and/or elsewhere.
-
-Unreal® is a trademark or registered trademark of Epic Games, Inc. in the United States of America and elsewhere.
-
-Vulkan is a registered trademark and the Vulkan SC logo is a trademark of the Khronos Group Inc.
-
-DirectX, Windows are registered trademarks or trademarks of Microsoft Corporation in the US and other jurisdictions.
-
-OpenGL is a registered trademark and the OpenGL ES logo is a trademark of Hewlett Packard Enterprise used by permission by Khronos.
-
-## Contact
-
-You can reach out to us on the following email address: <arm-asr-support@arm.com>.
-
-## Security Issues
-
-Arm takes security issues seriously please see [Security](SECURITY.md) for more details.
+### Trademarks
+- **Arm®** and **Arm Accuracy Super Resolution™ (Arm ASR)** are registered trademarks or trademarks of Arm Limited (or its subsidiaries).
+- **AMD®**, **FidelityFX™**, and **FSR™** are trademarks of Advanced Micro Devices, Inc.
+- **Qualcomm®**, **Snapdragon®**, and **Adreno®** are trademarks of Qualcomm Incorporated.
+- **Android™** and **Vulkan®** are trademarks of Google LLC and Khronos Group Inc., respectively.
