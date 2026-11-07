@@ -201,6 +201,14 @@ public:
     const std::vector<FrameGpuTiming>& samples() const { return samples_; }
     const GpuProfilerConfig& config() const { return config_; }
 
+    uint32_t unavailableCount() const { return unavailableCount_; }
+    uint32_t warmupRemaining() const { return warmupRemaining_; }
+
+    struct QueryResultWithAvailability {
+        uint64_t timestamp;
+        uint64_t available;
+    };
+
     static uint32_t queryCountForMode(FfxmGpuProfilingMode mode)
     {
         switch (mode) {
@@ -456,11 +464,6 @@ private:
         uint32_t             frameNumber = 0;
     };
 
-    struct QueryResultWithAvailability {
-        uint64_t timestamp;
-        uint64_t available;
-    };
-
     static constexpr uint32_t kMaxSlots = 4;
 
     GpuProfilerConfig           config_{};
@@ -495,7 +498,7 @@ private:
         const uint32_t validBits = ctx.timestampValidBits();
         const float period = ctx.timestampPeriod();
 
-        // Check total timestamp pair
+        // 1. Validate total timestamp pair
         const bool startAvail = (results[FFXM_PROFILING_QUERY_TOTAL_START].available != 0);
         const bool endAvail   = (results[FFXM_PROFILING_QUERY_TOTAL_END].available != 0);
 
@@ -509,12 +512,59 @@ private:
         );
 
         if (!totalRes.valid) {
-            if (warmupRemaining_ == 0) {
-                unavailableCount_++;
-            }
+            unavailableCount_++;
             return;
         }
 
+        FrameGpuTiming timing{};
+        timing.frameIndex = slot.frameNumber;
+        timing.valid      = true;
+        timing.totalMs    = totalRes.durationMs;
+
+        // 2. In per-pass mode, validate that ALL 7 passes and 4 clear jobs are valid
+        if (slot.submittedMode == FFXM_GPU_PROFILING_MODE_PER_PASS) {
+            for (uint32_t p = 0; p < FFXM_PROFILING_PASS_COUNT; ++p) {
+                const uint32_t sq = FFXM_PROFILING_QUERY_PASS_START(p);
+                const uint32_t eq = FFXM_PROFILING_QUERY_PASS_END(p);
+                const bool sqAvail = (results[sq].available != 0);
+                const bool eqAvail = (results[eq].available != 0);
+                FfxmGpuTimestampCalculationResult pr = ffxmCalculateGpuTimestampDelta(
+                    results[sq].timestamp,
+                    results[eq].timestamp,
+                    validBits,
+                    period,
+                    sqAvail,
+                    eqAvail
+                );
+                if (!pr.valid) {
+                    unavailableCount_++;
+                    return;
+                }
+                timing.passMs[p] = pr.durationMs;
+            }
+
+            for (uint32_t c = 0; c < FFXM_PROFILING_CLEAR_JOB_COUNT; ++c) {
+                const uint32_t sq = FFXM_PROFILING_QUERY_CLEAR_START(c);
+                const uint32_t eq = FFXM_PROFILING_QUERY_CLEAR_END(c);
+                const bool sqAvail = (results[sq].available != 0);
+                const bool eqAvail = (results[eq].available != 0);
+                FfxmGpuTimestampCalculationResult cr = ffxmCalculateGpuTimestampDelta(
+                    results[sq].timestamp,
+                    results[eq].timestamp,
+                    validBits,
+                    period,
+                    sqAvail,
+                    eqAvail
+                );
+                if (!cr.valid) {
+                    unavailableCount_++;
+                    return;
+                }
+                timing.clearMs[c] = cr.durationMs;
+            }
+        }
+
+        // 3. Warmup handling: only completely valid frames consume warmup quota
         if (warmupRemaining_ > 0) {
             warmupRemaining_--;
             return;
@@ -524,41 +574,7 @@ private:
             return;
         }
 
-        FrameGpuTiming timing{};
-        timing.frameIndex = slot.frameNumber;
-        timing.valid      = true;
-        timing.totalMs    = totalRes.durationMs;
-
-        if (slot.submittedMode == FFXM_GPU_PROFILING_MODE_PER_PASS) {
-            for (uint32_t p = 0; p < FFXM_PROFILING_PASS_COUNT; ++p) {
-                const uint32_t sq = FFXM_PROFILING_QUERY_PASS_START(p);
-                const uint32_t eq = FFXM_PROFILING_QUERY_PASS_END(p);
-                FfxmGpuTimestampCalculationResult pr = ffxmCalculateGpuTimestampDelta(
-                    results[sq].timestamp,
-                    results[eq].timestamp,
-                    validBits,
-                    period,
-                    results[sq].available != 0,
-                    results[eq].available != 0
-                );
-                timing.passMs[p] = pr.valid ? pr.durationMs : 0.0;
-            }
-
-            for (uint32_t c = 0; c < FFXM_PROFILING_CLEAR_JOB_COUNT; ++c) {
-                const uint32_t sq = FFXM_PROFILING_QUERY_CLEAR_START(c);
-                const uint32_t eq = FFXM_PROFILING_QUERY_CLEAR_END(c);
-                FfxmGpuTimestampCalculationResult cr = ffxmCalculateGpuTimestampDelta(
-                    results[sq].timestamp,
-                    results[eq].timestamp,
-                    validBits,
-                    period,
-                    results[sq].available != 0,
-                    results[eq].available != 0
-                );
-                timing.clearMs[c] = cr.valid ? cr.durationMs : 0.0;
-            }
-        }
-
+        // 4. Record fully verified frame
         samples_.push_back(timing);
 
         if (samples_.size() >= config_.targetMeasuredFrames) {

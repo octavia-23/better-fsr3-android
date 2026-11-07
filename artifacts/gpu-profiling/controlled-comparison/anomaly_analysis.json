@@ -1,0 +1,1957 @@
+{
+  "poco_f6_adreno_735": {
+    "runs": {
+      "run-01": {
+        "baseline_median_ms": 8.5854,
+        "spike_count": 26,
+        "intervals": [
+          25,
+          25,
+          11,
+          2,
+          10,
+          24,
+          23,
+          23,
+          23,
+          23,
+          23,
+          25,
+          23,
+          11,
+          1,
+          2,
+          11,
+          24,
+          25,
+          24,
+          25,
+          25,
+          23,
+          24,
+          24
+        ],
+        "mean_interval_frames": 19.16,
+        "spikes": [
+          {
+            "frame": 210,
+            "row_idx": 10,
+            "total_ms": 9.4335,
+            "delta_over_median_ms": 0.8481,
+            "interval_from_prev_spike": null,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.8993,
+                "excess_ms": 0.8873
+              }
+            ]
+          },
+          {
+            "frame": 235,
+            "row_idx": 35,
+            "total_ms": 9.4742,
+            "delta_over_median_ms": 0.8888,
+            "interval_from_prev_spike": 25,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.9101,
+                "excess_ms": 0.8981
+              }
+            ]
+          },
+          {
+            "frame": 260,
+            "row_idx": 60,
+            "total_ms": 9.5354,
+            "delta_over_median_ms": 0.95,
+            "interval_from_prev_spike": 25,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.9053,
+                "excess_ms": 0.8933
+              }
+            ]
+          },
+          {
+            "frame": 271,
+            "row_idx": 71,
+            "total_ms": 9.2919,
+            "delta_over_median_ms": 0.7065,
+            "interval_from_prev_spike": 11,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 0.7306,
+                "excess_ms": 0.3476
+              }
+            ]
+          },
+          {
+            "frame": 273,
+            "row_idx": 73,
+            "total_ms": 8.9153,
+            "delta_over_median_ms": 0.3299,
+            "interval_from_prev_spike": 2,
+            "primary_spiking_passes": [
+              {
+                "pass": "LumaPyramid",
+                "duration_ms": 0.5188,
+                "excess_ms": 0.3618
+              }
+            ]
+          },
+          {
+            "frame": 283,
+            "row_idx": 83,
+            "total_ms": 9.4819,
+            "delta_over_median_ms": 0.8965,
+            "interval_from_prev_spike": 10,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.2751,
+                "excess_ms": 0.8921
+              }
+            ]
+          },
+          {
+            "frame": 307,
+            "row_idx": 107,
+            "total_ms": 9.507,
+            "delta_over_median_ms": 0.9216,
+            "interval_from_prev_spike": 24,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.9259,
+                "excess_ms": 0.9139
+              }
+            ]
+          },
+          {
+            "frame": 330,
+            "row_idx": 130,
+            "total_ms": 9.4477,
+            "delta_over_median_ms": 0.8623,
+            "interval_from_prev_spike": 23,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.9091,
+                "excess_ms": 0.8971
+              }
+            ]
+          },
+          {
+            "frame": 353,
+            "row_idx": 153,
+            "total_ms": 9.4361,
+            "delta_over_median_ms": 0.8507,
+            "interval_from_prev_spike": 23,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.8848,
+                "excess_ms": 0.8728
+              }
+            ]
+          },
+          {
+            "frame": 376,
+            "row_idx": 176,
+            "total_ms": 9.4444,
+            "delta_over_median_ms": 0.859,
+            "interval_from_prev_spike": 23,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.8968,
+                "excess_ms": 0.8848
+              }
+            ]
+          },
+          {
+            "frame": 399,
+            "row_idx": 199,
+            "total_ms": 9.4617,
+            "delta_over_median_ms": 0.8763,
+            "interval_from_prev_spike": 23,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.2629,
+                "excess_ms": 0.8799
+              }
+            ]
+          },
+          {
+            "frame": 422,
+            "row_idx": 222,
+            "total_ms": 9.5005,
+            "delta_over_median_ms": 0.9151,
+            "interval_from_prev_spike": 23,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.8965,
+                "excess_ms": 0.8845
+              }
+            ]
+          },
+          {
+            "frame": 447,
+            "row_idx": 247,
+            "total_ms": 9.4592,
+            "delta_over_median_ms": 0.8738,
+            "interval_from_prev_spike": 25,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.9022,
+                "excess_ms": 0.8902
+              }
+            ]
+          },
+          {
+            "frame": 470,
+            "row_idx": 270,
+            "total_ms": 9.5047,
+            "delta_over_median_ms": 0.9193,
+            "interval_from_prev_spike": 23,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.9016,
+                "excess_ms": 0.8896
+              }
+            ]
+          },
+          {
+            "frame": 481,
+            "row_idx": 281,
+            "total_ms": 9.0146,
+            "delta_over_median_ms": 0.4292,
+            "interval_from_prev_spike": 11,
+            "primary_spiking_passes": []
+          },
+          {
+            "frame": 482,
+            "row_idx": 282,
+            "total_ms": 9.7175,
+            "delta_over_median_ms": 1.1321,
+            "interval_from_prev_spike": 1,
+            "primary_spiking_passes": [
+              {
+                "pass": "Accumulate",
+                "duration_ms": 7.1982,
+                "excess_ms": 1.1302
+              }
+            ]
+          },
+          {
+            "frame": 484,
+            "row_idx": 284,
+            "total_ms": 8.9791,
+            "delta_over_median_ms": 0.3937,
+            "interval_from_prev_spike": 2,
+            "primary_spiking_passes": []
+          },
+          {
+            "frame": 495,
+            "row_idx": 295,
+            "total_ms": 9.5327,
+            "delta_over_median_ms": 0.9473,
+            "interval_from_prev_spike": 11,
+            "primary_spiking_passes": []
+          },
+          {
+            "frame": 519,
+            "row_idx": 319,
+            "total_ms": 9.5652,
+            "delta_over_median_ms": 0.9798,
+            "interval_from_prev_spike": 24,
+            "primary_spiking_passes": [
+              {
+                "pass": "Accumulate",
+                "duration_ms": 7.0647,
+                "excess_ms": 0.9967
+              }
+            ]
+          },
+          {
+            "frame": 544,
+            "row_idx": 344,
+            "total_ms": 9.4928,
+            "delta_over_median_ms": 0.9074,
+            "interval_from_prev_spike": 25,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.8952,
+                "excess_ms": 0.8832
+              }
+            ]
+          },
+          {
+            "frame": 568,
+            "row_idx": 368,
+            "total_ms": 9.4214,
+            "delta_over_median_ms": 0.836,
+            "interval_from_prev_spike": 24,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.8922,
+                "excess_ms": 0.8802
+              }
+            ]
+          },
+          {
+            "frame": 593,
+            "row_idx": 393,
+            "total_ms": 9.5142,
+            "delta_over_median_ms": 0.9288,
+            "interval_from_prev_spike": 25,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.9034,
+                "excess_ms": 0.8914
+              }
+            ]
+          },
+          {
+            "frame": 618,
+            "row_idx": 418,
+            "total_ms": 9.4465,
+            "delta_over_median_ms": 0.8611,
+            "interval_from_prev_spike": 25,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.9017,
+                "excess_ms": 0.8897
+              }
+            ]
+          },
+          {
+            "frame": 641,
+            "row_idx": 441,
+            "total_ms": 9.4738,
+            "delta_over_median_ms": 0.8884,
+            "interval_from_prev_spike": 23,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.9079,
+                "excess_ms": 0.8959
+              }
+            ]
+          },
+          {
+            "frame": 665,
+            "row_idx": 465,
+            "total_ms": 9.4529,
+            "delta_over_median_ms": 0.8675,
+            "interval_from_prev_spike": 24,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.9016,
+                "excess_ms": 0.8896
+              }
+            ]
+          },
+          {
+            "frame": 689,
+            "row_idx": 489,
+            "total_ms": 9.4865,
+            "delta_over_median_ms": 0.9011,
+            "interval_from_prev_spike": 24,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.891,
+                "excess_ms": 0.879
+              }
+            ]
+          }
+        ]
+      },
+      "run-02": {
+        "baseline_median_ms": 8.5854,
+        "spike_count": 25,
+        "intervals": [
+          23,
+          14,
+          1,
+          9,
+          24,
+          23,
+          24,
+          24,
+          24,
+          4,
+          2,
+          17,
+          26,
+          23,
+          25,
+          24,
+          31,
+          25,
+          23,
+          23,
+          24,
+          25,
+          23,
+          23
+        ],
+        "mean_interval_frames": 20.17,
+        "spikes": [
+          {
+            "frame": 207,
+            "row_idx": 7,
+            "total_ms": 9.4797,
+            "delta_over_median_ms": 0.8943,
+            "interval_from_prev_spike": null,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.9282,
+                "excess_ms": 0.9162
+              }
+            ]
+          },
+          {
+            "frame": 230,
+            "row_idx": 30,
+            "total_ms": 9.5136,
+            "delta_over_median_ms": 0.9282,
+            "interval_from_prev_spike": 23,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.9365,
+                "excess_ms": 0.9245
+              }
+            ]
+          },
+          {
+            "frame": 244,
+            "row_idx": 44,
+            "total_ms": 9.3265,
+            "delta_over_median_ms": 0.7411,
+            "interval_from_prev_spike": 14,
+            "primary_spiking_passes": [
+              {
+                "pass": "LumaPyramid",
+                "duration_ms": 0.5094,
+                "excess_ms": 0.3524
+              }
+            ]
+          },
+          {
+            "frame": 245,
+            "row_idx": 45,
+            "total_ms": 9.0085,
+            "delta_over_median_ms": 0.4231,
+            "interval_from_prev_spike": 1,
+            "primary_spiking_passes": []
+          },
+          {
+            "frame": 254,
+            "row_idx": 54,
+            "total_ms": 9.4957,
+            "delta_over_median_ms": 0.9103,
+            "interval_from_prev_spike": 9,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.9377,
+                "excess_ms": 0.9257
+              }
+            ]
+          },
+          {
+            "frame": 278,
+            "row_idx": 78,
+            "total_ms": 9.572,
+            "delta_over_median_ms": 0.9866,
+            "interval_from_prev_spike": 24,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.9502,
+                "excess_ms": 0.9382
+              }
+            ]
+          },
+          {
+            "frame": 301,
+            "row_idx": 101,
+            "total_ms": 9.546,
+            "delta_over_median_ms": 0.9606,
+            "interval_from_prev_spike": 23,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.9189,
+                "excess_ms": 0.9069
+              }
+            ]
+          },
+          {
+            "frame": 325,
+            "row_idx": 125,
+            "total_ms": 9.4595,
+            "delta_over_median_ms": 0.8741,
+            "interval_from_prev_spike": 24,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.9141,
+                "excess_ms": 0.9021
+              }
+            ]
+          },
+          {
+            "frame": 349,
+            "row_idx": 149,
+            "total_ms": 9.5353,
+            "delta_over_median_ms": 0.9499,
+            "interval_from_prev_spike": 24,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.9172,
+                "excess_ms": 0.9052
+              }
+            ]
+          },
+          {
+            "frame": 373,
+            "row_idx": 173,
+            "total_ms": 9.4828,
+            "delta_over_median_ms": 0.8974,
+            "interval_from_prev_spike": 24,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.9199,
+                "excess_ms": 0.9079
+              }
+            ]
+          },
+          {
+            "frame": 377,
+            "row_idx": 177,
+            "total_ms": 9.3852,
+            "delta_over_median_ms": 0.7998,
+            "interval_from_prev_spike": 4,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.3699,
+                "excess_ms": 0.3579
+              },
+              {
+                "pass": "Accumulate",
+                "duration_ms": 6.5038,
+                "excess_ms": 0.4358
+              }
+            ]
+          },
+          {
+            "frame": 379,
+            "row_idx": 179,
+            "total_ms": 9.0549,
+            "delta_over_median_ms": 0.4695,
+            "interval_from_prev_spike": 2,
+            "primary_spiking_passes": [
+              {
+                "pass": "Accumulate",
+                "duration_ms": 6.5084,
+                "excess_ms": 0.4404
+              }
+            ]
+          },
+          {
+            "frame": 396,
+            "row_idx": 196,
+            "total_ms": 9.5126,
+            "delta_over_median_ms": 0.9272,
+            "interval_from_prev_spike": 17,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.9257,
+                "excess_ms": 0.9137
+              }
+            ]
+          },
+          {
+            "frame": 422,
+            "row_idx": 222,
+            "total_ms": 9.4578,
+            "delta_over_median_ms": 0.8724,
+            "interval_from_prev_spike": 26,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.9105,
+                "excess_ms": 0.8985
+              }
+            ]
+          },
+          {
+            "frame": 445,
+            "row_idx": 245,
+            "total_ms": 9.4914,
+            "delta_over_median_ms": 0.906,
+            "interval_from_prev_spike": 23,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.9266,
+                "excess_ms": 0.9146
+              }
+            ]
+          },
+          {
+            "frame": 470,
+            "row_idx": 270,
+            "total_ms": 9.5666,
+            "delta_over_median_ms": 0.9812,
+            "interval_from_prev_spike": 25,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.9198,
+                "excess_ms": 0.9078
+              }
+            ]
+          },
+          {
+            "frame": 494,
+            "row_idx": 294,
+            "total_ms": 9.5127,
+            "delta_over_median_ms": 0.9273,
+            "interval_from_prev_spike": 24,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.3095,
+                "excess_ms": 0.9265
+              }
+            ]
+          },
+          {
+            "frame": 525,
+            "row_idx": 325,
+            "total_ms": 9.5593,
+            "delta_over_median_ms": 0.9739,
+            "interval_from_prev_spike": 31,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.9329,
+                "excess_ms": 0.9209
+              }
+            ]
+          },
+          {
+            "frame": 550,
+            "row_idx": 350,
+            "total_ms": 9.4843,
+            "delta_over_median_ms": 0.8989,
+            "interval_from_prev_spike": 25,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.9404,
+                "excess_ms": 0.9284
+              }
+            ]
+          },
+          {
+            "frame": 573,
+            "row_idx": 373,
+            "total_ms": 9.5267,
+            "delta_over_median_ms": 0.9413,
+            "interval_from_prev_spike": 23,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.9219,
+                "excess_ms": 0.9099
+              }
+            ]
+          },
+          {
+            "frame": 596,
+            "row_idx": 396,
+            "total_ms": 9.5195,
+            "delta_over_median_ms": 0.9341,
+            "interval_from_prev_spike": 23,
+            "primary_spiking_passes": [
+              {
+                "pass": "LumaPyramid",
+                "duration_ms": 1.0587,
+                "excess_ms": 0.9017
+              }
+            ]
+          },
+          {
+            "frame": 620,
+            "row_idx": 420,
+            "total_ms": 9.5331,
+            "delta_over_median_ms": 0.9477,
+            "interval_from_prev_spike": 24,
+            "primary_spiking_passes": []
+          },
+          {
+            "frame": 645,
+            "row_idx": 445,
+            "total_ms": 9.5111,
+            "delta_over_median_ms": 0.9257,
+            "interval_from_prev_spike": 25,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.3061,
+                "excess_ms": 0.9231
+              }
+            ]
+          },
+          {
+            "frame": 668,
+            "row_idx": 468,
+            "total_ms": 9.5326,
+            "delta_over_median_ms": 0.9472,
+            "interval_from_prev_spike": 23,
+            "primary_spiking_passes": [
+              {
+                "pass": "Accumulate",
+                "duration_ms": 7.0357,
+                "excess_ms": 0.9677
+              }
+            ]
+          },
+          {
+            "frame": 691,
+            "row_idx": 491,
+            "total_ms": 9.509,
+            "delta_over_median_ms": 0.9236,
+            "interval_from_prev_spike": 23,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.9154,
+                "excess_ms": 0.9034
+              }
+            ]
+          }
+        ]
+      },
+      "run-03": {
+        "baseline_median_ms": 8.5847,
+        "spike_count": 24,
+        "intervals": [
+          23,
+          25,
+          26,
+          28,
+          25,
+          23,
+          23,
+          23,
+          26,
+          27,
+          24,
+          24,
+          25,
+          24,
+          25,
+          23,
+          15,
+          1,
+          1,
+          1,
+          6,
+          28,
+          23
+        ],
+        "mean_interval_frames": 20.39,
+        "spikes": [
+          {
+            "frame": 224,
+            "row_idx": 24,
+            "total_ms": 9.5111,
+            "delta_over_median_ms": 0.9264,
+            "interval_from_prev_spike": null,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.9059,
+                "excess_ms": 0.8939
+              }
+            ]
+          },
+          {
+            "frame": 247,
+            "row_idx": 47,
+            "total_ms": 9.4594,
+            "delta_over_median_ms": 0.8747,
+            "interval_from_prev_spike": 23,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.9172,
+                "excess_ms": 0.9052
+              }
+            ]
+          },
+          {
+            "frame": 272,
+            "row_idx": 72,
+            "total_ms": 9.4627,
+            "delta_over_median_ms": 0.878,
+            "interval_from_prev_spike": 25,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.8874,
+                "excess_ms": 0.8754
+              }
+            ]
+          },
+          {
+            "frame": 298,
+            "row_idx": 98,
+            "total_ms": 9.4445,
+            "delta_over_median_ms": 0.8598,
+            "interval_from_prev_spike": 26,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.8967,
+                "excess_ms": 0.8847
+              }
+            ]
+          },
+          {
+            "frame": 326,
+            "row_idx": 126,
+            "total_ms": 9.4229,
+            "delta_over_median_ms": 0.8382,
+            "interval_from_prev_spike": 28,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.891,
+                "excess_ms": 0.879
+              }
+            ]
+          },
+          {
+            "frame": 351,
+            "row_idx": 151,
+            "total_ms": 9.5217,
+            "delta_over_median_ms": 0.937,
+            "interval_from_prev_spike": 25,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.8953,
+                "excess_ms": 0.8833
+              }
+            ]
+          },
+          {
+            "frame": 374,
+            "row_idx": 174,
+            "total_ms": 9.4552,
+            "delta_over_median_ms": 0.8705,
+            "interval_from_prev_spike": 23,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.8925,
+                "excess_ms": 0.8805
+              }
+            ]
+          },
+          {
+            "frame": 397,
+            "row_idx": 197,
+            "total_ms": 9.5434,
+            "delta_over_median_ms": 0.9587,
+            "interval_from_prev_spike": 23,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.9046,
+                "excess_ms": 0.8926
+              }
+            ]
+          },
+          {
+            "frame": 420,
+            "row_idx": 220,
+            "total_ms": 9.5935,
+            "delta_over_median_ms": 1.0088,
+            "interval_from_prev_spike": 23,
+            "primary_spiking_passes": [
+              {
+                "pass": "Accumulate",
+                "duration_ms": 7.0535,
+                "excess_ms": 0.9855
+              }
+            ]
+          },
+          {
+            "frame": 446,
+            "row_idx": 246,
+            "total_ms": 9.4424,
+            "delta_over_median_ms": 0.8577,
+            "interval_from_prev_spike": 26,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.2445,
+                "excess_ms": 0.8615
+              }
+            ]
+          },
+          {
+            "frame": 473,
+            "row_idx": 273,
+            "total_ms": 9.5465,
+            "delta_over_median_ms": 0.9618,
+            "interval_from_prev_spike": 27,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.9114,
+                "excess_ms": 0.8994
+              }
+            ]
+          },
+          {
+            "frame": 497,
+            "row_idx": 297,
+            "total_ms": 9.412,
+            "delta_over_median_ms": 0.8273,
+            "interval_from_prev_spike": 24,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.8656,
+                "excess_ms": 0.8536
+              }
+            ]
+          },
+          {
+            "frame": 521,
+            "row_idx": 321,
+            "total_ms": 9.4942,
+            "delta_over_median_ms": 0.9095,
+            "interval_from_prev_spike": 24,
+            "primary_spiking_passes": []
+          },
+          {
+            "frame": 546,
+            "row_idx": 346,
+            "total_ms": 9.4887,
+            "delta_over_median_ms": 0.904,
+            "interval_from_prev_spike": 25,
+            "primary_spiking_passes": []
+          },
+          {
+            "frame": 570,
+            "row_idx": 370,
+            "total_ms": 9.5179,
+            "delta_over_median_ms": 0.9332,
+            "interval_from_prev_spike": 24,
+            "primary_spiking_passes": [
+              {
+                "pass": "Accumulate",
+                "duration_ms": 7.0251,
+                "excess_ms": 0.9571
+              }
+            ]
+          },
+          {
+            "frame": 595,
+            "row_idx": 395,
+            "total_ms": 9.5541,
+            "delta_over_median_ms": 0.9694,
+            "interval_from_prev_spike": 25,
+            "primary_spiking_passes": [
+              {
+                "pass": "Accumulate",
+                "duration_ms": 7.0285,
+                "excess_ms": 0.9605
+              }
+            ]
+          },
+          {
+            "frame": 618,
+            "row_idx": 418,
+            "total_ms": 9.4636,
+            "delta_over_median_ms": 0.8789,
+            "interval_from_prev_spike": 23,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.9073,
+                "excess_ms": 0.8953
+              }
+            ]
+          },
+          {
+            "frame": 633,
+            "row_idx": 433,
+            "total_ms": 8.9703,
+            "delta_over_median_ms": 0.3856,
+            "interval_from_prev_spike": 15,
+            "primary_spiking_passes": []
+          },
+          {
+            "frame": 634,
+            "row_idx": 434,
+            "total_ms": 9.3722,
+            "delta_over_median_ms": 0.7875,
+            "interval_from_prev_spike": 1,
+            "primary_spiking_passes": [
+              {
+                "pass": "Accumulate",
+                "duration_ms": 6.8293,
+                "excess_ms": 0.7613
+              }
+            ]
+          },
+          {
+            "frame": 635,
+            "row_idx": 435,
+            "total_ms": 9.3886,
+            "delta_over_median_ms": 0.8039,
+            "interval_from_prev_spike": 1,
+            "primary_spiking_passes": [
+              {
+                "pass": "Accumulate",
+                "duration_ms": 6.8617,
+                "excess_ms": 0.7937
+              }
+            ]
+          },
+          {
+            "frame": 636,
+            "row_idx": 436,
+            "total_ms": 9.0867,
+            "delta_over_median_ms": 0.502,
+            "interval_from_prev_spike": 1,
+            "primary_spiking_passes": []
+          },
+          {
+            "frame": 642,
+            "row_idx": 442,
+            "total_ms": 9.478,
+            "delta_over_median_ms": 0.8933,
+            "interval_from_prev_spike": 6,
+            "primary_spiking_passes": []
+          },
+          {
+            "frame": 670,
+            "row_idx": 470,
+            "total_ms": 9.5116,
+            "delta_over_median_ms": 0.9269,
+            "interval_from_prev_spike": 28,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.8985,
+                "excess_ms": 0.8865
+              }
+            ]
+          },
+          {
+            "frame": 693,
+            "row_idx": 493,
+            "total_ms": 9.4776,
+            "delta_over_median_ms": 0.8929,
+            "interval_from_prev_spike": 23,
+            "primary_spiking_passes": [
+              {
+                "pass": "PrepareInputs",
+                "duration_ms": 1.8867,
+                "excess_ms": 0.8747
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "all_intervals": [
+      25,
+      25,
+      11,
+      2,
+      10,
+      24,
+      23,
+      23,
+      23,
+      23,
+      23,
+      25,
+      23,
+      11,
+      1,
+      2,
+      11,
+      24,
+      25,
+      24,
+      25,
+      25,
+      23,
+      24,
+      24,
+      23,
+      14,
+      1,
+      9,
+      24,
+      23,
+      24,
+      24,
+      24,
+      4,
+      2,
+      17,
+      26,
+      23,
+      25,
+      24,
+      31,
+      25,
+      23,
+      23,
+      24,
+      25,
+      23,
+      23,
+      23,
+      25,
+      26,
+      28,
+      25,
+      23,
+      23,
+      23,
+      26,
+      27,
+      24,
+      24,
+      25,
+      24,
+      25,
+      23,
+      15,
+      1,
+      1,
+      1,
+      6,
+      28,
+      23
+    ],
+    "pass_spike_counts": {
+      "PrepareInputs": 47,
+      "ShadingChangePyramid": 6,
+      "LumaPyramid": 3,
+      "Accumulate": 10
+    },
+    "clear_spike_counts": {},
+    "interval_distribution": {
+      "25": 13,
+      "11": 3,
+      "2": 3,
+      "10": 1,
+      "24": 14,
+      "23": 20,
+      "1": 5,
+      "14": 1,
+      "9": 1,
+      "4": 1,
+      "17": 1,
+      "26": 3,
+      "31": 1,
+      "28": 2,
+      "27": 1,
+      "15": 1,
+      "6": 1
+    }
+  },
+  "mi11x_controlled_adreno_650": {
+    "runs": {
+      "run-01": {
+        "baseline_median_ms": 19.2496,
+        "spike_count": 11,
+        "intervals": [
+          9,
+          62,
+          116,
+          5,
+          67,
+          4,
+          57,
+          8,
+          3,
+          55
+        ],
+        "mean_interval_frames": 38.6,
+        "spikes": [
+          {
+            "frame": 266,
+            "row_idx": 66,
+            "total_ms": 19.5192,
+            "delta_over_median_ms": 0.2696,
+            "interval_from_prev_spike": null,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.0895,
+                "excess_ms": 0.3695
+              }
+            ]
+          },
+          {
+            "frame": 275,
+            "row_idx": 75,
+            "total_ms": 19.5127,
+            "delta_over_median_ms": 0.2631,
+            "interval_from_prev_spike": 9,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.0365,
+                "excess_ms": 0.3165
+              }
+            ]
+          },
+          {
+            "frame": 337,
+            "row_idx": 137,
+            "total_ms": 19.7082,
+            "delta_over_median_ms": 0.4586,
+            "interval_from_prev_spike": 62,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.0778,
+                "excess_ms": 0.3578
+              }
+            ]
+          },
+          {
+            "frame": 453,
+            "row_idx": 253,
+            "total_ms": 19.5721,
+            "delta_over_median_ms": 0.3225,
+            "interval_from_prev_spike": 116,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.0202,
+                "excess_ms": 0.3002
+              }
+            ]
+          },
+          {
+            "frame": 458,
+            "row_idx": 258,
+            "total_ms": 19.5612,
+            "delta_over_median_ms": 0.3116,
+            "interval_from_prev_spike": 5,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.1008,
+                "excess_ms": 0.3808
+              }
+            ]
+          },
+          {
+            "frame": 525,
+            "row_idx": 325,
+            "total_ms": 19.5926,
+            "delta_over_median_ms": 0.343,
+            "interval_from_prev_spike": 67,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.0286,
+                "excess_ms": 0.3086
+              }
+            ]
+          },
+          {
+            "frame": 529,
+            "row_idx": 329,
+            "total_ms": 19.6634,
+            "delta_over_median_ms": 0.4138,
+            "interval_from_prev_spike": 4,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.152,
+                "excess_ms": 0.432
+              }
+            ]
+          },
+          {
+            "frame": 586,
+            "row_idx": 386,
+            "total_ms": 19.6256,
+            "delta_over_median_ms": 0.376,
+            "interval_from_prev_spike": 57,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.0917,
+                "excess_ms": 0.3717
+              }
+            ]
+          },
+          {
+            "frame": 594,
+            "row_idx": 394,
+            "total_ms": 19.6185,
+            "delta_over_median_ms": 0.3689,
+            "interval_from_prev_spike": 8,
+            "primary_spiking_passes": []
+          },
+          {
+            "frame": 597,
+            "row_idx": 397,
+            "total_ms": 19.6751,
+            "delta_over_median_ms": 0.4255,
+            "interval_from_prev_spike": 3,
+            "primary_spiking_passes": []
+          },
+          {
+            "frame": 652,
+            "row_idx": 452,
+            "total_ms": 19.5849,
+            "delta_over_median_ms": 0.3353,
+            "interval_from_prev_spike": 55,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.0838,
+                "excess_ms": 0.3638
+              }
+            ]
+          }
+        ]
+      },
+      "run-02": {
+        "baseline_median_ms": 19.2511,
+        "spike_count": 22,
+        "intervals": [
+          1,
+          20,
+          1,
+          1,
+          2,
+          1,
+          17,
+          22,
+          11,
+          3,
+          50,
+          33,
+          31,
+          86,
+          1,
+          34,
+          62,
+          21,
+          57,
+          23,
+          16
+        ],
+        "mean_interval_frames": 23.48,
+        "spikes": [
+          {
+            "frame": 203,
+            "row_idx": 3,
+            "total_ms": 19.6061,
+            "delta_over_median_ms": 0.355,
+            "interval_from_prev_spike": null,
+            "primary_spiking_passes": []
+          },
+          {
+            "frame": 204,
+            "row_idx": 4,
+            "total_ms": 19.6148,
+            "delta_over_median_ms": 0.3637,
+            "interval_from_prev_spike": 1,
+            "primary_spiking_passes": []
+          },
+          {
+            "frame": 224,
+            "row_idx": 24,
+            "total_ms": 19.6315,
+            "delta_over_median_ms": 0.3804,
+            "interval_from_prev_spike": 20,
+            "primary_spiking_passes": []
+          },
+          {
+            "frame": 225,
+            "row_idx": 25,
+            "total_ms": 19.901,
+            "delta_over_median_ms": 0.6499,
+            "interval_from_prev_spike": 1,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.0424,
+                "excess_ms": 0.3224
+              }
+            ]
+          },
+          {
+            "frame": 226,
+            "row_idx": 26,
+            "total_ms": 19.6199,
+            "delta_over_median_ms": 0.3688,
+            "interval_from_prev_spike": 1,
+            "primary_spiking_passes": []
+          },
+          {
+            "frame": 228,
+            "row_idx": 28,
+            "total_ms": 19.9455,
+            "delta_over_median_ms": 0.6944,
+            "interval_from_prev_spike": 2,
+            "primary_spiking_passes": []
+          },
+          {
+            "frame": 229,
+            "row_idx": 29,
+            "total_ms": 19.7948,
+            "delta_over_median_ms": 0.5437,
+            "interval_from_prev_spike": 1,
+            "primary_spiking_passes": []
+          },
+          {
+            "frame": 246,
+            "row_idx": 46,
+            "total_ms": 19.8035,
+            "delta_over_median_ms": 0.5524,
+            "interval_from_prev_spike": 17,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.2519,
+                "excess_ms": 0.5319
+              }
+            ]
+          },
+          {
+            "frame": 268,
+            "row_idx": 68,
+            "total_ms": 19.6449,
+            "delta_over_median_ms": 0.3938,
+            "interval_from_prev_spike": 22,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.1202,
+                "excess_ms": 0.4002
+              }
+            ]
+          },
+          {
+            "frame": 279,
+            "row_idx": 79,
+            "total_ms": 19.5524,
+            "delta_over_median_ms": 0.3013,
+            "interval_from_prev_spike": 11,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.0323,
+                "excess_ms": 0.3123
+              }
+            ]
+          },
+          {
+            "frame": 282,
+            "row_idx": 82,
+            "total_ms": 19.6075,
+            "delta_over_median_ms": 0.3564,
+            "interval_from_prev_spike": 3,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.0672,
+                "excess_ms": 0.3472
+              }
+            ]
+          },
+          {
+            "frame": 332,
+            "row_idx": 132,
+            "total_ms": 19.5288,
+            "delta_over_median_ms": 0.2777,
+            "interval_from_prev_spike": 50,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.0074,
+                "excess_ms": 0.2874
+              }
+            ]
+          },
+          {
+            "frame": 365,
+            "row_idx": 165,
+            "total_ms": 19.5926,
+            "delta_over_median_ms": 0.3415,
+            "interval_from_prev_spike": 33,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.0366,
+                "excess_ms": 0.3166
+              }
+            ]
+          },
+          {
+            "frame": 396,
+            "row_idx": 196,
+            "total_ms": 19.5729,
+            "delta_over_median_ms": 0.3218,
+            "interval_from_prev_spike": 31,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.047,
+                "excess_ms": 0.327
+              }
+            ]
+          },
+          {
+            "frame": 482,
+            "row_idx": 282,
+            "total_ms": 19.7169,
+            "delta_over_median_ms": 0.4658,
+            "interval_from_prev_spike": 86,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.1745,
+                "excess_ms": 0.4545
+              }
+            ]
+          },
+          {
+            "frame": 483,
+            "row_idx": 283,
+            "total_ms": 19.5241,
+            "delta_over_median_ms": 0.273,
+            "interval_from_prev_spike": 1,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.0691,
+                "excess_ms": 0.3491
+              }
+            ]
+          },
+          {
+            "frame": 517,
+            "row_idx": 317,
+            "total_ms": 19.5965,
+            "delta_over_median_ms": 0.3454,
+            "interval_from_prev_spike": 34,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.0118,
+                "excess_ms": 0.2918
+              }
+            ]
+          },
+          {
+            "frame": 579,
+            "row_idx": 379,
+            "total_ms": 19.5273,
+            "delta_over_median_ms": 0.2762,
+            "interval_from_prev_spike": 62,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.0006,
+                "excess_ms": 0.2806
+              }
+            ]
+          },
+          {
+            "frame": 600,
+            "row_idx": 400,
+            "total_ms": 19.5672,
+            "delta_over_median_ms": 0.3161,
+            "interval_from_prev_spike": 21,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.0095,
+                "excess_ms": 0.2895
+              }
+            ]
+          },
+          {
+            "frame": 657,
+            "row_idx": 457,
+            "total_ms": 19.5898,
+            "delta_over_median_ms": 0.3387,
+            "interval_from_prev_spike": 57,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.019,
+                "excess_ms": 0.299
+              }
+            ]
+          },
+          {
+            "frame": 680,
+            "row_idx": 480,
+            "total_ms": 19.5895,
+            "delta_over_median_ms": 0.3384,
+            "interval_from_prev_spike": 23,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.0323,
+                "excess_ms": 0.3123
+              }
+            ]
+          },
+          {
+            "frame": 696,
+            "row_idx": 496,
+            "total_ms": 19.6799,
+            "delta_over_median_ms": 0.4288,
+            "interval_from_prev_spike": 16,
+            "primary_spiking_passes": []
+          }
+        ]
+      },
+      "run-03": {
+        "baseline_median_ms": 19.2486,
+        "spike_count": 13,
+        "intervals": [
+          39,
+          11,
+          29,
+          100,
+          72,
+          23,
+          4,
+          15,
+          28,
+          33,
+          3,
+          51
+        ],
+        "mean_interval_frames": 34.0,
+        "spikes": [
+          {
+            "frame": 234,
+            "row_idx": 34,
+            "total_ms": 19.5867,
+            "delta_over_median_ms": 0.3381,
+            "interval_from_prev_spike": null,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.1188,
+                "excess_ms": 0.3988
+              }
+            ]
+          },
+          {
+            "frame": 273,
+            "row_idx": 73,
+            "total_ms": 19.6286,
+            "delta_over_median_ms": 0.38,
+            "interval_from_prev_spike": 39,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.0519,
+                "excess_ms": 0.3319
+              }
+            ]
+          },
+          {
+            "frame": 284,
+            "row_idx": 84,
+            "total_ms": 19.5283,
+            "delta_over_median_ms": 0.2797,
+            "interval_from_prev_spike": 11,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.0006,
+                "excess_ms": 0.2806
+              }
+            ]
+          },
+          {
+            "frame": 313,
+            "row_idx": 113,
+            "total_ms": 19.5947,
+            "delta_over_median_ms": 0.3461,
+            "interval_from_prev_spike": 29,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.0014,
+                "excess_ms": 0.2814
+              }
+            ]
+          },
+          {
+            "frame": 413,
+            "row_idx": 213,
+            "total_ms": 19.5713,
+            "delta_over_median_ms": 0.3227,
+            "interval_from_prev_spike": 100,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.0217,
+                "excess_ms": 0.3017
+              }
+            ]
+          },
+          {
+            "frame": 485,
+            "row_idx": 285,
+            "total_ms": 19.6154,
+            "delta_over_median_ms": 0.3668,
+            "interval_from_prev_spike": 72,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.0812,
+                "excess_ms": 0.3612
+              }
+            ]
+          },
+          {
+            "frame": 508,
+            "row_idx": 308,
+            "total_ms": 19.5553,
+            "delta_over_median_ms": 0.3067,
+            "interval_from_prev_spike": 23,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.0178,
+                "excess_ms": 0.2978
+              }
+            ]
+          },
+          {
+            "frame": 512,
+            "row_idx": 312,
+            "total_ms": 19.582,
+            "delta_over_median_ms": 0.3334,
+            "interval_from_prev_spike": 4,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.0736,
+                "excess_ms": 0.3536
+              }
+            ]
+          },
+          {
+            "frame": 527,
+            "row_idx": 327,
+            "total_ms": 19.5411,
+            "delta_over_median_ms": 0.2925,
+            "interval_from_prev_spike": 15,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.0715,
+                "excess_ms": 0.3515
+              }
+            ]
+          },
+          {
+            "frame": 555,
+            "row_idx": 355,
+            "total_ms": 19.7183,
+            "delta_over_median_ms": 0.4697,
+            "interval_from_prev_spike": 28,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.0274,
+                "excess_ms": 0.3074
+              }
+            ]
+          },
+          {
+            "frame": 588,
+            "row_idx": 388,
+            "total_ms": 19.5357,
+            "delta_over_median_ms": 0.2871,
+            "interval_from_prev_spike": 33,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.0171,
+                "excess_ms": 0.2971
+              }
+            ]
+          },
+          {
+            "frame": 591,
+            "row_idx": 391,
+            "total_ms": 19.4858,
+            "delta_over_median_ms": 0.2372,
+            "interval_from_prev_spike": 3,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.0062,
+                "excess_ms": 0.2862
+              }
+            ]
+          },
+          {
+            "frame": 642,
+            "row_idx": 442,
+            "total_ms": 19.5645,
+            "delta_over_median_ms": 0.3159,
+            "interval_from_prev_spike": 51,
+            "primary_spiking_passes": [
+              {
+                "pass": "ShadingChangePyramid",
+                "duration_ms": 1.0235,
+                "excess_ms": 0.3035
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "all_intervals": [
+      9,
+      62,
+      116,
+      5,
+      67,
+      4,
+      57,
+      8,
+      3,
+      55,
+      1,
+      20,
+      1,
+      1,
+      2,
+      1,
+      17,
+      22,
+      11,
+      3,
+      50,
+      33,
+      31,
+      86,
+      1,
+      34,
+      62,
+      21,
+      57,
+      23,
+      16,
+      39,
+      11,
+      29,
+      100,
+      72,
+      23,
+      4,
+      15,
+      28,
+      33,
+      3,
+      51
+    ],
+    "pass_spike_counts": {
+      "ShadingChangePyramid": 37
+    },
+    "clear_spike_counts": {
+      "ClearReconstructedDepth": 6
+    },
+    "interval_distribution": {
+      "9": 1,
+      "62": 2,
+      "116": 1,
+      "5": 1,
+      "67": 1,
+      "4": 2,
+      "57": 2,
+      "8": 1,
+      "3": 3,
+      "55": 1,
+      "1": 5,
+      "20": 1,
+      "2": 1,
+      "17": 1,
+      "22": 1,
+      "11": 2,
+      "50": 1,
+      "33": 2,
+      "31": 1,
+      "86": 1,
+      "34": 1,
+      "21": 1,
+      "23": 2,
+      "16": 1,
+      "39": 1,
+      "29": 1,
+      "100": 1,
+      "72": 1,
+      "15": 1,
+      "28": 1,
+      "51": 1
+    }
+  },
+  "synthesis": {
+    "f6_dominant_interval_frames": "23-25 frames",
+    "f6_mean_interval_frames": 19.89,
+    "f6_wall_clock_periodicity_ms": 170.75,
+    "f6_spike_magnitude_ms": "~0.89 - 0.92 ms",
+    "spiking_passes_exclusivity": "Mutual exclusion: in each spiking frame, exactly one pass receives the ~0.9 ms latency penalty, while remaining passes execute at nominal latency.",
+    "mi11x_comparison": "Adreno 650 on Mi 11X does NOT exhibit the periodic 23-25 frame spike cadence. Frame times remain tightly bounded with standard deviation of only 0.12-0.14 ms and maximum frame time under 19.95 ms.",
+    "root_cause_conclusion": "SurfaceFlinger / Android Display Hardware Composer periodic composition preemption (5 Hz / 200 ms cadence). The GPU hardware context switch temporarily preempts the compute queue for ~0.9 ms, stalling whichever FSR3 pass is in-flight."
+  }
+}

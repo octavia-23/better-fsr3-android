@@ -1,0 +1,88 @@
+{
+  "device": {
+    "model": "Xiaomi Mi 11X",
+    "modelNumber": "M2012K11AI",
+    "codename": "aliothin",
+    "productName": "aliothin",
+    "brand": "Mi",
+    "manufacturer": "Xiaomi",
+    "soc": {
+      "model": "SM8250",
+      "platform": "kona",
+      "marketingName": "Snapdragon 870",
+      "manufacturer": "Qualcomm",
+      "abi": "arm64-v8a",
+      "cpuCores": 8,
+      "cpuTopology": "1x Cortex-A77 @ 3.2GHz + 3x Cortex-A77 @ 2.42GHz + 4x Cortex-A55 @ 1.8GHz"
+    },
+    "gpu": {
+      "name": "Adreno (TM) 650",
+      "vendor": "Qualcomm",
+      "architecture": "Adreno 600 series",
+      "vulkanDriverVersionRaw": 2150780928,
+      "vulkanDriverVersion": "0.512.530",
+      "vulkanApiVersionRaw": 4198695,
+      "vulkanApiVersion": "1.1.295",
+      "vulkanInstanceVersion": "1.4.0",
+      "timestampValidBits": 48,
+      "timestampPeriodNs": 52.0833,
+      "features": {
+        "shaderFloat16": true,
+        "storage16Bit": true,
+        "spirv14": true,
+        "storageExtendedFormats": true,
+        "storageWriteWithoutFormat": true,
+        "storageFormatsSupported": true,
+        "sampledFormatsSupported": true
+      }
+    },
+    "os": {
+      "androidVersion": "17",
+      "sdkLevel": 37,
+      "securityPatch": "2026-10-01",
+      "buildId": "CP2A.260605.016",
+      "buildFingerprint": "Mi/aliothin/aliothin:17/CP2A.260605.016/OS4.0.5.0.XPCCNXM:user/release-keys"
+    }
+  },
+  "build": {
+    "gitCommitSha": "13805503f74a44a137afba5b5b4908cba10c87ce",
+    "gitBranch": "main",
+    "buildType": "debug",
+    "buildConfiguration": "-DANDROID_STL=c++_shared -DBUILD_TESTING=OFF -D_DEBUG",
+    "apkPath": "samples/android/app/build/outputs/apk/debug/app-debug.apk",
+    "apkSha256": "905ce086f4115c9c3c037add49da29b1503a2d4ae6519b800aecfadba6bc5b14",
+    "packageName": "com.arm.asr.sample"
+  },
+  "benchmark": {
+    "runIndex": 1,
+    "effect": "FSR 3.1.4",
+    "mode": "per_pass_diagnostic",
+    "renderResolution": "1200x540",
+    "displayResolution": "2400x1080",
+    "upscalingRatio": "2.00x",
+    "jitterPhaseCount": 32,
+    "swapchainImageCount": 5,
+    "swapchainFormat": 37,
+    "warmupFrames": 200,
+    "measuredFrames": 500,
+    "accumulatePermutation": "0x00000085",
+    "accumulateUseLut": true,
+    "accumulateSrvCount": 8
+  },
+  "telemetry": {
+    "preRun": {
+      "batteryTempC": 34.7,
+      "thermalZone0TempC": 35.1,
+      "thermalStatus": "Thermal Status: 0",
+      "gpuFreqHz": 305000000,
+      "gpuFreqMHz": 305.0
+    },
+    "postRun": {
+      "batteryTempC": 34.7,
+      "thermalZone0TempC": 47.1,
+      "thermalStatus": "Thermal Status: 0",
+      "gpuFreqHz": 670000000,
+      "gpuFreqMHz": 670.0
+    }
+  }
+}

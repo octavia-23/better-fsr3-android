@@ -854,7 +854,13 @@ VkResult VkContext::getQueryPoolResults(uint32_t frameSlot, uint32_t firstQuery,
     }
 #if defined(FFXM_VK_CONTEXT_TESTING)
     if (testSeam_) {
-        return VK_SUCCESS;
+        if (testSeam_->mockQueryResults && data && dataSize > 0) {
+            size_t copyBytes = (testSeam_->mockQueryResultsSize > 0)
+                ? std::min(dataSize, testSeam_->mockQueryResultsSize)
+                : dataSize;
+            std::memcpy(data, testSeam_->mockQueryResults, copyBytes);
+        }
+        return testSeam_->mockQueryResultStatus;
     }
 #endif
     return vkGetQueryPoolResults(device_, queryPools_[frameSlot], firstQuery, queryCount, dataSize, data, stride, flags);

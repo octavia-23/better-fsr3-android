@@ -1,0 +1,13 @@
+Stage,Type,Mi11X_Adreno650_Median_ms,PocoF6_Adreno735_Median_ms,Speedup_Percent,Speedup_Ratio,Mi11X_Pct_Total,PocoF6_Pct_Total
+TOTAL FSR 3.1.4 GPU TIME,Total,19.25,8.5851,55.4,2.24x,100.0,100.0
+PrepareInputs,Compute Pass,2.1998,1.0121,53.99,2.17x,11.43,11.79
+LumaPyramid,Compute Pass,0.274,0.1569,42.74,1.75x,1.42,1.83
+ShadingChangePyramid,Compute Pass,0.7132,0.3834,46.24,1.86x,3.7,4.47
+ShadingChange,Compute Pass,0.0602,0.0466,22.59,1.29x,0.31,0.54
+PrepareReactivity,Compute Pass,1.1199,0.604,46.07,1.85x,5.82,7.04
+LumaInstability,Compute Pass,0.6164,0.2693,56.31,2.29x,3.2,3.14
+Accumulate,Compute Pass,14.1102,6.066,57.01,2.33x,73.3,70.66
+ClearReconstructedDepth,Clear Job,0.0867,0.0189,78.2,4.59x,0.45,0.22
+ClearSpdAtomicCounterInitial,Clear Job,0.0029,0.0019,34.48,1.53x,0.02,0.02
+ClearSpdMips,Clear Job,0.0438,0.0132,69.86,3.32x,0.23,0.15
+ClearSpdAtomicCounterSecondary,Clear Job,0.0044,0.0046,-4.55,0.96x,0.02,0.05

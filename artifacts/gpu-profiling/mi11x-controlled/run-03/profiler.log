@@ -1,0 +1,41 @@
+--------- beginning of main
+11-07 20:50:33.134 23430 25505 I ArmASR  : Vulkan loader reports instance version 1.4.0
+11-07 20:50:33.143 23430 25505 I ArmASR  : Using device 'Adreno (TM) 650' (Vulkan 1.1.295)
+11-07 20:50:33.144 23430 25505 I ArmASR  : GPU timestamp profiling: supported (48 valid bits, period 52.083 ns)
+11-07 20:50:33.144 23430 25505 I ArmASR  : Arm ASR / FSR 3.1.4 device gate: SPIR-V 1.4 yes | shaderFloat16 yes | 16-bit storage yes | extended formats yes | write without format yes | storage formats yes | sampled formats yes
+11-07 20:50:33.154 23430 25505 I ArmASR  : Swapchain: 2400x1080, 5 images, format 37
+11-07 20:50:33.154 23430 25505 I ArmASR  : FSR 3.1.4: Rendering at 1200x540, presenting at 2400x1080 (ratio 2.00)
+11-07 20:50:33.213 23430 25505 I ArmASR  : FSR 3.1.4 scratch buffer: 2936344 bytes
+11-07 20:50:33.726 23430 25505 I ArmASR  : FSR3-ACCUMULATE pipeline created (permutation: 0x00000085, srvTextureCount: 8, useLut: true)
+11-07 20:50:33.727 23430 25505 I ArmASR  : FSR 3.1.4 shared resources allocated: dilatedDepth (1200x540 R32_SFLOAT), dilatedMV (1200x540 R16G16_SFLOAT), reconDepth (1200x540 R32_UINT)
+11-07 20:50:33.727 23430 25505 I ArmASR  : FSR 3.1.4 context created: 1200x540 -> 2400x1080, jitter phase count 32
+11-07 20:50:33.728 23430 25505 I ArmASR  : FSR 3.1.4 sample ready
+11-07 20:50:33.730 23430 25505 I ArmASR  : First FSR 3.1.4 frame dispatched successfully
+11-07 20:50:47.988 23430 25505 I ArmASR  : GPU Profiling run completed (500 frames collected)
+11-07 20:50:47.990 23430 25505 I ArmASR  : ================ FSR 3.1.4 GPU PROFILING REPORT ================
+11-07 20:50:47.990 23430 25505 I ArmASR  : Device: Adreno (TM) 650 (Vulkan 1.1.295, Driver 0.805.0)
+11-07 20:50:47.990 23430 25505 I ArmASR  : Timestamp: 52.083 ns/tick, 48 valid bits
+11-07 20:50:47.990 23430 25505 I ArmASR  : Resolution: Render 1200x540 -> Display 2400x1080
+11-07 20:50:47.990 23430 25505 I ArmASR  : Mode: PER_PASS_DIAGNOSTIC (Run 3)
+11-07 20:50:47.990 23430 25505 I ArmASR  : Frames: 500 measured (200 warmup), 500 valid, 0 unavailable
+11-07 20:50:47.990 23430 25505 I ArmASR  : --- TOTAL FSR3 GPU TIME ---
+11-07 20:50:47.990 23430 25505 I ArmASR  :   Median: 19.249 ms
+11-07 20:50:47.990 23430 25505 I ArmASR  :   p95:    19.493 ms
+11-07 20:50:47.990 23430 25505 I ArmASR  :   p99:    19.582 ms
+11-07 20:50:47.990 23430 25505 I ArmASR  :   Mean:   19.267 ms (stddev: 0.125 ms)
+11-07 20:50:47.990 23430 25505 I ArmASR  :   Min:    19.042 ms | Max: 19.718 ms
+11-07 20:50:47.990 23430 25505 I ArmASR  : --- INDIVIDUAL COMPUTE PASSES ---
+11-07 20:50:47.990 23430 25505 I ArmASR  :   Pass 0 [PrepareInputs]: Median 2.200 ms | p95 2.222 ms | Mean 2.203 ms
+11-07 20:50:47.990 23430 25505 I ArmASR  :   Pass 1 [LumaPyramid]: Median 0.274 ms | p95 0.278 ms | Mean 0.274 ms
+11-07 20:50:47.990 23430 25505 I ArmASR  :   Pass 2 [ShadingChangePyramid]: Median 0.710 ms | p95 0.948 ms | Mean 0.732 ms
+11-07 20:50:47.990 23430 25505 I ArmASR  :   Pass 3 [ShadingChange]: Median 0.060 ms | p95 0.061 ms | Mean 0.060 ms
+11-07 20:50:47.990 23430 25505 I ArmASR  :   Pass 4 [PrepareReactivity]: Median 1.120 ms | p95 1.132 ms | Mean 1.121 ms
+11-07 20:50:47.990 23430 25505 I ArmASR  :   Pass 5 [LumaInstability]: Median 0.616 ms | p95 0.641 ms | Mean 0.618 ms
+11-07 20:50:47.990 23430 25505 I ArmASR  :   Pass 6 [Accumulate]: Median 14.113 ms | p95 14.170 ms | Mean 14.114 ms
+11-07 20:50:47.990 23430 25505 I ArmASR  : --- INDIVIDUAL CLEAR OPERATIONS ---
+11-07 20:50:47.990 23430 25505 I ArmASR  :   Clear 0 [ClearReconstructedDepth]: Median 0.087 ms | p95 0.095 ms | Mean 0.090 ms
+11-07 20:50:47.990 23430 25505 I ArmASR  :   Clear 1 [ClearSpdAtomicCounterInitial]: Median 0.003 ms | p95 0.003 ms | Mean 0.003 ms
+11-07 20:50:47.990 23430 25505 I ArmASR  :   Clear 2 [ClearSpdMips]: Median 0.044 ms | p95 0.046 ms | Mean 0.044 ms
+11-07 20:50:47.990 23430 25505 I ArmASR  :   Clear 3 [ClearSpdAtomicCounterSecondary]: Median 0.004 ms | p95 0.005 ms | Mean 0.004 ms
+11-07 20:50:47.990 23430 25505 I ArmASR  : =================================================================
+11-07 20:50:47.997 23430 25505 I ArmASR  : GPU profiling results successfully saved to: /data/user/0/com.arm.asr.sample/files/run-03/diagnostic.csv and /data/user/0/com.arm.asr.sample/files/run-03/diagnostic.json

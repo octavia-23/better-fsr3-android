@@ -53,6 +53,10 @@ public:
         int  failSemaphoreIndex          = -1;
         int  failFenceIndex              = -1;
 
+        const void* mockQueryResults     = nullptr;
+        size_t      mockQueryResultsSize = 0;
+        VkResult    mockQueryResultStatus = VK_SUCCESS;
+
         uint32_t waitIdleCalls           = 0;
         uint32_t semaphoreDestructions   = 0;
         uint32_t fenceDestructions       = 0;
@@ -75,6 +79,9 @@ public:
             deviceDestructions      = 0;
             surfaceDestructions     = 0;
             instanceDestructions    = 0;
+            mockQueryResults        = nullptr;
+            mockQueryResultsSize    = 0;
+            mockQueryResultStatus   = VK_SUCCESS;
         }
     };
 

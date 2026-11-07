@@ -6730,6 +6730,132 @@ void TestM4GpuProfilerStatisticsAndLifecycle()
         TEST_CHECK(GpuProfiler::queryCountForMode(FFXM_GPU_PROFILING_MODE_PER_PASS) == 24);
     }
 
+    // 4. Incomplete timestamp query rejection & profiler hardening (Phase 5)
+    {
+        GpuProfiler profiler;
+        GpuProfilerConfig cfg;
+        cfg.mode = FFXM_GPU_PROFILING_MODE_PER_PASS;
+        cfg.warmupFrames = 1;
+        cfg.targetMeasuredFrames = 2;
+        profiler.init(cfg);
+
+        VkContext ctx;
+        VkContext::TestSeam seam{};
+        seam.timestampValidBitsOverride = 48; // Qualcomm Adreno 48 valid bits
+        ctx.setTestSeam(&seam);
+        TEST_CHECK(ctx.init((ANativeWindow*)(uintptr_t)0x1) == true);
+
+        GpuProfiler::QueryResultWithAvailability mockQueries[FFXM_PROFILING_MAX_QUERIES] = {};
+        auto setAllQueriesValid = [&](uint64_t baseTick) {
+            for (uint32_t i = 0; i < 24; ++i) {
+                mockQueries[i].available = 1;
+                mockQueries[i].timestamp = baseTick + (i * 1000ULL);
+            }
+        };
+
+        // Scenario A: Total query is unavailable during warmup
+        setAllQueriesValid(100000ULL);
+        mockQueries[FFXM_PROFILING_QUERY_TOTAL_END].available = 0; // End query not ready
+        seam.mockQueryResults = mockQueries;
+        seam.mockQueryResultsSize = sizeof(mockQueries);
+
+        FfxmVkProfilingDescription descA{};
+        profiler.onBeginFrame(0, (VkCommandBuffer)(uintptr_t)0x70, ctx, &descA);
+        profiler.onFrameSubmitted(0, FFXM_GPU_PROFILING_MODE_PER_PASS, 100);
+
+        // Next frame on slot 0 triggers collectSlotResults
+        profiler.onBeginFrame(0, (VkCommandBuffer)(uintptr_t)0x70, ctx, &descA);
+        TEST_CHECK(profiler.unavailableCount() == 1);
+        TEST_CHECK(profiler.warmupRemaining() == 1); // Warmup counter must NOT decrement on invalid frame!
+        TEST_CHECK(profiler.sampleCount() == 0);
+
+        // Scenario B: Total query is valid, but pass 3 (ShadingChange) end query is unavailable
+        setAllQueriesValid(200000ULL);
+        uint32_t pass3End = FFXM_PROFILING_QUERY_PASS_END(3);
+        mockQueries[pass3End].available = 0; // Missing pass query
+        profiler.onFrameSubmitted(0, FFXM_GPU_PROFILING_MODE_PER_PASS, 101);
+
+        profiler.onBeginFrame(0, (VkCommandBuffer)(uintptr_t)0x70, ctx, &descA);
+        TEST_CHECK(profiler.unavailableCount() == 2);
+        TEST_CHECK(profiler.warmupRemaining() == 1); // Still preserved!
+        TEST_CHECK(profiler.sampleCount() == 0);
+
+        // Scenario C: Total and passes valid, but clear 2 (ClearSpdMips) start query is unavailable
+        setAllQueriesValid(300000ULL);
+        uint32_t clear2Start = FFXM_PROFILING_QUERY_CLEAR_START(2);
+        mockQueries[clear2Start].available = 0; // Missing clear query
+        profiler.onFrameSubmitted(0, FFXM_GPU_PROFILING_MODE_PER_PASS, 102);
+
+        profiler.onBeginFrame(0, (VkCommandBuffer)(uintptr_t)0x70, ctx, &descA);
+        TEST_CHECK(profiler.unavailableCount() == 3);
+        TEST_CHECK(profiler.warmupRemaining() == 1); // Still preserved!
+        TEST_CHECK(profiler.sampleCount() == 0);
+
+        // Scenario D: All 24 queries completely valid for warmup frame
+        setAllQueriesValid(400000ULL);
+        profiler.onFrameSubmitted(0, FFXM_GPU_PROFILING_MODE_PER_PASS, 103);
+
+        profiler.onBeginFrame(0, (VkCommandBuffer)(uintptr_t)0x70, ctx, &descA);
+        TEST_CHECK(profiler.unavailableCount() == 3);
+        TEST_CHECK(profiler.warmupRemaining() == 0); // Warmup now consumed!
+        TEST_CHECK(profiler.sampleCount() == 0);     // Warmup frames are not recorded in samples_
+
+        // Scenario E: Measured frame with all 24 queries valid (with 48-bit wraparound)
+        const uint64_t mask48 = (1ULL << 48) - 1ULL;
+        // Start just before 48-bit overflow, end after wraparound
+        mockQueries[FFXM_PROFILING_QUERY_TOTAL_START].available = 1;
+        mockQueries[FFXM_PROFILING_QUERY_TOTAL_START].timestamp = mask48 - 500;
+        mockQueries[FFXM_PROFILING_QUERY_TOTAL_END].available = 1;
+        mockQueries[FFXM_PROFILING_QUERY_TOTAL_END].timestamp = 500; // wrapped: delta = 1001 ticks
+
+        for (uint32_t p = 0; p < FFXM_PROFILING_PASS_COUNT; ++p) {
+            uint32_t s = FFXM_PROFILING_QUERY_PASS_START(p);
+            uint32_t e = FFXM_PROFILING_QUERY_PASS_END(p);
+            mockQueries[s].available = 1;
+            mockQueries[s].timestamp = 1000 + (p * 100);
+            mockQueries[e].available = 1;
+            mockQueries[e].timestamp = 1000 + (p * 100) + 50;
+        }
+        for (uint32_t c = 0; c < FFXM_PROFILING_CLEAR_JOB_COUNT; ++c) {
+            uint32_t s = FFXM_PROFILING_QUERY_CLEAR_START(c);
+            uint32_t e = FFXM_PROFILING_QUERY_CLEAR_END(c);
+            mockQueries[s].available = 1;
+            mockQueries[s].timestamp = 2000 + (c * 50);
+            mockQueries[e].available = 1;
+            mockQueries[e].timestamp = 2000 + (c * 50) + 20;
+        }
+
+        profiler.onFrameSubmitted(0, FFXM_GPU_PROFILING_MODE_PER_PASS, 104);
+        profiler.onBeginFrame(0, (VkCommandBuffer)(uintptr_t)0x70, ctx, &descA);
+
+        TEST_CHECK(profiler.unavailableCount() == 3);
+        TEST_CHECK(profiler.sampleCount() == 1);
+        const auto& s0 = profiler.samples()[0];
+        TEST_CHECK(s0.valid == true);
+        TEST_CHECK(s0.frameIndex == 104);
+        TEST_CHECK(s0.totalMs > 0.0);
+        for (uint32_t p = 0; p < FFXM_PROFILING_PASS_COUNT; ++p) {
+            TEST_CHECK(s0.passMs[p] > 0.0); // Never 0.0 ms!
+        }
+        for (uint32_t c = 0; c < FFXM_PROFILING_CLEAR_JOB_COUNT; ++c) {
+            TEST_CHECK(s0.clearMs[c] > 0.0); // Never 0.0 ms!
+        }
+
+        // Scenario F: Measured frame 2 completing targetMeasuredFrames
+        profiler.onFrameSubmitted(0, FFXM_GPU_PROFILING_MODE_PER_PASS, 105);
+        profiler.onBeginFrame(0, (VkCommandBuffer)(uintptr_t)0x70, ctx, &descA);
+
+        TEST_CHECK(profiler.sampleCount() == 2);
+        TEST_CHECK(profiler.isComplete() == true);
+
+        // Verify stats reflect unavailable frames accurately
+        std::vector<double> sampleTotals = { profiler.samples()[0].totalMs, profiler.samples()[1].totalMs };
+        auto stats = GpuProfiler::computeStats(sampleTotals, 2, profiler.unavailableCount());
+        TEST_CHECK(stats.validFrames == 2);
+        TEST_CHECK(stats.unavailableFrames == 3);
+        TEST_CHECK(stats.totalMeasuredFrames == 2);
+    }
+
     std::cout << "PASS: Test 35: M4 - GPU Profiler Statistics & Lifecycle passed perfectly." << std::endl;
 }
 
