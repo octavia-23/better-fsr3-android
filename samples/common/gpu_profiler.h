@@ -48,10 +48,10 @@ struct ProfilingStats {
 struct GpuProfilerConfig {
     FfxmGpuProfilingMode mode = FFXM_GPU_PROFILING_MODE_DISABLED;
     uint32_t warmupFrames = 200;
-    uint32_t targetMeasuredFrames = 1000;
+    uint32_t targetMeasuredFrames = 500;
     uint32_t runIndex = 1;
-    std::string outputDir = "artifacts/gpu-profiling/f6";
-    std::string filePrefix = "fsr3_f6";
+    std::string outputDir = "";
+    std::string filePrefix = "";
 };
 
 class GpuProfiler {
@@ -71,9 +71,10 @@ public:
         GpuProfilerConfig cfg;
         cfg.mode = FFXM_GPU_PROFILING_MODE_DISABLED;
         cfg.warmupFrames = 200;
-        cfg.targetMeasuredFrames = 1000;
+        cfg.targetMeasuredFrames = 500;
         cfg.runIndex = 1;
-        cfg.outputDir = "artifacts/gpu-profiling/f6";
+        cfg.outputDir = "";
+        cfg.filePrefix = "";
 
 #if defined(__ANDROID__)
         // Check Android system property: debug.fsr3.profiling
@@ -96,6 +97,36 @@ public:
             if (r >= 1 && r <= 10) {
                 cfg.runIndex = static_cast<uint32_t>(r);
             }
+        }
+
+        // Check frames property: debug.fsr3.frames
+        char framesVal[PROP_VALUE_MAX] = {};
+        if (__system_property_get("debug.fsr3.frames", framesVal) > 0) {
+            int f = std::atoi(framesVal);
+            if (f > 0) {
+                cfg.targetMeasuredFrames = static_cast<uint32_t>(f);
+            }
+        }
+
+        // Check warmup property: debug.fsr3.warmup
+        char warmupVal[PROP_VALUE_MAX] = {};
+        if (__system_property_get("debug.fsr3.warmup", warmupVal) > 0) {
+            int w = std::atoi(warmupVal);
+            if (w >= 0) {
+                cfg.warmupFrames = static_cast<uint32_t>(w);
+            }
+        }
+
+        // Check prefix property: debug.fsr3.prefix
+        char prefixVal[PROP_VALUE_MAX] = {};
+        if (__system_property_get("debug.fsr3.prefix", prefixVal) > 0) {
+            cfg.filePrefix = prefixVal;
+        }
+
+        // Check output directory property: debug.fsr3.dir
+        char dirVal[PROP_VALUE_MAX] = {};
+        if (__system_property_get("debug.fsr3.dir", dirVal) > 0) {
+            cfg.outputDir = dirVal;
         }
 #endif
 
@@ -134,8 +165,10 @@ public:
                             cfg.targetMeasuredFrames = static_cast<uint32_t>(std::strtoul(v.c_str(), nullptr, 10));
                         } else if (k == "run") {
                             cfg.runIndex = static_cast<uint32_t>(std::strtoul(v.c_str(), nullptr, 10));
-                        } else if (k == "output_dir") {
+                        } else if (k == "output_dir" || k == "dir") {
                             cfg.outputDir = v;
+                        } else if (k == "prefix" || k == "filename") {
+                            cfg.filePrefix = v;
                         }
                     }
                 }
@@ -346,18 +379,42 @@ public:
         std::string jsonData = generateJson(ctx, renderExtent, displayExtent, totalStats, passStats, clearStats);
 
         // 4. Save to files
-        std::string runSuffix = (config_.mode == FFXM_GPU_PROFILING_MODE_TOTAL_ONLY)
-            ? ("_total_run" + std::to_string(config_.runIndex))
-            : "_diagnostic";
+        std::string baseFilename;
+        if (!config_.filePrefix.empty()) {
+            if (config_.filePrefix == "diagnostic" ||
+                (config_.filePrefix.length() >= 10 &&
+                 config_.filePrefix.rfind("diagnostic") == config_.filePrefix.length() - 10)) {
+                baseFilename = config_.filePrefix;
+            } else {
+                std::string runSuffix = (config_.mode == FFXM_GPU_PROFILING_MODE_TOTAL_ONLY)
+                    ? ("_total_run" + std::to_string(config_.runIndex))
+                    : "_diagnostic";
+                baseFilename = config_.filePrefix + runSuffix;
+            }
+        } else {
+            std::string devName = ctx.deviceName();
+            std::string devPrefix = "fsr3_gpu";
+            if (devName.find("650") != std::string::npos) {
+                devPrefix = "fsr3_mi11x";
+            } else if (devName.find("735") != std::string::npos) {
+                devPrefix = "fsr3_f6";
+            }
+            std::string runSuffix = (config_.mode == FFXM_GPU_PROFILING_MODE_TOTAL_ONLY)
+                ? ("_total_run" + std::to_string(config_.runIndex))
+                : "_diagnostic";
+            baseFilename = devPrefix + runSuffix;
+        }
 
-        std::string baseFilename = config_.filePrefix + runSuffix;
-
-        std::vector<std::string> targetDirs = {
-            config_.outputDir,
-            "/data/local/tmp",
-            "/sdcard/Download",
-            "."
-        };
+        std::vector<std::string> targetDirs;
+        if (!config_.outputDir.empty()) {
+            targetDirs.push_back(config_.outputDir);
+        }
+#if defined(__ANDROID__)
+        targetDirs.push_back("/data/user/0/com.arm.asr.sample/files");
+#endif
+        targetDirs.push_back("/data/local/tmp");
+        targetDirs.push_back("/sdcard/Download");
+        targetDirs.push_back(".");
 
         bool saved = false;
         for (const auto& dir : targetDirs) {

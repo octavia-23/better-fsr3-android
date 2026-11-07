@@ -1,0 +1,124 @@
+{
+  "device": {
+    "model": "POCO F6",
+    "modelNumber": "24069PC21I",
+    "codename": "peridot",
+    "productName": "peridot_in",
+    "brand": "POCO",
+    "manufacturer": "Xiaomi",
+    "soc": {
+      "model": "SM8635",
+      "platform": "pineapple",
+      "marketingName": "Snapdragon 8s Gen 3",
+      "manufacturer": "Qualcomm",
+      "abi": "arm64-v8a",
+      "cpuCores": 8,
+      "cpuTopology": "1x Cortex-X4 @ 3.0GHz + 4x Cortex-A720 @ 2.8GHz + 3x Cortex-A520 @ 2.0GHz"
+    },
+    "gpu": {
+      "name": "Adreno (TM) 735",
+      "vendor": "Qualcomm",
+      "architecture": "Adreno 700 series",
+      "glesDriver": "OpenGL ES 3.2 V@0762.36.1 (GIT@a0053eb399, I31b05c049d, 1766398679) (Date:12/22/25)",
+      "vulkanDriverVersionRaw": 2150604801,
+      "vulkanDriverVersion": "0.762.1",
+      "vulkanApiVersionRaw": 4206720,
+      "vulkanApiVersion": "1.3.128",
+      "vulkanInstanceVersion": "1.4.0",
+      "timestampValidBits": 48,
+      "timestampPeriodNs": 52.0833,
+      "features": {
+        "shaderFloat16": true,
+        "storage16Bit": true,
+        "spirv14": true,
+        "storageExtendedFormats": true,
+        "storageWriteWithoutFormat": true,
+        "storageFormatsSupported": true,
+        "sampledFormatsSupported": true
+      }
+    },
+    "os": {
+      "androidVersion": "16",
+      "sdkLevel": 36,
+      "securityPatch": "2026-07-01",
+      "buildId": "BP2A.250605.031.A3",
+      "buildFingerprint": "POCO/peridot_in/peridot:16/BP2A.250605.031.A3/OS3.0.303.0.WNPINXM:user/release-keys"
+    }
+  },
+  "build": {
+    "gitCommitSha": "13805503f74a44a137afba5b5b4908cba10c87ce",
+    "gitBranch": "main",
+    "buildType": "debug",
+    "buildConfiguration": "-DANDROID_STL=c++_shared -DBUILD_TESTING=OFF -D_DEBUG",
+    "apkPath": "samples/android/app/build/outputs/apk/debug/app-debug.apk",
+    "apkSha256": "905ce086f4115c9c3c037add49da29b1503a2d4ae6519b800aecfadba6bc5b14",
+    "packageName": "com.arm.asr.sample"
+  },
+  "benchmark": {
+    "runIndex": 1,
+    "effect": "FSR 3.1.4",
+    "mode": "per_pass_diagnostic",
+    "resolution": {
+      "renderWidth": 1200,
+      "renderHeight": 540,
+      "displayWidth": 2400,
+      "displayHeight": 1080,
+      "upscaleRatio": 2.0,
+      "qualityMode": "PERFORMANCE"
+    },
+    "frames": {
+      "warmupFrames": 200,
+      "targetMeasuredFrames": 500,
+      "validMeasuredFrames": 500,
+      "unavailableFrames": 0
+    },
+    "shaderConfiguration": {
+      "accumulationPermutation": "0x00000085",
+      "accumulationUseLut": true,
+      "accumulationSrvTextureCount": 8,
+      "jitterPhaseCount": 32
+    }
+  },
+  "telemetryObservations": {
+    "thermal": {
+      "preRunHal": {
+        "batteryC": 35.3,
+        "skinC": 37.32,
+        "gpu0C": 39.2,
+        "gpu1C": 39.6,
+        "gpu2C": 39.6,
+        "gpu3C": 38.8,
+        "cpu0C": 43.6,
+        "cpu1C": 44.4,
+        "cpu2C": 44.8,
+        "cpu3C": 42.2,
+        "cpu4C": 42.2,
+        "cpu5C": 39.8,
+        "cpu6C": 41.0,
+        "cpu7C": 41.4,
+        "thermalStatus": 0
+      },
+      "postRunHal": {
+        "batteryC": 35.9,
+        "skinC": 39.55,
+        "gpu0C": 80.4,
+        "gpu1C": 82.4,
+        "gpu2C": 76.5,
+        "gpu3C": 73.7,
+        "cpu0C": 57.4,
+        "cpu1C": 57.8,
+        "cpu2C": 58.2,
+        "cpu3C": 53.7,
+        "cpu4C": 54.9,
+        "cpu5C": 54.5,
+        "cpu6C": 56.9,
+        "cpu7C": 59.3,
+        "thermalStatus": 0
+      }
+    },
+    "gpuClockObservations": {
+      "accessibleViaSysfs": false,
+      "note": "/sys/class/kgsl/kgsl-3d0 nodes are restricted on non-rooted Android 16 release-keys build; devfreq cooling device reported value 0 (no thermal throttling throttling active)"
+    }
+  }
+}

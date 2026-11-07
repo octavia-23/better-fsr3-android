@@ -1,0 +1,132 @@
+{
+  "device": {
+    "name": "Adreno (TM) 735",
+    "driverVersion": 2150604801,
+    "apiVersion": 4206720,
+    "timestampValidBits": 48,
+    "timestampPeriodNs": 52.0833
+  },
+  "workload": {
+    "effect": "FSR 3.1.4",
+    "mode": "per_pass_diagnostic",
+    "runIndex": 2,
+    "renderExtent": {"width": 1200, "height": 540},
+    "displayExtent": {"width": 2400, "height": 1080},
+    "warmupFrames": 200,
+    "targetMeasuredFrames": 500,
+    "validFrames": 500,
+    "unavailableFrames": 0
+  },
+  "total": {
+    "median_ms": 8.5855,
+    "p95_ms": 8.6894,
+    "p99_ms": 9.5331,
+    "mean_ms": 8.6246,
+    "min_ms": 8.3420,
+    "max_ms": 9.5720,
+    "stddev_ms": 0.1984
+  },
+  "passes": {
+    "PrepareInputs": {
+      "median_ms": 1.0112,
+      "p95_ms": 1.0226,
+      "p99_ms": 1.9282,
+      "mean_ms": 1.0413,
+      "min_ms": 0.9785,
+      "max_ms": 1.9502,
+      "stddev_ms": 0.1617
+    },
+    "LumaPyramid": {
+      "median_ms": 0.1569,
+      "p95_ms": 0.1601,
+      "p99_ms": 0.1653,
+      "mean_ms": 0.1597,
+      "min_ms": 0.1543,
+      "max_ms": 1.0587,
+      "stddev_ms": 0.0432
+    },
+    "ShadingChangePyramid": {
+      "median_ms": 0.3833,
+      "p95_ms": 0.4237,
+      "p99_ms": 0.4683,
+      "mean_ms": 0.3889,
+      "min_ms": 0.3332,
+      "max_ms": 1.3095,
+      "stddev_ms": 0.0640
+    },
+    "ShadingChange": {
+      "median_ms": 0.0465,
+      "p95_ms": 0.0468,
+      "p99_ms": 0.0488,
+      "mean_ms": 0.0466,
+      "min_ms": 0.0451,
+      "max_ms": 0.0554,
+      "stddev_ms": 0.0006
+    },
+    "PrepareReactivity": {
+      "median_ms": 0.6040,
+      "p95_ms": 0.6128,
+      "p99_ms": 0.6154,
+      "mean_ms": 0.6061,
+      "min_ms": 0.5834,
+      "max_ms": 1.5442,
+      "stddev_ms": 0.0422
+    },
+    "LumaInstability": {
+      "median_ms": 0.2691,
+      "p95_ms": 0.2755,
+      "p99_ms": 0.2806,
+      "mean_ms": 0.2694,
+      "min_ms": 0.2551,
+      "max_ms": 0.2871,
+      "stddev_ms": 0.0034
+    },
+    "Accumulate": {
+      "median_ms": 6.0660,
+      "p95_ms": 6.0967,
+      "p99_ms": 6.1098,
+      "mean_ms": 6.0723,
+      "min_ms": 5.9226,
+      "max_ms": 7.0357,
+      "stddev_ms": 0.0608
+    }
+  },
+  "clears": {
+    "ClearReconstructedDepth": {
+      "median_ms": 0.0189,
+      "p95_ms": 0.0192,
+      "p99_ms": 0.0195,
+      "mean_ms": 0.0189,
+      "min_ms": 0.0185,
+      "max_ms": 0.0289,
+      "stddev_ms": 0.0008
+    },
+    "ClearSpdAtomicCounterInitial": {
+      "median_ms": 0.0019,
+      "p95_ms": 0.0020,
+      "p99_ms": 0.0023,
+      "mean_ms": 0.0019,
+      "min_ms": 0.0018,
+      "max_ms": 0.0026,
+      "stddev_ms": 0.0001
+    },
+    "ClearSpdMips": {
+      "median_ms": 0.0131,
+      "p95_ms": 0.0134,
+      "p99_ms": 0.0136,
+      "mean_ms": 0.0132,
+      "min_ms": 0.0124,
+      "max_ms": 0.0228,
+      "stddev_ms": 0.0005
+    },
+    "ClearSpdAtomicCounterSecondary": {
+      "median_ms": 0.0046,
+      "p95_ms": 0.0048,
+      "p99_ms": 0.0051,
+      "mean_ms": 0.0046,
+      "min_ms": 0.0028,
+      "max_ms": 0.0124,
+      "stddev_ms": 0.0004
+    }
+  }
+}
