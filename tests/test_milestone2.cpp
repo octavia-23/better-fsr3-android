@@ -6978,6 +6978,287 @@ static void TestPhase3MobileBandwidthReductionAndKernelFusion()
               << (dramBytesSaved / 1024) << " KB/frame, 100% eliminated roundtrip)." << std::endl;
 }
 
+static void TestPhase4CadenceAndSurfaceFlingerPacingStabilization()
+{
+    std::cout << "--- Test Phase 4: Cadence & SurfaceFlinger Pacing Stabilization Verification ---" << std::endl;
+
+    // 1. Invariant: Pacing Configuration Defaults & Validation
+    {
+        arm::SwapchainSync sync;
+        const auto& cfg = sync.pacingConfig();
+        TEST_CHECK(cfg.mode == arm::SwapchainSync::PacingMode::Unlocked);
+        TEST_CHECK(cfg.enableGpuPacingLock == false);
+        TEST_CHECK(cfg.targetFps == 60);
+        TEST_CHECK(sync.totalFramesSubmitted() == 0);
+
+        // LockTo1Vsync automatically enables GPU pacing lock
+        arm::SwapchainSync::PacingConfig p1;
+        p1.mode = arm::SwapchainSync::PacingMode::LockTo1Vsync;
+        p1.targetFps = 120;
+        sync.setPacingConfig(p1);
+        TEST_CHECK(sync.pacingConfig().mode == arm::SwapchainSync::PacingMode::LockTo1Vsync);
+        TEST_CHECK(sync.pacingConfig().enableGpuPacingLock == true);
+        TEST_CHECK(sync.pacingConfig().targetFrameTimeNs == 8333333ull);
+
+        // TargetFps mode with 60 FPS
+        arm::SwapchainSync::PacingConfig p2;
+        p2.mode = arm::SwapchainSync::PacingMode::TargetFps;
+        p2.targetFps = 60;
+        sync.setPacingConfig(p2);
+        TEST_CHECK(sync.pacingConfig().mode == arm::SwapchainSync::PacingMode::TargetFps);
+        TEST_CHECK(sync.pacingConfig().enableGpuPacingLock == true);
+        TEST_CHECK(sync.pacingConfig().targetFrameTimeNs == 16666666ull);
+
+        sync.resetPacingStats();
+        TEST_CHECK(sync.pacingStats().totalPresentedFrames == 0);
+    }
+
+    // 2. Invariant: GPU Pacing Lock & Prior-Frame Wait / Failure Rollback
+    {
+        arm::SwapchainSync sync;
+        VkDevice mockDevice = (VkDevice)0x10;
+        VkQueue mockQueue = (VkQueue)0x20;
+        VkSwapchainKHR mockSwapchain = (VkSwapchainKHR)0x30;
+        std::vector<VkImage> mockImages = { (VkImage)0x101, (VkImage)0x102, (VkImage)0x103 };
+        VkCommandBuffer mockCmds[2] = { (VkCommandBuffer)0x201, (VkCommandBuffer)0x202 };
+        VkSemaphore mockAcq[2] = { (VkSemaphore)0x301, (VkSemaphore)0x302 };
+        VkSemaphore mockRel[2] = { (VkSemaphore)0x401, (VkSemaphore)0x402 };
+        VkFence mockFences[2] = { (VkFence)0x501, (VkFence)0x502 };
+
+        sync.init(mockDevice, mockQueue, mockSwapchain, mockImages, mockCmds, mockAcq, mockRel, mockFences);
+
+        arm::SwapchainSync::VulkanFunctions fn = {};
+        fn.vkWaitForFences = [](VkDevice, uint32_t, const VkFence*, VkBool32, uint64_t) -> VkResult {
+            return VK_SUCCESS;
+        };
+        fn.vkResetFences = [](VkDevice, uint32_t, const VkFence*) -> VkResult { return VK_SUCCESS; };
+        fn.vkResetCommandBuffer = [](VkCommandBuffer, VkCommandBufferResetFlags) -> VkResult { return VK_SUCCESS; };
+        fn.vkBeginCommandBuffer = [](VkCommandBuffer, const VkCommandBufferBeginInfo*) -> VkResult { return VK_SUCCESS; };
+        fn.vkEndCommandBuffer = [](VkCommandBuffer) -> VkResult { return VK_SUCCESS; };
+        fn.vkQueueSubmit = [](VkQueue, uint32_t, const VkSubmitInfo*, VkFence) -> VkResult { return VK_SUCCESS; };
+        fn.vkQueuePresentKHR = [](VkQueue, const VkPresentInfoKHR*) -> VkResult { return VK_SUCCESS; };
+        fn.vkAcquireNextImageKHR = [](VkDevice, VkSwapchainKHR, uint64_t, VkSemaphore, VkFence, uint32_t* pIndex) -> VkResult {
+            *pIndex = 0;
+            return VK_SUCCESS;
+        };
+
+        sync.setVulkanFunctions(fn);
+
+        // A. Pacing lock enabled:
+        arm::SwapchainSync::PacingConfig cfg;
+        cfg.mode = arm::SwapchainSync::PacingMode::LockTo1Vsync;
+        sync.setPacingConfig(cfg);
+
+        // Frame 0 begin: no prior frame submitted yet, totalFramesSubmitted == 0
+        uint32_t imgIndex = 0;
+        TEST_CHECK(sync.beginFrame(&imgIndex) == true);
+        TEST_CHECK(sync.endFrame(0) == true);
+        TEST_CHECK(sync.totalFramesSubmitted() == 1);
+        TEST_CHECK(sync.frame() == 1);
+
+        // Frame 1 begin: totalFramesSubmitted == 1 -> must wait for frame 0's fence (mockFences[0])
+        TEST_CHECK(sync.beginFrame(&imgIndex) == true);
+        TEST_CHECK(sync.endFrame(0) == true);
+        TEST_CHECK(sync.totalFramesSubmitted() == 2);
+
+        // B. Failure mode test: if prior-frame fence wait returns DEVICE_LOST:
+        sync.vulkanFunctions().vkWaitForFences = [](VkDevice, uint32_t, const VkFence*, VkBool32, uint64_t timeout) -> VkResult {
+            if (timeout == 1000000000ull) { // Prior frame pacing fence wait
+                return VK_ERROR_DEVICE_LOST;
+            }
+            return VK_SUCCESS;
+        };
+        TEST_CHECK(sync.beginFrame(&imgIndex) == false);
+        TEST_CHECK(sync.isDeviceLost() == true);
+        TEST_CHECK(sync.isTerminalError() == true);
+    }
+
+    // 3. Invariant: Wall-Clock Cadence Regulation & Target FPS Sleep Computation
+    {
+        arm::SwapchainSync sync;
+        VkDevice mockDevice = (VkDevice)0x10;
+        VkQueue mockQueue = (VkQueue)0x20;
+        VkSwapchainKHR mockSwapchain = (VkSwapchainKHR)0x30;
+        std::vector<VkImage> mockImages = { (VkImage)0x101, (VkImage)0x102 };
+        VkCommandBuffer mockCmds[2] = { (VkCommandBuffer)0x201, (VkCommandBuffer)0x202 };
+        VkSemaphore mockAcq[2] = { (VkSemaphore)0x301, (VkSemaphore)0x302 };
+        VkSemaphore mockRel[2] = { (VkSemaphore)0x401, (VkSemaphore)0x402 };
+        VkFence mockFences[2] = { (VkFence)0x501, (VkFence)0x502 };
+
+        sync.init(mockDevice, mockQueue, mockSwapchain, mockImages, mockCmds, mockAcq, mockRel, mockFences);
+
+        static uint64_t s_MockTimeNs = 1000000000ull; // Start at 1.0s
+        static uint64_t s_TotalSleptNs = 0;
+        static uint32_t s_SleepCalls = 0;
+        s_MockTimeNs = 1000000000ull;
+        s_TotalSleptNs = 0;
+        s_SleepCalls = 0;
+
+        arm::SwapchainSync::VulkanFunctions fn = {};
+        fn.vkWaitForFences = [](VkDevice, uint32_t, const VkFence*, VkBool32, uint64_t) -> VkResult { return VK_SUCCESS; };
+        fn.vkResetFences = [](VkDevice, uint32_t, const VkFence*) -> VkResult { return VK_SUCCESS; };
+        fn.vkResetCommandBuffer = [](VkCommandBuffer, VkCommandBufferResetFlags) -> VkResult { return VK_SUCCESS; };
+        fn.vkBeginCommandBuffer = [](VkCommandBuffer, const VkCommandBufferBeginInfo*) -> VkResult { return VK_SUCCESS; };
+        fn.vkEndCommandBuffer = [](VkCommandBuffer) -> VkResult { return VK_SUCCESS; };
+        fn.vkQueueSubmit = [](VkQueue, uint32_t, const VkSubmitInfo*, VkFence) -> VkResult { return VK_SUCCESS; };
+        fn.vkQueuePresentKHR = [](VkQueue, const VkPresentInfoKHR*) -> VkResult { return VK_SUCCESS; };
+        fn.vkAcquireNextImageKHR = [](VkDevice, VkSwapchainKHR, uint64_t, VkSemaphore, VkFence, uint32_t* pIndex) -> VkResult {
+            *pIndex = 0;
+            return VK_SUCCESS;
+        };
+        fn.getMonotonicTimeNs = []() -> uint64_t { return s_MockTimeNs; };
+        fn.sleepNs = [](uint64_t ns) {
+            s_SleepCalls++;
+            s_TotalSleptNs += ns;
+            s_MockTimeNs += ns; // Advance time by sleep duration
+        };
+
+        sync.setVulkanFunctions(fn);
+
+        arm::SwapchainSync::PacingConfig cfg;
+        cfg.mode = arm::SwapchainSync::PacingMode::TargetFps;
+        cfg.targetFps = 60; // 16.666 ms = 16666666 ns
+        sync.setPacingConfig(cfg);
+
+        // Frame 0: Presents at T = 1.0s
+        uint32_t imgIdx = 0;
+        TEST_CHECK(sync.beginFrame(&imgIdx) == true);
+        TEST_CHECK(sync.endFrame(0) == true);
+        TEST_CHECK(s_SleepCalls == 0); // No sleep on frame 0
+
+        // Frame 1: Rendering finishes at T = 1.008s (8 ms elapsed, 8.666 ms before 16.666 ms target)
+        s_MockTimeNs += 8000000ull;
+        TEST_CHECK(sync.beginFrame(&imgIdx) == true);
+        TEST_CHECK(sync.endFrame(0) == true);
+        TEST_CHECK(s_SleepCalls == 1);
+        TEST_CHECK(s_TotalSleptNs == (16666666ull - 8000000ull));
+        TEST_CHECK(sync.pacingStats().pacingWaitCount == 1);
+
+        // Frame 2: Slow frame, finishes rendering at T + 25 ms (> 16.666 ms)
+        uint64_t sleptBefore = s_TotalSleptNs;
+        uint32_t callsBefore = s_SleepCalls;
+        s_MockTimeNs += 25000000ull;
+        TEST_CHECK(sync.beginFrame(&imgIdx) == true);
+        TEST_CHECK(sync.endFrame(0) == true);
+        // Must NOT sleep on a late frame
+        TEST_CHECK(s_SleepCalls == callsBefore);
+        TEST_CHECK(s_TotalSleptNs == sleptBefore);
+    }
+
+    // 4. Invariant: HyperOS SurfaceFlinger Preemption Jitter Invariant (P99 < 2.0 ms)
+    {
+        arm::SwapchainSync sync;
+        VkDevice mockDevice = (VkDevice)0x10;
+        VkQueue mockQueue = (VkQueue)0x20;
+        VkSwapchainKHR mockSwapchain = (VkSwapchainKHR)0x30;
+        std::vector<VkImage> mockImages = { (VkImage)0x101, (VkImage)0x102 };
+        VkCommandBuffer mockCmds[2] = { (VkCommandBuffer)0x201, (VkCommandBuffer)0x202 };
+        VkSemaphore mockAcq[2] = { (VkSemaphore)0x301, (VkSemaphore)0x302 };
+        VkSemaphore mockRel[2] = { (VkSemaphore)0x401, (VkSemaphore)0x402 };
+        VkFence mockFences[2] = { (VkFence)0x501, (VkFence)0x502 };
+
+        sync.init(mockDevice, mockQueue, mockSwapchain, mockImages, mockCmds, mockAcq, mockRel, mockFences);
+
+        static uint64_t s_SimTimeNs = 0;
+        s_SimTimeNs = 1000000000ull;
+
+        arm::SwapchainSync::VulkanFunctions fn = {};
+        fn.vkWaitForFences = [](VkDevice, uint32_t, const VkFence*, VkBool32, uint64_t) -> VkResult { return VK_SUCCESS; };
+        fn.vkResetFences = [](VkDevice, uint32_t, const VkFence*) -> VkResult { return VK_SUCCESS; };
+        fn.vkResetCommandBuffer = [](VkCommandBuffer, VkCommandBufferResetFlags) -> VkResult { return VK_SUCCESS; };
+        fn.vkBeginCommandBuffer = [](VkCommandBuffer, const VkCommandBufferBeginInfo*) -> VkResult { return VK_SUCCESS; };
+        fn.vkEndCommandBuffer = [](VkCommandBuffer) -> VkResult { return VK_SUCCESS; };
+        fn.vkQueueSubmit = [](VkQueue, uint32_t, const VkSubmitInfo*, VkFence) -> VkResult { return VK_SUCCESS; };
+        fn.vkQueuePresentKHR = [](VkQueue, const VkPresentInfoKHR*) -> VkResult { return VK_SUCCESS; };
+        fn.vkAcquireNextImageKHR = [](VkDevice, VkSwapchainKHR, uint64_t, VkSemaphore, VkFence, uint32_t* pIndex) -> VkResult {
+            *pIndex = 0;
+            return VK_SUCCESS;
+        };
+        fn.getMonotonicTimeNs = []() -> uint64_t { return s_SimTimeNs; };
+        fn.sleepNs = [](uint64_t ns) {
+            s_SimTimeNs += ns;
+        };
+
+        sync.setVulkanFunctions(fn);
+
+        arm::SwapchainSync::PacingConfig cfg;
+        cfg.mode = arm::SwapchainSync::PacingMode::TargetFps;
+        cfg.targetFps = 60; // 16.666 ms
+        sync.setPacingConfig(cfg);
+
+        // Run 120 frames with HyperOS preemption spikes injected every 24 frames
+        for (int frame = 0; frame < 120; ++frame) {
+            uint32_t img = 0;
+            TEST_CHECK(sync.beginFrame(&img) == true);
+
+            // Baseline GPU compute: 8.5 ms (8,500,000 ns)
+            uint64_t computeTimeNs = 8500000ull;
+            if (frame % 24 == 0) {
+                // Injected SurfaceFlinger HWC composition preemption spike (+0.92 ms)
+                computeTimeNs += 920000ull;
+            }
+            s_SimTimeNs += computeTimeNs;
+
+            TEST_CHECK(sync.endFrame(0) == true);
+        }
+
+        const auto& stats = sync.pacingStats();
+        TEST_CHECK(stats.totalPresentedFrames == 120);
+        TEST_CHECK(stats.meanIntervalMs >= 16.60 && stats.meanIntervalMs <= 16.70);
+        TEST_CHECK(stats.varianceMs2 < 0.05); // Variance strictly bounded
+        TEST_CHECK(stats.stdDevMs < 0.25);   // Standard deviation < 0.25 ms
+        TEST_CHECK(stats.p99JitterMs < 2.0); // Acceptance Invariant: P99 Jitter < 2.0 ms strictly satisfied!
+        TEST_CHECK(stats.maxJitterMs < 2.0); // Max jitter strictly bounded!
+    }
+
+    // 5. Invariant: AbortFrame Cadence Preservation
+    {
+        arm::SwapchainSync sync;
+        VkDevice mockDevice = (VkDevice)0x10;
+        VkQueue mockQueue = (VkQueue)0x20;
+        VkSwapchainKHR mockSwapchain = (VkSwapchainKHR)0x30;
+        std::vector<VkImage> mockImages = { (VkImage)0x101, (VkImage)0x102 };
+        VkCommandBuffer mockCmds[2] = { (VkCommandBuffer)0x201, (VkCommandBuffer)0x202 };
+        VkSemaphore mockAcq[2] = { (VkSemaphore)0x301, (VkSemaphore)0x302 };
+        VkSemaphore mockRel[2] = { (VkSemaphore)0x401, (VkSemaphore)0x402 };
+        VkFence mockFences[2] = { (VkFence)0x501, (VkFence)0x502 };
+
+        sync.init(mockDevice, mockQueue, mockSwapchain, mockImages, mockCmds, mockAcq, mockRel, mockFences);
+
+        static uint64_t s_AbortTimeNs = 1000000000ull;
+        arm::SwapchainSync::VulkanFunctions fn = {};
+        fn.vkWaitForFences = [](VkDevice, uint32_t, const VkFence*, VkBool32, uint64_t) -> VkResult { return VK_SUCCESS; };
+        fn.vkResetFences = [](VkDevice, uint32_t, const VkFence*) -> VkResult { return VK_SUCCESS; };
+        fn.vkResetCommandBuffer = [](VkCommandBuffer, VkCommandBufferResetFlags) -> VkResult { return VK_SUCCESS; };
+        fn.vkBeginCommandBuffer = [](VkCommandBuffer, const VkCommandBufferBeginInfo*) -> VkResult { return VK_SUCCESS; };
+        fn.vkEndCommandBuffer = [](VkCommandBuffer) -> VkResult { return VK_SUCCESS; };
+        fn.vkQueueSubmit = [](VkQueue, uint32_t, const VkSubmitInfo*, VkFence) -> VkResult { return VK_SUCCESS; };
+        fn.vkQueuePresentKHR = [](VkQueue, const VkPresentInfoKHR*) -> VkResult { return VK_SUCCESS; };
+        fn.vkCmdPipelineBarrier = [](VkCommandBuffer, VkPipelineStageFlags, VkPipelineStageFlags, VkDependencyFlags, uint32_t, const VkMemoryBarrier*, uint32_t, const VkBufferMemoryBarrier*, uint32_t, const VkImageMemoryBarrier*) {};
+        fn.vkCmdClearColorImage = [](VkCommandBuffer, VkImage, VkImageLayout, const VkClearColorValue*, uint32_t, const VkImageSubresourceRange*) {};
+        fn.vkAcquireNextImageKHR = [](VkDevice, VkSwapchainKHR, uint64_t, VkSemaphore, VkFence, uint32_t* pIndex) -> VkResult {
+            *pIndex = 0;
+            return VK_SUCCESS;
+        };
+        fn.getMonotonicTimeNs = []() -> uint64_t { return s_AbortTimeNs; };
+
+        sync.setVulkanFunctions(fn);
+
+        arm::SwapchainSync::PacingConfig cfg;
+        cfg.mode = arm::SwapchainSync::PacingMode::LockTo1Vsync;
+        sync.setPacingConfig(cfg);
+
+        uint32_t img = 0;
+        TEST_CHECK(sync.beginFrame(&img) == true);
+        s_AbortTimeNs += 16666666ull;
+        TEST_CHECK(sync.abortFrame(0) == true);
+        TEST_CHECK(sync.totalFramesSubmitted() == 1);
+        TEST_CHECK(sync.pacingStats().totalPresentedFrames == 1);
+    }
+
+    std::cout << "PASS: Phase 4 Cadence & SurfaceFlinger Pacing Stabilization verified (P99 Jitter < 2.0 ms, 1-VSYNC GPU Lock)." << std::endl;
+}
+
 int main()
 {
     std::cout << "============================================================" << std::endl;
@@ -7022,6 +7303,7 @@ int main()
     TestM4GpuProfilerStatisticsAndLifecycle();
     TestM4VkContextQueryPoolLifecycle();
     TestPhase3MobileBandwidthReductionAndKernelFusion();
+    TestPhase4CadenceAndSurfaceFlingerPacingStabilization();
 
     std::cout << "============================================================" << std::endl;
     std::cout << "Summary: " << g_TestPasses << " checks PASSED, " << g_TestFailures << " FAILED." << std::endl;

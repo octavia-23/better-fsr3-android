@@ -145,6 +145,11 @@ bool initRendering(App& app, ANativeWindow* window)
     if (!createSizedResources(app))
         return false;
 
+    arm::SwapchainSync::PacingConfig pacing;
+    pacing.mode = arm::SwapchainSync::PacingMode::LockTo1Vsync;
+    pacing.targetFps = 120;
+    app.ctx.sync().setPacingConfig(pacing);
+
     app.profiler.initFromEnvironmentOrDefaults();
     app.lastTimeSeconds = nowSeconds();
     app.renderReady     = true;

@@ -10,7 +10,11 @@
 #endif
 #include <vulkan/vulkan.h>
 
+#include <algorithm>
+#include <chrono>
+#include <cmath>
 #include <cstdint>
+#include <thread>
 #include <vector>
 
 namespace arm {
@@ -31,6 +35,32 @@ public:
         OtherError
     };
 
+    enum class PacingMode {
+        Unlocked,      // Pipelined multi-frame in flight without CPU lock
+        LockTo1Vsync,  // GPU pacing lock: CPU cannot drift > 1 VSYNC ahead of GPU completion
+        TargetFps      // Wall-clock cadence stabilization + GPU pacing lock (e.g. 60 or 120 FPS)
+    };
+
+    struct PacingConfig {
+        PacingMode mode                = PacingMode::Unlocked;
+        uint32_t   targetFps           = 60;            // Target FPS when mode == TargetFps (e.g. 60 or 120)
+        uint64_t   targetFrameTimeNs   = 16666666ull;   // Derived: 1,000,000,000 / targetFps
+        bool       enableGpuPacingLock = false;         // Automatically true if mode != Unlocked
+        uint64_t   gpuWaitTimeoutNs    = 1000000000ull; // 1 second timeout for GPU pacing fence
+    };
+
+    struct PacingStats {
+        uint64_t totalPresentedFrames  = 0;
+        double   meanIntervalMs        = 0.0;
+        double   varianceMs2           = 0.0;
+        double   stdDevMs              = 0.0;
+        double   p95JitterMs           = 0.0;
+        double   p99JitterMs           = 0.0;
+        double   maxJitterMs           = 0.0;
+        uint64_t pacingWaitCount       = 0;
+        double   totalPacingWaitTimeMs = 0.0;
+    };
+
     struct VulkanFunctions {
         VkResult (VKAPI_PTR *vkWaitForFences)(VkDevice, uint32_t, const VkFence*, VkBool32, uint64_t) = nullptr;
         VkResult (VKAPI_PTR *vkAcquireNextImageKHR)(VkDevice, VkSwapchainKHR, uint64_t, VkSemaphore, VkFence, uint32_t*) = nullptr;
@@ -47,6 +77,8 @@ public:
         void (VKAPI_PTR *vkDestroyFence)(VkDevice, VkFence, const VkAllocationCallbacks*) = nullptr;
         VkResult (VKAPI_PTR *vkCreateSemaphore)(VkDevice, const VkSemaphoreCreateInfo*, const VkAllocationCallbacks*, VkSemaphore*) = nullptr;
         void (VKAPI_PTR *vkDestroySemaphore)(VkDevice, VkSemaphore, const VkAllocationCallbacks*) = nullptr;
+        uint64_t (*getMonotonicTimeNs)() = nullptr;
+        void (*sleepNs)(uint64_t ns) = nullptr;
     };
 
     void initStandardFunctions()
@@ -68,6 +100,15 @@ public:
         fn_.vkCreateSemaphore = ::vkCreateSemaphore;
         fn_.vkDestroySemaphore = ::vkDestroySemaphore;
 #endif
+        fn_.getMonotonicTimeNs = []() -> uint64_t {
+            auto now = std::chrono::steady_clock::now().time_since_epoch();
+            return (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(now).count();
+        };
+        fn_.sleepNs = [](uint64_t ns) {
+            if (ns > 0) {
+                std::this_thread::sleep_for(std::chrono::nanoseconds(ns));
+            }
+        };
     }
 
     void setVulkanFunctions(const VulkanFunctions& fn) { fn_ = fn; }
@@ -105,6 +146,10 @@ public:
         recoveryFailed_ = false;
         surfaceLost_ = false;
         lastPresentResult_ = PresentResult::Success;
+        totalFramesSubmitted_ = 0;
+        lastPresentTimeNs_ = 0;
+        stats_ = PacingStats();
+        recentIntervalsNs_.clear();
     }
 
     /// Clears all retained Vulkan handles, caller pointers, and sync state without
@@ -137,6 +182,35 @@ public:
         recoveryFailed_ = false;
         surfaceLost_ = false;
         lastPresentResult_ = PresentResult::Success;
+        totalFramesSubmitted_ = 0;
+        lastPresentTimeNs_ = 0;
+        stats_ = PacingStats();
+        recentIntervalsNs_.clear();
+    }
+
+    void setPacingConfig(const PacingConfig& config)
+    {
+        pacingConfig_ = config;
+        if (pacingConfig_.mode != PacingMode::Unlocked) {
+            pacingConfig_.enableGpuPacingLock = true;
+        }
+        if (pacingConfig_.targetFps > 0) {
+            pacingConfig_.targetFrameTimeNs = 1000000000ull / pacingConfig_.targetFps;
+        } else {
+            pacingConfig_.targetFrameTimeNs = 16666666ull;
+        }
+        lastPresentTimeNs_ = 0;
+    }
+
+    const PacingConfig& pacingConfig() const { return pacingConfig_; }
+    const PacingStats& pacingStats() const { return stats_; }
+    uint64_t totalFramesSubmitted() const { return totalFramesSubmitted_; }
+
+    void resetPacingStats()
+    {
+        stats_ = PacingStats();
+        recentIntervalsNs_.clear();
+        lastPresentTimeNs_ = 0;
     }
 
     void onSwapchainRecreated()
@@ -292,6 +366,22 @@ public:
         acquireSemaphoreConsumed_ = false;
         submissionQueued_ = false;
 
+        // Invariant: GPU Pacing Lock
+        // Prevent CPU submission from drifting more than 1 VSYNC ahead of GPU completion.
+        if (pacingConfig_.enableGpuPacingLock && totalFramesSubmitted_ > 0) {
+            uint32_t prevFrameSlot = (frame_ + kFramesInFlight - 1) % kFramesInFlight;
+            if (inFlightFences_[prevFrameSlot] != VK_NULL_HANDLE) {
+                VkResult prevWaitRes = fn_.vkWaitForFences(device_, 1, &inFlightFences_[prevFrameSlot], VK_TRUE, pacingConfig_.gpuWaitTimeoutNs);
+                if (prevWaitRes != VK_SUCCESS) {
+                    if (prevWaitRes == VK_ERROR_DEVICE_LOST) {
+                        deviceLost_ = true;
+                    }
+                    fenceReset_ = false;
+                    return false;
+                }
+            }
+        }
+
         VkResult waitRes = fn_.vkWaitForFences(device_, 1, &inFlightFences_[frame_], VK_TRUE, UINT64_MAX);
         if (waitRes != VK_SUCCESS) {
             if (waitRes == VK_ERROR_DEVICE_LOST) {
@@ -411,9 +501,22 @@ public:
             return false;
         }
 
+        totalFramesSubmitted_++;
         submissionQueued_ = true;
         acquireSemaphoreConsumed_ = true;
         fenceReset_ = false;
+
+        // Pacing cadence stabilization:
+        if (pacingConfig_.mode == PacingMode::TargetFps && lastPresentTimeNs_ > 0) {
+            uint64_t nowNs = getCurrentTimeNs();
+            uint64_t targetWakeNs = lastPresentTimeNs_ + pacingConfig_.targetFrameTimeNs;
+            if (nowNs < targetWakeNs) {
+                uint64_t sleepNs = targetWakeNs - nowNs;
+                performSleepNs(sleepNs);
+                stats_.pacingWaitCount++;
+                stats_.totalPacingWaitTimeMs += (double)sleepNs * 1e-6;
+            }
+        }
 
         VkPresentInfoKHR present = {VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
         present.waitSemaphoreCount = 1;
@@ -425,6 +528,11 @@ public:
         VkResult presented = fn_.vkQueuePresentKHR(queue_, &present);
         imageAcquired_ = false;
         submissionQueued_ = false;
+
+        uint64_t presentTimeNs = getCurrentTimeNs();
+        if (presented == VK_SUCCESS || presented == VK_SUBOPTIMAL_KHR) {
+            recordPresentationSample(presentTimeNs);
+        }
 
         if (presented == VK_SUCCESS) {
             lastPresentResult_ = swapchainSuboptimal_ ? PresentResult::Suboptimal : PresentResult::Success;
@@ -582,6 +690,7 @@ public:
             return false;
         }
 
+        totalFramesSubmitted_++;
         submissionQueued_ = true;
         acquireSemaphoreConsumed_ = true;
         fenceReset_ = false;
@@ -597,6 +706,11 @@ public:
         VkResult presented = fn_.vkQueuePresentKHR(queue_, &present);
         imageAcquired_ = false;
         submissionQueued_ = false;
+
+        uint64_t presentTimeNs = getCurrentTimeNs();
+        if (presented == VK_SUCCESS || presented == VK_SUBOPTIMAL_KHR) {
+            recordPresentationSample(presentTimeNs);
+        }
 
         if (presented == VK_SUCCESS) {
             lastPresentResult_ = swapchainSuboptimal_ ? PresentResult::Suboptimal : PresentResult::Success;
@@ -642,6 +756,76 @@ public:
     }
 
 private:
+    uint64_t getCurrentTimeNs() const
+    {
+        if (fn_.getMonotonicTimeNs) {
+            return fn_.getMonotonicTimeNs();
+        }
+        auto now = std::chrono::steady_clock::now().time_since_epoch();
+        return (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(now).count();
+    }
+
+    void performSleepNs(uint64_t ns) const
+    {
+        if (fn_.sleepNs) {
+            fn_.sleepNs(ns);
+            return;
+        }
+        if (ns > 0) {
+            std::this_thread::sleep_for(std::chrono::nanoseconds(ns));
+        }
+    }
+
+    void recordPresentationSample(uint64_t presentTimeNs)
+    {
+        stats_.totalPresentedFrames++;
+        if (lastPresentTimeNs_ > 0 && presentTimeNs >= lastPresentTimeNs_) {
+            uint64_t intervalNs = presentTimeNs - lastPresentTimeNs_;
+            recentIntervalsNs_.push_back(intervalNs);
+            if (recentIntervalsNs_.size() > 256) {
+                recentIntervalsNs_.erase(recentIntervalsNs_.begin());
+            }
+
+            size_t n = recentIntervalsNs_.size();
+            double sumMs = 0.0;
+            std::vector<double> jittersMs;
+            jittersMs.reserve(n);
+
+            double targetMs = (double)pacingConfig_.targetFrameTimeNs * 1e-6;
+
+            for (uint64_t intNs : recentIntervalsNs_) {
+                double intMs = (double)intNs * 1e-6;
+                sumMs += intMs;
+                double jitter = std::fabs(intMs - targetMs);
+                jittersMs.push_back(jitter);
+            }
+
+            stats_.meanIntervalMs = sumMs / (double)n;
+
+            double sumSqDiff = 0.0;
+            for (uint64_t intNs : recentIntervalsNs_) {
+                double intMs = (double)intNs * 1e-6;
+                double diff = intMs - stats_.meanIntervalMs;
+                sumSqDiff += diff * diff;
+            }
+            stats_.varianceMs2 = sumSqDiff / (double)n;
+            stats_.stdDevMs = std::sqrt(stats_.varianceMs2);
+
+            std::sort(jittersMs.begin(), jittersMs.end());
+            size_t idx95 = (size_t)std::ceil(0.95 * n) - 1;
+            size_t idx99 = (size_t)std::ceil(0.99 * n) - 1;
+            stats_.p95JitterMs = jittersMs[std::min(idx95, n - 1)];
+            stats_.p99JitterMs = jittersMs[std::min(idx99, n - 1)];
+            stats_.maxJitterMs = jittersMs.back();
+        }
+        lastPresentTimeNs_ = presentTimeNs;
+    }
+
+    PacingConfig             pacingConfig_;
+    PacingStats              stats_;
+    uint64_t                 totalFramesSubmitted_ = 0;
+    uint64_t                 lastPresentTimeNs_ = 0;
+    std::vector<uint64_t>    recentIntervalsNs_;
     VkDevice                 device_ = VK_NULL_HANDLE;
     VkQueue                  queue_ = VK_NULL_HANDLE;
     VkSwapchainKHR           swapchain_ = VK_NULL_HANDLE;
