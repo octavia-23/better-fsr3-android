@@ -155,19 +155,19 @@ FFX_MIN16_F Lanczos2(FFX_MIN16_F x)
 #endif //FFX_HALF
 
 // FSR1 lanczos approximation. Input is x*x and must be <= 4.
+// Factored algebraic identity: ((25/16)*a^2 - 9/16)*(b^2) == (b^2)*(b*(x2 - 1)) where b = 0.25*x2 - 1.
+// Reduces ALU count from 6 ops to 3 ops and eliminates intermediate register pressure.
 FfxFloat32 Lanczos2ApproxSqNoClamp(FfxFloat32 x2)
 {
-    FfxFloat32 a = (2.0f / 5.0f) * x2 - 1;
-    FfxFloat32 b = (1.0f / 4.0f) * x2 - 1;
-    return ((25.0f / 16.0f) * a * a - (25.0f / 16.0f - 1)) * (b * b);
+    FfxFloat32 b = 0.25f * x2 - 1.0f;
+    return (b * b) * (b * (x2 - 1.0f));
 }
 
 #if FFX_HALF
 FFX_MIN16_F Lanczos2ApproxSqNoClamp(FFX_MIN16_F x2)
 {
-    FFX_MIN16_F a = FFX_MIN16_F(2.0f / 5.0f) * x2 - FFX_MIN16_F(1);
-    FFX_MIN16_F b = FFX_MIN16_F(1.0f / 4.0f) * x2 - FFX_MIN16_F(1);
-    return (FFX_MIN16_F(25.0f / 16.0f) * a * a - FFX_MIN16_F(25.0f / 16.0f - 1)) * (b * b);
+    FFX_MIN16_F b = FFX_MIN16_F(0.25f) * x2 - FFX_MIN16_F(1.0f);
+    return (b * b) * (b * (x2 - FFX_MIN16_F(1.0f)));
 }
 
 #if defined(__XBOX_SCARLETT) && defined(__XBATG_EXTRA_16_BIT_OPTIMISATION) && (__XBATG_EXTRA_16_BIT_OPTIMISATION == 1)

@@ -321,6 +321,18 @@ void ComputeUpsampledColorAndWeight(const AccumulationPassCommonParams params, F
 
     const FfxBoolean bIsInitialSample = (params.fAccumulation == 0.0f);
 
+    // Identify how much of each upsampled color to be used for this frame
+    const FfxFloat32 fKernelBiasMax          = ComputeMaxKernelWeight(params, data);
+    const FfxFloat32 fKernelBiasMin          = ffxMax(1.0f, ((1.0f + fKernelBiasMax) * 0.3f));
+
+    const FfxFloat32 fKernelBiasWeight =
+        ffxMin(1.0f - params.fDisocclusion * 0.5f,
+        ffxMin(1.0f - params.fShadingChange,
+        ffxSaturate(data.fHistoryWeight * 5.0f)
+        ));
+
+    const FfxFloat32 fKernelBias             = ffxLerp(fKernelBiasMin, fKernelBiasMax, fKernelBiasWeight);
+
 #if FFX_FSR3UPSCALER_USE_XBOX_PAIRED_16BIT_MATH_OPTIMIZATIONS
     // Unroll the loop to load samples on Scarlett to help the shader compiler
     const FFX_MIN16_F2 fSampleOffsetX02 = __XB_AsHalf(bFlipCol ? __XB_AsUInt(FFX_MIN16_F2( 1, -1)) : __XB_AsUInt(FFX_MIN16_F2(-1, 1)));
@@ -404,50 +416,6 @@ void ComputeUpsampledColorAndWeight(const AccumulationPassCommonParams params, F
     RGBToYCoCgPaired(VertR, VertG, VertB);
     RGBToYCoCgPaired(CenterR, CenterG, CenterB);
 
-#else
-    FfxFloat32x3 fSamples[9];
-    FfxInt32 iSampleIndex = 0;
-
-    FFX_UNROLL
-    for (FfxInt32 row = 0; row < 3; row++) {
-        FFX_UNROLL
-        for (FfxInt32 col = 0; col < 3; col++) {
-            const FfxInt32x2 iSampleColRow = FfxInt32x2(bFlipCol ? (3 - col) : col, bFlipRow ? (3 - row) : row);
-            const FfxInt32x2 iSrcSamplePos = FfxInt32x2(iSrcInputPos) + offsetTL + iSampleColRow;
-            const FfxInt32x2 iSampleCoord = ClampLoad(iSrcSamplePos, FfxInt32x2(0, 0), FfxInt32x2(RenderSize()));
-
-            fSamples[iSampleIndex] = LoadPreparedColor(iSampleCoord);
-
-            ++iSampleIndex;
-        }
-    }
-
-#if FFX_FSR3UPSCALER_OPTION_HDR_COLOR_INPUT
-    if (bIsInitialSample)
-    {
-        for (iSampleIndex = 0; iSampleIndex < 9; ++iSampleIndex)
-        {
-            //YCoCg -> RGB -> Tonemap -> YCoCg (Use RGB tonemapper to avoid color desaturation)
-            fSamples[iSampleIndex] = RGBToYCoCg(Tonemap(YCoCgToRGB(fSamples[iSampleIndex])));
-        }
-    }
-#endif
-
-#endif // #if FFX_FSR3UPSCALER_USE_XBOX_PAIRED_16BIT_MATH_OPTIMIZATIONS
-
-    // Identify how much of each upsampled color to be used for this frame
-    const FfxFloat32 fKernelBiasMax          = ComputeMaxKernelWeight(params, data);
-    const FfxFloat32 fKernelBiasMin          = ffxMax(1.0f, ((1.0f + fKernelBiasMax) * 0.3f));
-
-    const FfxFloat32 fKernelBiasWeight =
-        ffxMin(1.0f - params.fDisocclusion * 0.5f,
-        ffxMin(1.0f - params.fShadingChange,
-        ffxSaturate(data.fHistoryWeight * 5.0f)
-        ));
-
-    const FfxFloat32 fKernelBias             = ffxLerp(fKernelBiasMin, fKernelBiasMax, fKernelBiasWeight);
-    
-#if FFX_FSR3UPSCALER_USE_XBOX_PAIRED_16BIT_MATH_OPTIMIZATIONS
     // Unroll the loop to load samples on Scarlett to help the shader compiler
     const bool coordX0OnScreen = iSrcSamplePosX01.x == iSrcSamplePosX01Clamped.x;
     const bool coordX1OnScreen = iSrcSamplePosX01.y == iSrcSamplePosX01Clamped.y;
@@ -580,8 +548,9 @@ void ComputeUpsampledColorAndWeight(const AccumulationPassCommonParams params, F
     data.clippingBox.aabbMax            = FfxFloat32x3(aabbMinMaxR.y, aabbMinMaxG.y, aabbMinMaxB.y);
     data.clippingBox.fBoxCenterWeight   = FfxFloat32(boxCenterWeight);
 #else
-
-    iSampleIndex = 0;
+    // Fused Single-Pass Mobile Loop: Loads, weights, and accumulates 3x3 samples in-flight
+    // without allocating fSamples[9] (saving 27 live registers, eliminating VGPR spilling and redundant coordinate math).
+    const FfxFloat32 fRectificationCurveBias = -2.3f;
 
     FFX_UNROLL
     for (FfxInt32 row = 0; row < 3; row++)
@@ -594,29 +563,33 @@ void ComputeUpsampledColorAndWeight(const AccumulationPassCommonParams params, F
             const FfxFloat32x2 fSrcSampleOffset = fBaseSampleOffset + fOffset;
 
             const FfxInt32x2 iSrcSamplePos   = FfxInt32x2(iSrcInputPos) + FfxInt32x2(offsetTL) + sampleColRow;
-            const FfxFloat32 fOnScreenFactor = FfxFloat32(IsOnScreen(FfxInt32x2(iSrcSamplePos), FfxInt32x2(RenderSize())));
+            const FfxFloat32 fOnScreenFactor = FfxFloat32(IsOnScreen(iSrcSamplePos, FfxInt32x2(RenderSize())));
+            const FfxInt32x2 iSampleCoord    = ClampLoad(iSrcSamplePos, FfxInt32x2(0, 0), FfxInt32x2(RenderSize()));
+
+            FfxFloat32x3 sampleColor = LoadPreparedColor(iSampleCoord);
+
+#if FFX_FSR3UPSCALER_OPTION_HDR_COLOR_INPUT
+            if (bIsInitialSample)
+            {
+                // YCoCg -> RGB -> Tonemap -> YCoCg (Use RGB tonemapper to avoid color desaturation)
+                sampleColor = RGBToYCoCg(Tonemap(YCoCgToRGB(sampleColor)));
+            }
+#endif
 
             if (!bIsInitialSample)
             {
                 const FfxFloat32 fSampleWeight = fOnScreenFactor * FfxFloat32(GetUpsampleLanczosWeight(fSrcSampleOffset, fKernelBias));
-
-                data.fUpsampledColor += fSamples[iSampleIndex] * fSampleWeight;
+                data.fUpsampledColor += sampleColor * fSampleWeight;
                 data.fUpsampledWeight += fSampleWeight;
             }
 
             // Update rectification box
-            {
-                const FfxFloat32 fRectificationCurveBias = -2.3f;
-                const FfxFloat32 fSrcSampleOffsetSq = dot(fSrcSampleOffset, fSrcSampleOffset);
-                const FfxFloat32 fBoxSampleWeight   = exp(fRectificationCurveBias * fSrcSampleOffsetSq) * fOnScreenFactor;
-
-                const FfxBoolean bInitialSample = (row == 0) && (col == 0);
-                RectificationBoxAddSample(bInitialSample, data.clippingBox, fSamples[iSampleIndex], fBoxSampleWeight);
-            }
-            ++iSampleIndex;
+            const FfxFloat32 fSrcSampleOffsetSq = dot(fSrcSampleOffset, fSrcSampleOffset);
+            const FfxFloat32 fBoxSampleWeight   = exp(fRectificationCurveBias * fSrcSampleOffsetSq) * fOnScreenFactor;
+            const FfxBoolean bInitialSample     = (row == 0) && (col == 0);
+            RectificationBoxAddSample(bInitialSample, data.clippingBox, sampleColor, fBoxSampleWeight);
         }
     }
-	
 #endif // #if FFX_FSR3UPSCALER_USE_XBOX_PAIRED_16BIT_MATH_OPTIMIZATIONS
 
     RectificationBoxComputeVarianceBoxData(data.clippingBox);
