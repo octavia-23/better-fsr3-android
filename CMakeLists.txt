@@ -168,5 +168,35 @@ if(BUILD_TESTING)
         target_link_libraries(test_milestone2 PRIVATE log)
     endif()
     add_test(NAME test_milestone2 COMMAND test_milestone2)
+
+    add_executable(test_image_quality tests/test_image_quality.cpp)
+    target_link_libraries(test_image_quality PRIVATE Arm_ASR_api)
+    if(NOT FFXM_REMOVE_ARM_ASR_VK_STANDALONE_BACKEND)
+        target_link_libraries(test_image_quality PRIVATE Arm_ASR_backend "${CMAKE_CURRENT_SOURCE_DIR}/vulkan-1.lib")
+        target_compile_definitions(test_image_quality PRIVATE FFXM_HAS_VK_BACKEND=1)
+    else()
+        target_sources(test_image_quality PRIVATE
+            src/backends/shared/ffxm_shader_blobs.cpp
+            src/backends/shared/blob_accessors/ffxm_fsr3upscaler_shaderblobs.cpp
+            src/backends/shared/blob_accessors/ffxm_fsr2_shaderblobs.cpp)
+        target_include_directories(test_image_quality PRIVATE
+            src/backends/shared
+            src/backends/shared/blob_accessors/prebuilt_shaders
+            src/components)
+        target_compile_definitions(test_image_quality PRIVATE FFXM_FSR=1)
+    endif()
+    target_include_directories(test_image_quality PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/samples/common
+        ${FFXM_INCLUDE_PATH}
+        ${FFXM_HOST_PATH}
+        ${FFXM_GPU_PATH}
+        ${FFXM_HOST_BACKENDS_PATH}/vk
+        ${FFXM_VULKAN_PATH})
+    target_compile_features(test_image_quality PRIVATE cxx_std_20)
+    if(ANDROID)
+        target_link_libraries(test_image_quality PRIVATE log)
+    endif()
+    add_test(NAME test_image_quality COMMAND test_image_quality)
 endif()
 

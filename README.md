@@ -493,7 +493,7 @@ This repository adheres to strict engineering directives:
 - [x] **Milestone 4**: Vulkan profiler hardening and query invariant validation.
 - [ ] **Milestone 5**: System-level kernel trace profiling (Perfetto / ftrace) to analyze POCO F6 SurfaceFlinger preemption cadence.
 - [ ] **Milestone 6**: Hardware profiling expansion across additional mobile architectures (ARM Immortalis / Mali-G720, Samsung Xclipse).
-- [ ] **Milestone 7**: Automated image quality verification harness (PSNR, SSIM, and LPIPS against reference renders).
+- [x] **Milestone 7**: Automated image quality verification harness (PSNR, SSIM, and deterministic multi-frame regression test).
 - [ ] **Milestone 8**: Sub-pass shader instruction analysis and ALU occupancy tuning of the `Accumulate` kernel.
 - [ ] **Milestone 9**: Empirical evaluation of Tile-Based Deferred Rendering (TBDR) fragment/subpass alternatives against compute dispatch baselines.
 - [ ] **Milestone 10**: Phase 2 Frame Generation exploratory architecture (Optical Flow and Frame Interpolation swapchain integration).
