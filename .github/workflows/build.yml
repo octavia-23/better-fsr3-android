@@ -178,6 +178,7 @@ jobs:
           -DFFXM_USE_PREBUILT_SHADERS=OFF
           -DFFXM_VKLOADER_VOLK=OFF
           -DFFXM_VULKAN_PATH="${{ github.workspace }}/Vulkan-Headers/include"
+          -DBUILD_TESTING=OFF
       - name: Build
         run: cmake --build build-sc --config Release
 

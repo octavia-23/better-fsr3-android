@@ -172,7 +172,7 @@ if(BUILD_TESTING)
     add_executable(test_image_quality tests/test_image_quality.cpp)
     target_link_libraries(test_image_quality PRIVATE Arm_ASR_api)
     if(NOT FFXM_REMOVE_ARM_ASR_VK_STANDALONE_BACKEND)
-        target_link_libraries(test_image_quality PRIVATE Arm_ASR_backend "${CMAKE_CURRENT_SOURCE_DIR}/vulkan-1.lib")
+        target_link_libraries(test_image_quality PRIVATE Arm_ASR_backend)
         target_compile_definitions(test_image_quality PRIVATE FFXM_HAS_VK_BACKEND=1)
     else()
         target_sources(test_image_quality PRIVATE

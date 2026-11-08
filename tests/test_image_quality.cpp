@@ -36,6 +36,138 @@
 #       define NOMINMAX
 #   endif
 #   include <windows.h>
+
+static PFN_vkEnumerateDeviceExtensionProperties s_pfnRealEnumerateDeviceExtensionProperties = nullptr;
+static PFN_vkGetDeviceProcAddr s_pfnRealGetDeviceProcAddr = nullptr;
+static PFN_vkGetPhysicalDeviceProperties2 s_pfnRealGetPhysicalDeviceProperties2 = nullptr;
+static PFN_vkGetPhysicalDeviceFeatures2 s_pfnRealGetPhysicalDeviceFeatures2 = nullptr;
+static PFN_vkGetPhysicalDeviceMemoryProperties s_pfnRealGetPhysicalDeviceMemoryProperties = nullptr;
+
+static PFN_vkCreateInstance s_pfnCreateInstance = nullptr;
+static PFN_vkDestroyInstance s_pfnDestroyInstance = nullptr;
+static PFN_vkEnumeratePhysicalDevices s_pfnEnumeratePhysicalDevices = nullptr;
+static PFN_vkGetPhysicalDeviceProperties s_pfnGetPhysicalDeviceProperties = nullptr;
+static PFN_vkGetPhysicalDeviceQueueFamilyProperties s_pfnGetPhysicalDeviceQueueFamilyProperties = nullptr;
+static PFN_vkCreateDevice s_pfnCreateDevice = nullptr;
+static PFN_vkDestroyDevice s_pfnDestroyDevice = nullptr;
+
+static PFN_vkGetDeviceQueue s_pfnGetDeviceQueue = nullptr;
+static PFN_vkCreateCommandPool s_pfnCreateCommandPool = nullptr;
+static PFN_vkDestroyCommandPool s_pfnDestroyCommandPool = nullptr;
+static PFN_vkAllocateCommandBuffers s_pfnAllocateCommandBuffers = nullptr;
+static PFN_vkCreateImage s_pfnCreateImage = nullptr;
+static PFN_vkDestroyImage s_pfnDestroyImage = nullptr;
+static PFN_vkGetImageMemoryRequirements s_pfnGetImageMemoryRequirements = nullptr;
+static PFN_vkAllocateMemory s_pfnAllocateMemory = nullptr;
+static PFN_vkFreeMemory s_pfnFreeMemory = nullptr;
+static PFN_vkBindImageMemory s_pfnBindImageMemory = nullptr;
+static PFN_vkCreateBuffer s_pfnCreateBuffer = nullptr;
+static PFN_vkDestroyBuffer s_pfnDestroyBuffer = nullptr;
+static PFN_vkGetBufferMemoryRequirements s_pfnGetBufferMemoryRequirements = nullptr;
+static PFN_vkBindBufferMemory s_pfnBindBufferMemory = nullptr;
+static PFN_vkMapMemory s_pfnMapMemory = nullptr;
+static PFN_vkUnmapMemory s_pfnUnmapMemory = nullptr;
+static PFN_vkBeginCommandBuffer s_pfnBeginCommandBuffer = nullptr;
+static PFN_vkEndCommandBuffer s_pfnEndCommandBuffer = nullptr;
+static PFN_vkCmdCopyBufferToImage s_pfnCmdCopyBufferToImage = nullptr;
+static PFN_vkCmdPipelineBarrier s_pfnCmdPipelineBarrier = nullptr;
+static PFN_vkCmdCopyImageToBuffer s_pfnCmdCopyImageToBuffer = nullptr;
+static PFN_vkQueueSubmit s_pfnQueueSubmit = nullptr;
+static PFN_vkQueueWaitIdle s_pfnQueueWaitIdle = nullptr;
+#endif
+
+#if !defined(ANDROID)
+// On host platforms when compiling tests without the full Vulkan SDK loader (using header-only Vulkan-Headers),
+// provide stubs for Vulkan loader functions so test_image_quality can link Arm_ASR_backend
+// without any external vulkan-1.lib file.
+// When running real hardware tests, these stubs forward dynamically to vulkan-1.dll.
+extern "C" {
+    VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
+        VkPhysicalDevice physicalDevice, const char* pLayerName, uint32_t* pPropertyCount, VkExtensionProperties* pProperties)
+    {
+#if defined(_WIN32)
+        if (s_pfnRealEnumerateDeviceExtensionProperties) {
+            return s_pfnRealEnumerateDeviceExtensionProperties(physicalDevice, pLayerName, pPropertyCount, pProperties);
+        }
+#endif
+        (void)physicalDevice;
+        (void)pLayerName;
+        (void)pProperties;
+        if (pPropertyCount) {
+            *pPropertyCount = 0;
+        }
+        return VK_SUCCESS;
+    }
+
+    VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice device, const char* pName)
+    {
+#if defined(_WIN32)
+        if (s_pfnRealGetDeviceProcAddr) {
+            return s_pfnRealGetDeviceProcAddr(device, pName);
+        }
+#endif
+        (void)device;
+        (void)pName;
+        return nullptr;
+    }
+
+    VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceProperties2(
+        VkPhysicalDevice physicalDevice, VkPhysicalDeviceProperties2* pProperties)
+    {
+#if defined(_WIN32)
+        if (s_pfnRealGetPhysicalDeviceProperties2) {
+            s_pfnRealGetPhysicalDeviceProperties2(physicalDevice, pProperties);
+            return;
+        }
+#endif
+        (void)physicalDevice;
+        (void)pProperties;
+    }
+
+    VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceFeatures2(
+        VkPhysicalDevice physicalDevice, VkPhysicalDeviceFeatures2* pFeatures)
+    {
+#if defined(_WIN32)
+        if (s_pfnRealGetPhysicalDeviceFeatures2) {
+            s_pfnRealGetPhysicalDeviceFeatures2(physicalDevice, pFeatures);
+            return;
+        }
+#endif
+        (void)physicalDevice;
+        (void)pFeatures;
+    }
+
+    VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceMemoryProperties(
+        VkPhysicalDevice physicalDevice, VkPhysicalDeviceMemoryProperties* pMemoryProperties)
+    {
+#if defined(_WIN32)
+        if (s_pfnRealGetPhysicalDeviceMemoryProperties) {
+            s_pfnRealGetPhysicalDeviceMemoryProperties(physicalDevice, pMemoryProperties);
+            return;
+        }
+#endif
+        (void)physicalDevice;
+        (void)pMemoryProperties;
+    }
+
+    VKAPI_ATTR void VKAPI_CALL vkCmdSetViewport(
+        VkCommandBuffer commandBuffer, uint32_t firstViewport, uint32_t viewportCount, const VkViewport* pViewports)
+    {
+        (void)commandBuffer;
+        (void)firstViewport;
+        (void)viewportCount;
+        (void)pViewports;
+    }
+
+    VKAPI_ATTR void VKAPI_CALL vkCmdSetScissor(
+        VkCommandBuffer commandBuffer, uint32_t firstScissor, uint32_t scissorCount, const VkRect2D* pScissors)
+    {
+        (void)commandBuffer;
+        (void)firstScissor;
+        (void)scissorCount;
+        (void)pScissors;
+    }
+}
 #endif
 
 namespace {
@@ -98,103 +230,82 @@ uint16_t FloatToHalf(float f) {
 inline Vec3 CheckerPattern(const Vec2& p) {
     float cx = std::floor(p.x);
     float cy = std::floor(p.y);
-    float odd = std::fmod(std::abs(cx + cy), 2.0f);
-    Vec3 a = {0.82f, 0.36f, 0.18f};
-    Vec3 b = {0.10f, 0.13f, 0.20f};
-    Vec3 base = {
-        a.x * (1.0f - odd) + b.x * odd,
-        a.y * (1.0f - odd) + b.y * odd,
-        a.z * (1.0f - odd) + b.z * odd
-    };
-
-    // Thin bright grid line for high-frequency edge reconstruction
-    float gx = std::abs((p.x - std::floor(p.x)) - 0.5f);
-    float gy = std::abs((p.y - std::floor(p.y)) - 0.5f);
-    float gMax = std::max(gx, gy);
-    float line = 1.0f - std::clamp((gMax - 0.46f) / (0.50f - 0.46f), 0.0f, 1.0f);
-
-    Vec3 lineCol = {0.95f, 0.93f, 0.85f};
-    float lineFactor = line * 0.7f;
-    return {
-        base.x * (1.0f - lineFactor) + lineCol.x * lineFactor,
-        base.y * (1.0f - lineFactor) + lineCol.y * lineFactor,
-        base.z * (1.0f - lineFactor) + lineCol.z * lineFactor
-    };
+    float check = std::fmod(cx + cy, 2.0f);
+    if (check < 0.0f) check += 2.0f;
+    return (check < 1.0f) ? Vec3{0.85f, 0.85f, 0.85f} : Vec3{0.15f, 0.15f, 0.15f};
 }
 
-// ---------------------------------------------------------------------------
-// Image Quality Metrics Implementation
-// ---------------------------------------------------------------------------
-
+// Quality metric evaluation structures
 struct QualityMetrics {
-    double mse;
-    double psnr;
-    double ssim;
-    double pixelMatchRate;
+    double psnr = 0.0;
+    double ssim = 0.0;
+    double pixelMatchRate = 0.0;
 };
 
-QualityMetrics CalculateMetrics(const uint8_t* actual, const uint8_t* reference,
-                               int width, int height, int channels = 4)
-{
-    QualityMetrics q = {};
-    double totalSe = 0.0;
-    int matchingPixels = 0;
-    const int totalPixels = width * height;
+// Calculates Peak Signal-to-Noise Ratio (PSNR) and Structural Similarity Index (SSIM)
+QualityMetrics CalculateMetrics(const uint8_t* actual, const uint8_t* reference, int width, int height, int channels = 4) {
+    QualityMetrics q;
+    size_t totalPixels = width * height;
+    double mse = 0.0;
+    size_t matchedPixels = 0;
 
-    for (int i = 0; i < totalPixels; ++i) {
-        int idx = i * channels;
-        int dr = static_cast<int>(actual[idx + 0]) - static_cast<int>(reference[idx + 0]);
-        int dg = static_cast<int>(actual[idx + 1]) - static_cast<int>(reference[idx + 1]);
-        int db = static_cast<int>(actual[idx + 2]) - static_cast<int>(reference[idx + 2]);
+    for (size_t i = 0; i < totalPixels; ++i) {
+        size_t idx = i * channels;
+        int diffR = static_cast<int>(actual[idx + 0]) - static_cast<int>(reference[idx + 0]);
+        int diffG = static_cast<int>(actual[idx + 1]) - static_cast<int>(reference[idx + 1]);
+        int diffB = static_cast<int>(actual[idx + 2]) - static_cast<int>(reference[idx + 2]);
 
-        totalSe += (dr * dr + dg * dg + db * db) / (3.0 * 255.0 * 255.0);
+        mse += (diffR * diffR + diffG * diffG + diffB * diffB) / 3.0;
 
-        // Per-channel absolute error tolerance <= 4 (allowing FP16 rounding drift)
-        if (std::abs(dr) <= 4 && std::abs(dg) <= 4 && std::abs(db) <= 4) {
-            matchingPixels++;
+        if (std::abs(diffR) <= 3 && std::abs(diffG) <= 3 && std::abs(diffB) <= 3) {
+            matchedPixels++;
         }
     }
+    mse /= totalPixels;
 
-    q.mse = totalSe / static_cast<double>(totalPixels);
-    q.psnr = (q.mse > 1e-12) ? (10.0 * std::log10(1.0 / q.mse)) : 99.0;
-    q.pixelMatchRate = static_cast<double>(matchingPixels) / static_cast<double>(totalPixels);
+    if (mse < 1e-10) {
+        q.psnr = 99.0;
+    } else {
+        q.psnr = 10.0 * std::log10((255.0 * 255.0) / mse);
+    }
+    q.pixelMatchRate = static_cast<double>(matchedPixels) / static_cast<double>(totalPixels);
 
-    // SSIM calculation over 8x8 blocks
-    constexpr double C1 = 0.0001; // (0.01 * 1.0)^2
-    constexpr double C2 = 0.0009; // (0.03 * 1.0)^2
+    // Standard 8x8 block SSIM
     constexpr int blockSize = 8;
     int blocksX = width / blockSize;
     int blocksY = height / blockSize;
     double totalSsim = 0.0;
 
+    const double C1 = 6.5025;   // (0.01 * 255)^2
+    const double C2 = 58.5225;  // (0.03 * 255)^2
+
     for (int by = 0; by < blocksY; ++by) {
         for (int bx = 0; bx < blocksX; ++bx) {
             double meanA = 0.0, meanR = 0.0;
-            for (int dy = 0; dy < blockSize; ++dy) {
-                for (int dx = 0; dx < blockSize; ++dx) {
-                    int px = bx * blockSize + dx;
-                    int py = by * blockSize + dy;
+            for (int y = 0; y < blockSize; ++y) {
+                for (int x = 0; x < blockSize; ++x) {
+                    int px = bx * blockSize + x;
+                    int py = by * blockSize + y;
                     int idx = (py * width + px) * channels;
-                    // Luma approximation: 0.299R + 0.587G + 0.114B
-                    double lumA = (0.299 * actual[idx + 0] + 0.587 * actual[idx + 1] + 0.114 * actual[idx + 2]) / 255.0;
-                    double lumR = (0.299 * reference[idx + 0] + 0.587 * reference[idx + 1] + 0.114 * reference[idx + 2]) / 255.0;
-                    meanA += lumA;
-                    meanR += lumR;
+                    double lumaA = 0.299 * actual[idx] + 0.587 * actual[idx + 1] + 0.114 * actual[idx + 2];
+                    double lumaR = 0.299 * reference[idx] + 0.587 * reference[idx + 1] + 0.114 * reference[idx + 2];
+                    meanA += lumaA;
+                    meanR += lumaR;
                 }
             }
             meanA /= (blockSize * blockSize);
             meanR /= (blockSize * blockSize);
 
             double varA = 0.0, varR = 0.0, covAR = 0.0;
-            for (int dy = 0; dy < blockSize; ++dy) {
-                for (int dx = 0; dx < blockSize; ++dx) {
-                    int px = bx * blockSize + dx;
-                    int py = by * blockSize + dy;
+            for (int y = 0; y < blockSize; ++y) {
+                for (int x = 0; x < blockSize; ++x) {
+                    int px = bx * blockSize + x;
+                    int py = by * blockSize + y;
                     int idx = (py * width + px) * channels;
-                    double lumA = (0.299 * actual[idx + 0] + 0.587 * actual[idx + 1] + 0.114 * actual[idx + 2]) / 255.0;
-                    double lumR = (0.299 * reference[idx + 0] + 0.587 * reference[idx + 1] + 0.114 * reference[idx + 2]) / 255.0;
-                    double diffA = lumA - meanA;
-                    double diffR = lumR - meanR;
+                    double lumaA = 0.299 * actual[idx] + 0.587 * actual[idx + 1] + 0.114 * actual[idx + 2];
+                    double lumaR = 0.299 * reference[idx] + 0.587 * reference[idx + 1] + 0.114 * reference[idx + 2];
+                    double diffA = lumaA - meanA;
+                    double diffR = lumaR - meanR;
                     varA += diffA * diffA;
                     varR += diffR * diffR;
                     covAR += diffA * diffR;
@@ -291,20 +402,20 @@ bool CreateImage(VkDevice device, const VkPhysicalDeviceMemoryProperties& memPro
     imgInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     imgInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
-    if (vkCreateImage(device, &imgInfo, nullptr, &outImg->image) != VK_SUCCESS)
+    if (s_pfnCreateImage(device, &imgInfo, nullptr, &outImg->image) != VK_SUCCESS)
         return false;
 
     VkMemoryRequirements memReq;
-    vkGetImageMemoryRequirements(device, outImg->image, &memReq);
+    s_pfnGetImageMemoryRequirements(device, outImg->image, &memReq);
 
     VkMemoryAllocateInfo allocInfo = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
     allocInfo.allocationSize = memReq.size;
     allocInfo.memoryTypeIndex = FindMemoryType(memProps, memReq.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-    if (vkAllocateMemory(device, &allocInfo, nullptr, &outImg->memory) != VK_SUCCESS)
+    if (s_pfnAllocateMemory(device, &allocInfo, nullptr, &outImg->memory) != VK_SUCCESS)
         return false;
 
-    return vkBindImageMemory(device, outImg->image, outImg->memory, 0) == VK_SUCCESS;
+    return s_pfnBindImageMemory(device, outImg->image, outImg->memory, 0) == VK_SUCCESS;
 }
 
 bool CreateBuffer(VkDevice device, const VkPhysicalDeviceMemoryProperties& memProps,
@@ -317,39 +428,39 @@ bool CreateBuffer(VkDevice device, const VkPhysicalDeviceMemoryProperties& memPr
     bufInfo.usage = usage;
     bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    if (vkCreateBuffer(device, &bufInfo, nullptr, &outBuf->buffer) != VK_SUCCESS)
+    if (s_pfnCreateBuffer(device, &bufInfo, nullptr, &outBuf->buffer) != VK_SUCCESS)
         return false;
 
     VkMemoryRequirements memReq;
-    vkGetBufferMemoryRequirements(device, outBuf->buffer, &memReq);
+    s_pfnGetBufferMemoryRequirements(device, outBuf->buffer, &memReq);
 
     VkMemoryAllocateInfo allocInfo = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
     allocInfo.allocationSize = memReq.size;
     allocInfo.memoryTypeIndex = FindMemoryType(memProps, memReq.memoryTypeBits, properties);
 
-    if (vkAllocateMemory(device, &allocInfo, nullptr, &outBuf->memory) != VK_SUCCESS)
+    if (s_pfnAllocateMemory(device, &allocInfo, nullptr, &outBuf->memory) != VK_SUCCESS)
         return false;
 
-    if (vkBindBufferMemory(device, outBuf->buffer, outBuf->memory, 0) != VK_SUCCESS)
+    if (s_pfnBindBufferMemory(device, outBuf->buffer, outBuf->memory, 0) != VK_SUCCESS)
         return false;
 
     if (properties & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) {
-        if (vkMapMemory(device, outBuf->memory, 0, size, 0, &outBuf->mapped) != VK_SUCCESS)
+        if (s_pfnMapMemory(device, outBuf->memory, 0, size, 0, &outBuf->mapped) != VK_SUCCESS)
             return false;
     }
     return true;
 }
 
 void DestroyImage(VkDevice device, VulkanTestImage* img) {
-    if (img->image) vkDestroyImage(device, img->image, nullptr);
-    if (img->memory) vkFreeMemory(device, img->memory, nullptr);
+    if (img->image && s_pfnDestroyImage) s_pfnDestroyImage(device, img->image, nullptr);
+    if (img->memory && s_pfnFreeMemory) s_pfnFreeMemory(device, img->memory, nullptr);
     *img = {};
 }
 
 void DestroyBuffer(VkDevice device, VulkanTestBuffer* buf) {
-    if (buf->mapped) vkUnmapMemory(device, buf->memory);
-    if (buf->buffer) vkDestroyBuffer(device, buf->buffer, nullptr);
-    if (buf->memory) vkFreeMemory(device, buf->memory, nullptr);
+    if (buf->mapped && s_pfnUnmapMemory) s_pfnUnmapMemory(device, buf->memory);
+    if (buf->buffer && s_pfnDestroyBuffer) s_pfnDestroyBuffer(device, buf->buffer, nullptr);
+    if (buf->memory && s_pfnFreeMemory) s_pfnFreeMemory(device, buf->memory, nullptr);
     *buf = {};
 }
 
@@ -368,6 +479,26 @@ int main()
         std::cout << "PASS: Image quality harness safely skipped on headless environment." << std::endl;
         return 0;
     }
+
+    s_pfnRealGetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)GetProcAddress(hVk, "vkGetDeviceProcAddr");
+    s_pfnRealEnumerateDeviceExtensionProperties = (PFN_vkEnumerateDeviceExtensionProperties)GetProcAddress(hVk, "vkEnumerateDeviceExtensionProperties");
+    s_pfnRealGetPhysicalDeviceProperties2 = (PFN_vkGetPhysicalDeviceProperties2)GetProcAddress(hVk, "vkGetPhysicalDeviceProperties2");
+    s_pfnRealGetPhysicalDeviceFeatures2 = (PFN_vkGetPhysicalDeviceFeatures2)GetProcAddress(hVk, "vkGetPhysicalDeviceFeatures2");
+    s_pfnRealGetPhysicalDeviceMemoryProperties = (PFN_vkGetPhysicalDeviceMemoryProperties)GetProcAddress(hVk, "vkGetPhysicalDeviceMemoryProperties");
+
+    s_pfnCreateInstance = (PFN_vkCreateInstance)GetProcAddress(hVk, "vkCreateInstance");
+    s_pfnDestroyInstance = (PFN_vkDestroyInstance)GetProcAddress(hVk, "vkDestroyInstance");
+    s_pfnEnumeratePhysicalDevices = (PFN_vkEnumeratePhysicalDevices)GetProcAddress(hVk, "vkEnumeratePhysicalDevices");
+    s_pfnGetPhysicalDeviceProperties = (PFN_vkGetPhysicalDeviceProperties)GetProcAddress(hVk, "vkGetPhysicalDeviceProperties");
+    s_pfnGetPhysicalDeviceQueueFamilyProperties = (PFN_vkGetPhysicalDeviceQueueFamilyProperties)GetProcAddress(hVk, "vkGetPhysicalDeviceQueueFamilyProperties");
+    s_pfnCreateDevice = (PFN_vkCreateDevice)GetProcAddress(hVk, "vkCreateDevice");
+    s_pfnDestroyDevice = (PFN_vkDestroyDevice)GetProcAddress(hVk, "vkDestroyDevice");
+
+    if (!s_pfnCreateInstance || !s_pfnEnumeratePhysicalDevices || !s_pfnCreateDevice) {
+        std::cout << "INFO: Failed to resolve core Vulkan entrypoints from vulkan-1.dll. Skipping." << std::endl;
+        FreeLibrary(hVk);
+        return 0;
+    }
 #endif
 
     // 1. Initialize Vulkan Instance
@@ -379,21 +510,27 @@ int main()
     instInfo.pApplicationInfo = &appInfo;
 
     VkInstance instance = VK_NULL_HANDLE;
-    if (vkCreateInstance(&instInfo, nullptr, &instance) != VK_SUCCESS) {
+    if (s_pfnCreateInstance(&instInfo, nullptr, &instance) != VK_SUCCESS) {
         std::cout << "INFO: vkCreateInstance failed (no compatible Vulkan driver). Skipping." << std::endl;
+#if defined(_WIN32)
+        FreeLibrary(hVk);
+#endif
         return 0;
     }
 
     uint32_t gpuCount = 0;
-    vkEnumeratePhysicalDevices(instance, &gpuCount, nullptr);
+    s_pfnEnumeratePhysicalDevices(instance, &gpuCount, nullptr);
     if (gpuCount == 0) {
         std::cout << "INFO: No physical Vulkan devices enumerated. Skipping." << std::endl;
-        vkDestroyInstance(instance, nullptr);
+        s_pfnDestroyInstance(instance, nullptr);
+#if defined(_WIN32)
+        FreeLibrary(hVk);
+#endif
         return 0;
     }
 
     std::vector<VkPhysicalDevice> gpus(gpuCount);
-    vkEnumeratePhysicalDevices(instance, &gpuCount, gpus.data());
+    s_pfnEnumeratePhysicalDevices(instance, &gpuCount, gpus.data());
 
     VkPhysicalDevice selectedGpu = VK_NULL_HANDLE;
     uint32_t computeFamily = UINT32_MAX;
@@ -402,21 +539,23 @@ int main()
     for (int preferDiscrete = 1; preferDiscrete >= 0; --preferDiscrete) {
         for (uint32_t i = 0; i < gpuCount; ++i) {
             VkPhysicalDeviceProperties p;
-            vkGetPhysicalDeviceProperties(gpus[i], &p);
+            s_pfnGetPhysicalDeviceProperties(gpus[i], &p);
             if (preferDiscrete && p.deviceType != VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
                 continue;
 
             VkPhysicalDeviceFloat16Int8FeaturesKHR f16 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT16_INT8_FEATURES_KHR };
             VkPhysicalDeviceFeatures2 feat2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
             feat2.pNext = &f16;
-            vkGetPhysicalDeviceFeatures2(gpus[i], &feat2);
+            if (s_pfnRealGetPhysicalDeviceFeatures2) {
+                s_pfnRealGetPhysicalDeviceFeatures2(gpus[i], &feat2);
+            }
 
             if (!f16.shaderFloat16) continue;
 
             uint32_t qfCount = 0;
-            vkGetPhysicalDeviceQueueFamilyProperties(gpus[i], &qfCount, nullptr);
+            s_pfnGetPhysicalDeviceQueueFamilyProperties(gpus[i], &qfCount, nullptr);
             std::vector<VkQueueFamilyProperties> qfProps(qfCount);
-            vkGetPhysicalDeviceQueueFamilyProperties(gpus[i], &qfCount, qfProps.data());
+            s_pfnGetPhysicalDeviceQueueFamilyProperties(gpus[i], &qfCount, qfProps.data());
 
             for (uint32_t q = 0; q < qfCount; ++q) {
                 if (qfProps[q].queueFlags & VK_QUEUE_COMPUTE_BIT) {
@@ -432,14 +571,19 @@ int main()
 
     if (selectedGpu == VK_NULL_HANDLE) {
         std::cout << "INFO: No GPU supporting shaderFloat16 and compute queue. Skipping." << std::endl;
-        vkDestroyInstance(instance, nullptr);
+        s_pfnDestroyInstance(instance, nullptr);
+#if defined(_WIN32)
+        FreeLibrary(hVk);
+#endif
         return 0;
     }
 
     VkPhysicalDeviceProperties props;
-    vkGetPhysicalDeviceProperties(selectedGpu, &props);
+    s_pfnGetPhysicalDeviceProperties(selectedGpu, &props);
     VkPhysicalDeviceMemoryProperties memProps;
-    vkGetPhysicalDeviceMemoryProperties(selectedGpu, &memProps);
+    if (s_pfnRealGetPhysicalDeviceMemoryProperties) {
+        s_pfnRealGetPhysicalDeviceMemoryProperties(selectedGpu, &memProps);
+    }
     std::cout << "Hardware Device: " << props.deviceName << " (Vulkan "
               << VK_VERSION_MAJOR(props.apiVersion) << "."
               << VK_VERSION_MINOR(props.apiVersion) << ")" << std::endl;
@@ -468,24 +612,58 @@ int main()
     devInfo.pQueueCreateInfos = &queueInfo;
 
     VkDevice device = VK_NULL_HANDLE;
-    HARNESS_CHECK(vkCreateDevice(selectedGpu, &devInfo, nullptr, &device) == VK_SUCCESS);
+    HARNESS_CHECK(s_pfnCreateDevice(selectedGpu, &devInfo, nullptr, &device) == VK_SUCCESS);
     if (!device) return 1;
 
+#if defined(_WIN32)
+    auto loadDev = [&](const char* name) -> PFN_vkVoidFunction {
+        if (s_pfnRealGetDeviceProcAddr) {
+            PFN_vkVoidFunction fn = s_pfnRealGetDeviceProcAddr(device, name);
+            if (fn) return fn;
+        }
+        return (PFN_vkVoidFunction)GetProcAddress(hVk, name);
+    };
+
+    s_pfnGetDeviceQueue = (PFN_vkGetDeviceQueue)loadDev("vkGetDeviceQueue");
+    s_pfnCreateCommandPool = (PFN_vkCreateCommandPool)loadDev("vkCreateCommandPool");
+    s_pfnDestroyCommandPool = (PFN_vkDestroyCommandPool)loadDev("vkDestroyCommandPool");
+    s_pfnAllocateCommandBuffers = (PFN_vkAllocateCommandBuffers)loadDev("vkAllocateCommandBuffers");
+    s_pfnCreateImage = (PFN_vkCreateImage)loadDev("vkCreateImage");
+    s_pfnDestroyImage = (PFN_vkDestroyImage)loadDev("vkDestroyImage");
+    s_pfnGetImageMemoryRequirements = (PFN_vkGetImageMemoryRequirements)loadDev("vkGetImageMemoryRequirements");
+    s_pfnAllocateMemory = (PFN_vkAllocateMemory)loadDev("vkAllocateMemory");
+    s_pfnFreeMemory = (PFN_vkFreeMemory)loadDev("vkFreeMemory");
+    s_pfnBindImageMemory = (PFN_vkBindImageMemory)loadDev("vkBindImageMemory");
+    s_pfnCreateBuffer = (PFN_vkCreateBuffer)loadDev("vkCreateBuffer");
+    s_pfnDestroyBuffer = (PFN_vkDestroyBuffer)loadDev("vkDestroyBuffer");
+    s_pfnGetBufferMemoryRequirements = (PFN_vkGetBufferMemoryRequirements)loadDev("vkGetBufferMemoryRequirements");
+    s_pfnBindBufferMemory = (PFN_vkBindBufferMemory)loadDev("vkBindBufferMemory");
+    s_pfnMapMemory = (PFN_vkMapMemory)loadDev("vkMapMemory");
+    s_pfnUnmapMemory = (PFN_vkUnmapMemory)loadDev("vkUnmapMemory");
+    s_pfnBeginCommandBuffer = (PFN_vkBeginCommandBuffer)loadDev("vkBeginCommandBuffer");
+    s_pfnEndCommandBuffer = (PFN_vkEndCommandBuffer)loadDev("vkEndCommandBuffer");
+    s_pfnCmdCopyBufferToImage = (PFN_vkCmdCopyBufferToImage)loadDev("vkCmdCopyBufferToImage");
+    s_pfnCmdPipelineBarrier = (PFN_vkCmdPipelineBarrier)loadDev("vkCmdPipelineBarrier");
+    s_pfnCmdCopyImageToBuffer = (PFN_vkCmdCopyImageToBuffer)loadDev("vkCmdCopyImageToBuffer");
+    s_pfnQueueSubmit = (PFN_vkQueueSubmit)loadDev("vkQueueSubmit");
+    s_pfnQueueWaitIdle = (PFN_vkQueueWaitIdle)loadDev("vkQueueWaitIdle");
+#endif
+
     VkQueue queue = VK_NULL_HANDLE;
-    vkGetDeviceQueue(device, computeFamily, 0, &queue);
+    s_pfnGetDeviceQueue(device, computeFamily, 0, &queue);
 
     VkCommandPool cmdPool = VK_NULL_HANDLE;
     VkCommandPoolCreateInfo poolInfo = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
     poolInfo.queueFamilyIndex = computeFamily;
     poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    HARNESS_CHECK(vkCreateCommandPool(device, &poolInfo, nullptr, &cmdPool) == VK_SUCCESS);
+    HARNESS_CHECK(s_pfnCreateCommandPool(device, &poolInfo, nullptr, &cmdPool) == VK_SUCCESS);
 
     VkCommandBuffer cmdBuffer = VK_NULL_HANDLE;
     VkCommandBufferAllocateInfo cmdAlloc = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
     cmdAlloc.commandPool = cmdPool;
     cmdAlloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     cmdAlloc.commandBufferCount = 1;
-    HARNESS_CHECK(vkAllocateCommandBuffers(device, &cmdAlloc, &cmdBuffer) == VK_SUCCESS);
+    HARNESS_CHECK(s_pfnAllocateCommandBuffers(device, &cmdAlloc, &cmdBuffer) == VK_SUCCESS);
 
     // 3. Setup Resolutions & FSR 3.1.4 Context
     constexpr uint32_t renderW = 640;
@@ -506,7 +684,7 @@ int main()
     arm::VkDeviceContext devContext = {};
     devContext.vkDevice = device;
     devContext.vkPhysicalDevice = selectedGpu;
-    devContext.vkDeviceProcAddr = vkGetDeviceProcAddr;
+    devContext.vkDeviceProcAddr = s_pfnRealGetDeviceProcAddr;
 
     arm::FfxmInterface iface = {};
     HARNESS_CHECK(arm::ffxmGetInterfaceVK(&iface, arm::ffxmGetDeviceVK(&devContext), scratchBuffer.data(), scratchSize, 1) == FFXM_OK);
@@ -700,7 +878,7 @@ int main()
 
         // Record command buffer: upload -> transition -> FSR dispatch -> readback
         VkCommandBufferBeginInfo beginInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
-        vkBeginCommandBuffer(cmdBuffer, &beginInfo);
+        s_pfnBeginCommandBuffer(cmdBuffer, &beginInfo);
 
         // Copy buffers to input images
         auto copyBufferToImg = [&](VkBuffer srcBuf, VkImage dstImg, uint32_t w, uint32_t h) {
@@ -708,7 +886,7 @@ int main()
             region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
             region.imageSubresource.layerCount = 1;
             region.imageExtent = { w, h, 1 };
-            vkCmdCopyBufferToImage(cmdBuffer, srcBuf, dstImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+            s_pfnCmdCopyBufferToImage(cmdBuffer, srcBuf, dstImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
         };
 
         // Transition inputs to TRANSFER_DST
@@ -724,7 +902,7 @@ int main()
         barriers[0].image = colorImg.image;
         barriers[1].image = depthImg.image;
         barriers[2].image = mvImg.image;
-        vkCmdPipelineBarrier(cmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 3, barriers);
+        s_pfnCmdPipelineBarrier(cmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 3, barriers);
 
         copyBufferToImg(uploadColor.buffer, colorImg.image, renderW, renderH);
         copyBufferToImg(uploadDepth.buffer, depthImg.image, renderW, renderH);
@@ -737,7 +915,7 @@ int main()
             barriers[b].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
             barriers[b].newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         }
-        vkCmdPipelineBarrier(cmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 3, barriers);
+        s_pfnCmdPipelineBarrier(cmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 3, barriers);
 
         VkImageMemoryBarrier outBarrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
         outBarrier.srcAccessMask = 0;
@@ -746,7 +924,7 @@ int main()
         outBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
         outBarrier.image = outputImg.image;
         outBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-        vkCmdPipelineBarrier(cmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &outBarrier);
+        s_pfnCmdPipelineBarrier(cmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &outBarrier);
 
         // Setup Dispatch Description
         arm::FfxmFsr3UpscalerDispatchDescription dispDesc = {};
@@ -791,21 +969,21 @@ int main()
         readbackBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
         readbackBarrier.image = outputImg.image;
         readbackBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-        vkCmdPipelineBarrier(cmdBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &readbackBarrier);
+        s_pfnCmdPipelineBarrier(cmdBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &readbackBarrier);
 
         VkBufferImageCopy copyRegion = {};
         copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         copyRegion.imageSubresource.layerCount = 1;
         copyRegion.imageExtent = { displayW, displayH, 1 };
-        vkCmdCopyImageToBuffer(cmdBuffer, outputImg.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readbackOutput.buffer, 1, &copyRegion);
+        s_pfnCmdCopyImageToBuffer(cmdBuffer, outputImg.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readbackOutput.buffer, 1, &copyRegion);
 
-        vkEndCommandBuffer(cmdBuffer);
+        s_pfnEndCommandBuffer(cmdBuffer);
 
         VkSubmitInfo submitInfo = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &cmdBuffer;
-        HARNESS_CHECK(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE) == VK_SUCCESS);
-        HARNESS_CHECK(vkQueueWaitIdle(queue) == VK_SUCCESS);
+        HARNESS_CHECK(s_pfnQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE) == VK_SUCCESS);
+        HARNESS_CHECK(s_pfnQueueWaitIdle(queue) == VK_SUCCESS);
 
         // Read back output pixels
         std::memcpy(hostOutput.data(), readbackOutput.mapped, outputSize);
@@ -936,15 +1114,15 @@ int main()
         std::memcpy(uploadMv.mapped, hostMv.data(), mvSize);
 
         VkCommandBufferBeginInfo bInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
-        vkBeginCommandBuffer(cmdBuffer, &bInfo);
+        s_pfnBeginCommandBuffer(cmdBuffer, &bInfo);
 
         VkBufferImageCopy region = {};
         region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         region.imageSubresource.layerCount = 1;
         region.imageExtent = { renderW, renderH, 1 };
-        vkCmdCopyBufferToImage(cmdBuffer, uploadColor.buffer, colorImg.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-        vkCmdCopyBufferToImage(cmdBuffer, uploadDepth.buffer, depthImg.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-        vkCmdCopyBufferToImage(cmdBuffer, uploadMv.buffer, mvImg.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+        s_pfnCmdCopyBufferToImage(cmdBuffer, uploadColor.buffer, colorImg.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+        s_pfnCmdCopyBufferToImage(cmdBuffer, uploadDepth.buffer, depthImg.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+        s_pfnCmdCopyBufferToImage(cmdBuffer, uploadMv.buffer, mvImg.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
         VkImageMemoryBarrier bBarrier[3] = {};
         for (int b = 0; b < 3; ++b) {
@@ -958,7 +1136,7 @@ int main()
         bBarrier[0].image = colorImg.image;
         bBarrier[1].image = depthImg.image;
         bBarrier[2].image = mvImg.image;
-        vkCmdPipelineBarrier(cmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 3, bBarrier);
+        s_pfnCmdPipelineBarrier(cmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 3, bBarrier);
 
         arm::FfxmFsr3UpscalerDispatchDescription dispDesc = {};
         dispDesc.commandList = arm::ffxmGetCommandListVK(cmdBuffer);
@@ -994,21 +1172,21 @@ int main()
         rBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
         rBarrier.image = outputImg.image;
         rBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-        vkCmdPipelineBarrier(cmdBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &rBarrier);
+        s_pfnCmdPipelineBarrier(cmdBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &rBarrier);
 
         VkBufferImageCopy cRegion = {};
         cRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         cRegion.imageSubresource.layerCount = 1;
         cRegion.imageExtent = { displayW, displayH, 1 };
-        vkCmdCopyImageToBuffer(cmdBuffer, outputImg.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readbackOutput.buffer, 1, &cRegion);
+        s_pfnCmdCopyImageToBuffer(cmdBuffer, outputImg.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readbackOutput.buffer, 1, &cRegion);
 
-        vkEndCommandBuffer(cmdBuffer);
+        s_pfnEndCommandBuffer(cmdBuffer);
 
         VkSubmitInfo sInfo = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
         sInfo.commandBufferCount = 1;
         sInfo.pCommandBuffers = &cmdBuffer;
-        HARNESS_CHECK(vkQueueSubmit(queue, 1, &sInfo, VK_NULL_HANDLE) == VK_SUCCESS);
-        HARNESS_CHECK(vkQueueWaitIdle(queue) == VK_SUCCESS);
+        HARNESS_CHECK(s_pfnQueueSubmit(queue, 1, &sInfo, VK_NULL_HANDLE) == VK_SUCCESS);
+        HARNESS_CHECK(s_pfnQueueWaitIdle(queue) == VK_SUCCESS);
 
         std::memcpy(hostOutput.data(), readbackOutput.mapped, outputSize);
 
@@ -1031,11 +1209,16 @@ int main()
     DestroyImage(device, &dilMvImg);
     DestroyImage(device, &reconDepthImg);
 
-    vkDestroyCommandPool(device, cmdPool, nullptr);
-    vkDestroyDevice(device, nullptr);
-    vkDestroyInstance(instance, nullptr);
+    s_pfnDestroyCommandPool(device, cmdPool, nullptr);
+    s_pfnDestroyDevice(device, nullptr);
+    s_pfnDestroyInstance(instance, nullptr);
 
 #if defined(_WIN32)
+    s_pfnRealGetDeviceProcAddr = nullptr;
+    s_pfnRealEnumerateDeviceExtensionProperties = nullptr;
+    s_pfnRealGetPhysicalDeviceProperties2 = nullptr;
+    s_pfnRealGetPhysicalDeviceFeatures2 = nullptr;
+    s_pfnRealGetPhysicalDeviceMemoryProperties = nullptr;
     FreeLibrary(hVk);
 #endif
 
