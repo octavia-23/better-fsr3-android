@@ -7,6 +7,9 @@
 #	define VK_USE_PLATFORM_ANDROID_KHR 1
 #elif defined(_WIN32)
 #	define VK_USE_PLATFORM_WIN32_KHR 1
+#   ifndef NOMINMAX
+#       define NOMINMAX
+#   endif
 #endif
 #include <vulkan/vulkan.h>
 
@@ -814,8 +817,8 @@ private:
             std::sort(jittersMs.begin(), jittersMs.end());
             size_t idx95 = (size_t)std::ceil(0.95 * n) - 1;
             size_t idx99 = (size_t)std::ceil(0.99 * n) - 1;
-            stats_.p95JitterMs = jittersMs[std::min(idx95, n - 1)];
-            stats_.p99JitterMs = jittersMs[std::min(idx99, n - 1)];
+            stats_.p95JitterMs = jittersMs[(std::min)(idx95, n - 1)];
+            stats_.p99JitterMs = jittersMs[(std::min)(idx99, n - 1)];
             stats_.maxJitterMs = jittersMs.back();
         }
         lastPresentTimeNs_ = presentTimeNs;
