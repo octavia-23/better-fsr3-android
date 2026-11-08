@@ -146,7 +146,9 @@ if(BUILD_TESTING)
         target_sources(test_milestone2 PRIVATE
             src/backends/shared/ffxm_shader_blobs.cpp
             src/backends/shared/blob_accessors/ffxm_fsr3upscaler_shaderblobs.cpp
-            src/backends/shared/blob_accessors/ffxm_fsr2_shaderblobs.cpp)
+            src/backends/shared/blob_accessors/ffxm_fsr2_shaderblobs.cpp
+            src/backends/shared/blob_accessors/ffxm_opticalflow_shaderblobs.cpp
+            src/backends/shared/blob_accessors/ffxm_frameinterpolation_shaderblobs.cpp)
         target_include_directories(test_milestone2 PRIVATE
             src/backends/shared
             src/backends/shared/blob_accessors/prebuilt_shaders
@@ -180,7 +182,9 @@ if(BUILD_TESTING)
         target_sources(test_image_quality PRIVATE
             src/backends/shared/ffxm_shader_blobs.cpp
             src/backends/shared/blob_accessors/ffxm_fsr3upscaler_shaderblobs.cpp
-            src/backends/shared/blob_accessors/ffxm_fsr2_shaderblobs.cpp)
+            src/backends/shared/blob_accessors/ffxm_fsr2_shaderblobs.cpp
+            src/backends/shared/blob_accessors/ffxm_opticalflow_shaderblobs.cpp
+            src/backends/shared/blob_accessors/ffxm_frameinterpolation_shaderblobs.cpp)
         target_include_directories(test_image_quality PRIVATE
             src/backends/shared
             src/backends/shared/blob_accessors/prebuilt_shaders

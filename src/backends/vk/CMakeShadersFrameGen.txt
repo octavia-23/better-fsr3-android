@@ -1,0 +1,83 @@
+# Copyright © 2026 Arm Limited.
+# SPDX-License-Identifier: MIT
+
+set(FRAMEGEN_BASE_ARGS
+    -reflection -deps=gcc -DFFX_GPU=1 -DFFXM_GPU=1)
+
+get_filename_component(FFXM_TOOLS_BIN_DIR "${FFXM_SC_EXECUTABLE}" DIRECTORY)
+
+file(RELATIVE_PATH FRAMEGEN_REL_GLSLANG "${CMAKE_SOURCE_DIR}" "${FFXM_TOOLS_BIN_DIR}/glslangValidator.exe")
+file(RELATIVE_PATH FRAMEGEN_REL_GPU_PATH "${CMAKE_SOURCE_DIR}" "${FFXM_GPU_PATH}")
+file(RELATIVE_PATH FRAMEGEN_REL_OUTPUT "${CMAKE_SOURCE_DIR}" "${FFXM_PASS_SHADER_OUTPUT_PATH}")
+
+set(FRAMEGEN_GLSL_BASE_ARGS
+    -compiler=glslang -glslangexe=${FRAMEGEN_REL_GLSLANG} -V -S comp --target-env vulkan1.1 -Os -DFFX_GLSL=1 -DFFXM_GLSL=1)
+
+# 1. Optical Flow Prepare Pass
+set(OF_PREPARE_SHADER "${CMAKE_CURRENT_SOURCE_DIR}/shaders/opticalflow/ffx_opticalflow_prepare_pass.glsl")
+set(OF_PREPARE_PERMUTATION_HEADER "${FFXM_PASS_SHADER_OUTPUT_PATH}/ffxm_opticalflow_prepare_pass_permutations.h")
+
+if(EXISTS "${OF_PREPARE_SHADER}")
+    file(RELATIVE_PATH OF_REL_SHADER_PREPARE "${CMAKE_SOURCE_DIR}" "${OF_PREPARE_SHADER}")
+    add_custom_command(
+        OUTPUT ${OF_PREPARE_PERMUTATION_HEADER}
+        COMMAND ${FFXM_SC_EXECUTABLE}
+            ${FRAMEGEN_BASE_ARGS}
+            ${FRAMEGEN_GLSL_BASE_ARGS}
+            "-I${FRAMEGEN_REL_GPU_PATH}"
+            -name=ffxm_opticalflow_prepare_pass
+            -output=${FRAMEGEN_REL_OUTPUT}
+            ${OF_REL_SHADER_PREPARE}
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        DEPENDS ${OF_PREPARE_SHADER}
+        COMMENT "Compiling Optical Flow Prepare shader permutations with FidelityFX-SC..."
+        VERBATIM
+    )
+    add_shader_output("${OF_PREPARE_PERMUTATION_HEADER}")
+endif()
+
+# 2. Optical Flow Search Pass
+set(OF_SEARCH_SHADER "${CMAKE_CURRENT_SOURCE_DIR}/shaders/opticalflow/ffx_opticalflow_search_pass.glsl")
+set(OF_SEARCH_PERMUTATION_HEADER "${FFXM_PASS_SHADER_OUTPUT_PATH}/ffxm_opticalflow_search_pass_permutations.h")
+
+if(EXISTS "${OF_SEARCH_SHADER}")
+    file(RELATIVE_PATH OF_REL_SHADER_SEARCH "${CMAKE_SOURCE_DIR}" "${OF_SEARCH_SHADER}")
+    add_custom_command(
+        OUTPUT ${OF_SEARCH_PERMUTATION_HEADER}
+        COMMAND ${FFXM_SC_EXECUTABLE}
+            ${FRAMEGEN_BASE_ARGS}
+            ${FRAMEGEN_GLSL_BASE_ARGS}
+            "-I${FRAMEGEN_REL_GPU_PATH}"
+            -name=ffxm_opticalflow_search_pass
+            -output=${FRAMEGEN_REL_OUTPUT}
+            ${OF_REL_SHADER_SEARCH}
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        DEPENDS ${OF_SEARCH_SHADER}
+        COMMENT "Compiling Optical Flow Search shader permutations with FidelityFX-SC..."
+        VERBATIM
+    )
+    add_shader_output("${OF_SEARCH_PERMUTATION_HEADER}")
+endif()
+
+# 3. Frame Interpolation Pass
+set(FI_INTERPOLATE_SHADER "${CMAKE_CURRENT_SOURCE_DIR}/shaders/frameinterpolation/ffx_frameinterpolation_pass.glsl")
+set(FI_INTERPOLATE_PERMUTATION_HEADER "${FFXM_PASS_SHADER_OUTPUT_PATH}/ffxm_frameinterpolation_pass_permutations.h")
+
+if(EXISTS "${FI_INTERPOLATE_SHADER}")
+    file(RELATIVE_PATH FI_REL_SHADER_INTERPOLATE "${CMAKE_SOURCE_DIR}" "${FI_INTERPOLATE_SHADER}")
+    add_custom_command(
+        OUTPUT ${FI_INTERPOLATE_PERMUTATION_HEADER}
+        COMMAND ${FFXM_SC_EXECUTABLE}
+            ${FRAMEGEN_BASE_ARGS}
+            ${FRAMEGEN_GLSL_BASE_ARGS}
+            "-I${FRAMEGEN_REL_GPU_PATH}"
+            -name=ffxm_frameinterpolation_pass
+            -output=${FRAMEGEN_REL_OUTPUT}
+            ${FI_REL_SHADER_INTERPOLATE}
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        DEPENDS ${FI_INTERPOLATE_SHADER}
+        COMMENT "Compiling Frame Interpolation shader permutations with FidelityFX-SC..."
+        VERBATIM
+    )
+    add_shader_output("${FI_INTERPOLATE_PERMUTATION_HEADER}")
+endif()

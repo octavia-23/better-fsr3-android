@@ -24,6 +24,8 @@
 #if defined(FFXM_FSR) || defined(FFXM_ALL)
 #include "blob_accessors/ffxm_fsr2_shaderblobs.h"
 #include "blob_accessors/ffxm_fsr3upscaler_shaderblobs.h"
+#include "blob_accessors/ffxm_opticalflow_shaderblobs.h"
+#include "blob_accessors/ffxm_frameinterpolation_shaderblobs.h"
 #endif // #if defined(FFXM_FSR) || defined(FFXM_ALL)
 
 #include <string.h> // for memset
@@ -46,6 +48,10 @@ FfxmErrorCode ffxmGetPermutationBlobByIndex(
         return fsr2GetPermutationBlobByIndex((FfxmFsr2Pass)passId, permutationOptions, outBlob, outVertBlob);
     case FFXM_EFFECT_FSR3UPSCALER:
         return fsr3UpscalerGetPermutationBlobByIndex((FfxmFsr3UpscalerPass)passId, permutationOptions, outBlob);
+    case FFXM_EFFECT_OPTICALFLOW:
+        return opticalflowGetPermutationBlobByIndex((FfxmOpticalflowPass)passId, permutationOptions, outBlob);
+    case FFXM_EFFECT_FRAMEINTERPOLATION:
+        return frameinterpolationGetPermutationBlobByIndex((FfxmFrameInterpolationPass)passId, permutationOptions, outBlob);
 #endif // #if defined(FFXM_FSR) || defined(FFXM_ALL)
 
     default:
@@ -67,6 +73,10 @@ switch (effectId)
         return fsr2IsWave64(permutationOptions, isWave64);
     case FFXM_EFFECT_FSR3UPSCALER:
         return fsr3UpscalerIsWave64(permutationOptions, isWave64);
+    case FFXM_EFFECT_OPTICALFLOW:
+        return opticalflowIsWave64(permutationOptions, isWave64);
+    case FFXM_EFFECT_FRAMEINTERPOLATION:
+        return frameinterpolationIsWave64(permutationOptions, isWave64);
 #endif // #if defined(FFXM_FSR) || defined(FFXM_ALL)
 
     default:

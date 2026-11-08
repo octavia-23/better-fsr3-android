@@ -8,6 +8,14 @@
 
 namespace arm {
 
+struct OpticalflowConstants {
+    int32_t  iResolution[2];
+    float    fInvResolution[2];
+    uint32_t uFrameIndex;
+    float    fSceneChangeThreshold;
+    float    padding[2];
+};
+
 struct FfxmOpticalflowContext_Private {
     FfxmInterface                      backendInterface;
     FfxmOpticalflowContextDescription  contextDescription;
@@ -16,6 +24,9 @@ struct FfxmOpticalflowContext_Private {
     bool                               firstExecution;
     FfxmResourceInternal               opticalFlowPyramid;
     FfxmResourceInternal               sceneChangeHist;
+    FfxmPipelineState                  pipelinePrepare;
+    FfxmPipelineState                  pipelineSearch;
+    FfxmConstantBuffer                 constantBuffer;
 };
 
 static_assert(sizeof(FfxmOpticalflowContext_Private) <= sizeof(FfxmOpticalflowContext),

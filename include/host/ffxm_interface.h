@@ -74,6 +74,8 @@ typedef enum FfxmEffect
 {
     FFXM_EFFECT_FSR2 = 0,               ///< FidelityFX Super Resolution v2
     FFXM_EFFECT_FSR3UPSCALER = 1,       ///< FidelityFX Super Resolution v3
+    FFXM_EFFECT_OPTICALFLOW = 2,        ///< FidelityFX Optical Flow
+    FFXM_EFFECT_FRAMEINTERPOLATION = 3, ///< FidelityFX Frame Interpolation
 } FfxmEffect;
 
 /// Stand in type for FfxmPass

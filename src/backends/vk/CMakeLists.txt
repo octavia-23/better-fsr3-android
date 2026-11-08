@@ -135,7 +135,11 @@ set(FFXM_FSR_PRIVATE_SOURCE
 	"${FFXM_SRC_BACKENDS_PATH}/shared/blob_accessors/ffxm_fsr2_shaderblobs.h"
 	"${FFXM_SRC_BACKENDS_PATH}/shared/blob_accessors/ffxm_fsr2_shaderblobs.cpp"
 	"${FFXM_SRC_BACKENDS_PATH}/shared/blob_accessors/ffxm_fsr3upscaler_shaderblobs.h"
-	"${FFXM_SRC_BACKENDS_PATH}/shared/blob_accessors/ffxm_fsr3upscaler_shaderblobs.cpp")
+	"${FFXM_SRC_BACKENDS_PATH}/shared/blob_accessors/ffxm_fsr3upscaler_shaderblobs.cpp"
+	"${FFXM_SRC_BACKENDS_PATH}/shared/blob_accessors/ffxm_opticalflow_shaderblobs.h"
+	"${FFXM_SRC_BACKENDS_PATH}/shared/blob_accessors/ffxm_opticalflow_shaderblobs.cpp"
+	"${FFXM_SRC_BACKENDS_PATH}/shared/blob_accessors/ffxm_frameinterpolation_shaderblobs.h"
+	"${FFXM_SRC_BACKENDS_PATH}/shared/blob_accessors/ffxm_frameinterpolation_shaderblobs.cpp")
 list(APPEND PRIVATE_SOURCE ${FFXM_FSR_PRIVATE_SOURCE})
 
 # Does this need to recurse??
@@ -216,6 +220,7 @@ else()
 	# add pass shaders for all the components
 	include (CMakeShadersFSR2.txt)
 	include (CMakeShadersFSR3.txt)
+	include (CMakeShadersFrameGen.txt)
 
 	add_custom_target(ffxm_shader_permutations_vk DEPENDS ${FFXM_SC_PERMUTATION_OUTPUTS})
 	add_dependencies(${FFXM_SC_DEPENDENT_TARGET} ffxm_shader_permutations_vk)

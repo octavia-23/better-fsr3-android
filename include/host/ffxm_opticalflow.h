@@ -32,6 +32,12 @@ typedef enum FfxmOpticalflowInitializationFlagBits {
     FFXM_OPTICALFLOW_ENABLE_HALF_PRECISION = (1 << 1)
 } FfxmOpticalflowInitializationFlagBits;
 
+typedef enum FfxmOpticalflowPass {
+    FFXM_OPTICALFLOW_PASS_PREPARE = 0, ///< Prepares luminance pyramid and scene change metrics
+    FFXM_OPTICALFLOW_PASS_SEARCH  = 1, ///< Hierarchical optical flow vector search
+    FFXM_OPTICALFLOW_PASS_COUNT   = 2
+} FfxmOpticalflowPass;
+
 typedef struct FfxmOpticalflowContextDescription {
     uint32_t         flags;
     FfxmDimensions2D resolution;

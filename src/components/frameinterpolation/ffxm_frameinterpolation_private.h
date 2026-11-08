@@ -8,6 +8,15 @@
 
 namespace arm {
 
+struct FrameInterpolationConstants {
+    int32_t  iDisplaySize[2];
+    float    fInvDisplaySize[2];
+    float    fInterpolationTime;
+    uint32_t uReset;
+    float    fDepthThreshold;
+    float    fMotionScale;
+};
+
 struct FfxmFrameInterpolationContext_Private {
     FfxmInterface                                backendInterface;
     FfxmFrameInterpolationContextDescription     contextDescription;
@@ -16,6 +25,8 @@ struct FfxmFrameInterpolationContext_Private {
     bool                                         firstExecution;
     FfxmResourceInternal                         historyColor;
     FfxmResourceInternal                         interpolatedStaging;
+    FfxmPipelineState                            pipelineInterpolate;
+    FfxmConstantBuffer                           constantBuffer;
 };
 
 static_assert(sizeof(FfxmFrameInterpolationContext_Private) <= sizeof(FfxmFrameInterpolationContext),

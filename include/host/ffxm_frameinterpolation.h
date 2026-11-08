@@ -32,6 +32,11 @@ typedef enum FfxmFrameInterpolationInitializationFlagBits {
     FFXM_FRAMEINTERPOLATION_ENABLE_HALF_PRECISION = (1 << 1)
 } FfxmFrameInterpolationInitializationFlagBits;
 
+typedef enum FfxmFrameInterpolationPass {
+    FFXM_FRAMEINTERPOLATION_PASS_INTERPOLATE = 0, ///< Bidirectional frame interpolation pass
+    FFXM_FRAMEINTERPOLATION_PASS_COUNT       = 1
+} FfxmFrameInterpolationPass;
+
 typedef struct FfxmFrameInterpolationContextDescription {
     uint32_t         flags;
     FfxmDimensions2D maxDisplaySize;

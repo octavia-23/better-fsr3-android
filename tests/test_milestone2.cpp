@@ -7347,11 +7347,19 @@ static void TestPhase5FrameGenerationArchitecture()
         TEST_CHECK(ffxmOpticalflowContextDispatch(&ctx, &dispDesc) == FFXM_OK);
         TEST_CHECK(priv->frameIndex == 1);
         TEST_CHECK(priv->firstExecution == false);
-        TEST_CHECK(s_ScheduledGpuJobs.size() == 1);
+        TEST_CHECK(s_ScheduledGpuJobs.size() == 2);
+        // Prepare Pass
         TEST_CHECK(s_ScheduledGpuJobs[0].jobType == FFXM_GPU_JOB_COMPUTE);
+        TEST_CHECK(s_ScheduledGpuJobs[0].computeJobDescriptor.pipeline.pipeline != nullptr);
         TEST_CHECK(s_ScheduledGpuJobs[0].computeJobDescriptor.dimensions[0] == (1920 + 7) / 8);
         TEST_CHECK(s_ScheduledGpuJobs[0].computeJobDescriptor.dimensions[1] == (1080 + 7) / 8);
         TEST_CHECK(s_ScheduledGpuJobs[0].computeJobDescriptor.dimensions[2] == 1);
+        // Search Pass
+        TEST_CHECK(s_ScheduledGpuJobs[1].jobType == FFXM_GPU_JOB_COMPUTE);
+        TEST_CHECK(s_ScheduledGpuJobs[1].computeJobDescriptor.pipeline.pipeline != nullptr);
+        TEST_CHECK(s_ScheduledGpuJobs[1].computeJobDescriptor.dimensions[0] == (1920 + 7) / 8);
+        TEST_CHECK(s_ScheduledGpuJobs[1].computeJobDescriptor.dimensions[1] == (1080 + 7) / 8);
+        TEST_CHECK(s_ScheduledGpuJobs[1].computeJobDescriptor.dimensions[2] == 1);
         TEST_CHECK(s_ExecuteGpuJobsCallCount == 1);
         TEST_CHECK(s_UnregisterResourcesCallCount == 1);
 
@@ -7422,10 +7430,14 @@ static void TestPhase5FrameGenerationArchitecture()
         ResetDispatchTrackers();
         TEST_CHECK(ffxmFrameInterpolationContextDispatch(&ctx, &fiDisp) == FFXM_OK);
         TEST_CHECK(priv->frameIndex == 1);
-        TEST_CHECK(s_ScheduledGpuJobs.size() == 1);
+        TEST_CHECK(s_ScheduledGpuJobs.size() == 2);
+        // Interpolate Pass
         TEST_CHECK(s_ScheduledGpuJobs[0].jobType == FFXM_GPU_JOB_COMPUTE);
+        TEST_CHECK(s_ScheduledGpuJobs[0].computeJobDescriptor.pipeline.pipeline != nullptr);
         TEST_CHECK(s_ScheduledGpuJobs[0].computeJobDescriptor.dimensions[0] == (3840 + 7) / 8);
         TEST_CHECK(s_ScheduledGpuJobs[0].computeJobDescriptor.dimensions[1] == (2160 + 7) / 8);
+        // History Color Update Copy Pass
+        TEST_CHECK(s_ScheduledGpuJobs[1].jobType == FFXM_GPU_JOB_COPY);
         TEST_CHECK(s_ExecuteGpuJobsCallCount == 1);
         TEST_CHECK(s_UnregisterResourcesCallCount == 1);
 
