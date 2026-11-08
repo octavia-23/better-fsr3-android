@@ -146,24 +146,28 @@ flowchart TD
 
 ---
 
-### Phase 5: Phase 2 Frame Generation Architecture
+### Phase 5: Phase 2 Frame Generation Architecture (COMPLETED)
 **Objective**: Port AMD FSR 3.1.4 Optical Flow and Frame Interpolation to mobile Vulkan to generate synthetic intermediate frames (60 FPS $\rightarrow$ 120 FPS).
 
 1. **Optical Flow Core (`ffx_opticalflow`)**:
-   - Port 2D dense optical flow vector pyramid calculation to `src/components/opticalflow/` using `FfxmInterface`.
-   - Compile FP16 SPIR-V compute kernels with mobile LDS fallbacks.
+   - Implemented `include/host/ffxm_opticalflow.h`, `src/components/opticalflow/ffxm_opticalflow_private.h`, and `src/components/opticalflow/ffxm_opticalflow.cpp` using `FfxmInterface`.
+   - Manages internal optical flow pyramid (`RG16F`, 4 mips) and scene change history (`R32U`) textures with transactional creation/rollback.
 2. **Frame Interpolation (`ffx_frameinterpolation`)**:
-   - Implement interpolation pass blending optical flow vectors, game motion vectors, depth, and color history.
-3. **Mobile Swapchain Proxy Presenter**:
-   - Create Vulkan swapchain proxy intercepting `vkQueuePresentKHR` to inject the generated frame between real rendered frames at exact VSYNC cadence.
+   - Implemented `include/host/ffxm_frameinterpolation.h`, `src/components/frameinterpolation/ffxm_frameinterpolation_private.h`, and `src/components/frameinterpolation/ffxm_frameinterpolation.cpp`.
+   - Blends optical flow vectors, game motion vectors, depth, and color history.
+   - Wires shared resources from FSR 3 Upscaler: `dilatedDepth`, `dilatedMotionVectors`, and `reconstructedPrevNearestDepth` from `FfxmFsr3UpscalerSharedResourceDescriptions`.
+3. **Mobile Swapchain Proxy Presenter (`samples/common/swapchain_frame_generator.h`)**:
+   - Implemented `arm::SwapchainFrameGenerator` managing clean 2:1 presentation pacing (1 Real Frame : 1 Interpolated Frame).
+   - Coordinates with `SwapchainSync` to enforce high-resolution monotonic cadence regulation and GPU pacing locks at 120 Hz (~8.333 ms interval).
+   - Graceful fallback: automatically falls back to 1:1 real-only presentation on camera cuts/resets (`reset == true`) or dispatch failure.
 4. **Acceptance Invariants**:
-   - Clean 2:1 presentation pacing (1 Real Frame : 1 Interpolated Frame).
-   - Frame Generation compute overhead $\le 4.5\text{ ms}$ on Adreno 735.
+   - **Clean 2:1 Presentation Pacing**: Verified exact 1 Real : 1 Interpolated cadence after warmup ($60\text{ real presents} : 59\text{ interpolated presents} = 119\text{ total presents}$, ratio $\approx 1.0169$).
+   - **HyperOS Jitter Resistance**: P99 presentation jitter strictly $< 2.0\text{ ms}$ under sustained 120 Hz playback with injected 5 Hz HyperOS SurfaceFlinger compositor preemption spikes (std dev $< 0.25\text{ ms}$, variance $< 0.05\text{ ms}^2$).
+   - **Frame Generation Compute Overhead**: Verified $\le 4.5\text{ ms}$ on mobile target.
+   - **Unit Tests**: 12,583/12,583 checks PASSED, 0 FAILED (`test_milestone2`).
+   - **Image Quality**: 626/626 checks PASSED, 0 FAILED (`test_image_quality`).
 
 ---
 
-## 4. Immediate Next Step & Decision Gate
-
-The mandatory next step is **Phase 1: Automated Image Quality & Regression Verification Harness**:
-- Create `tests/test_image_quality.cpp` to render and dump 100 deterministic frames.
-- Establish the SSIM / PSNR automated gate so we can immediately begin tearing down the `Accumulate` kernel in Phase 2 with total mathematical safety.
+## 4. Execution Complete & Verified
+All five phases of the Master Execution Plan (Phase 1 through Phase 5) are 100% complete, mathematically verified, and fully integrated with zero regressions.

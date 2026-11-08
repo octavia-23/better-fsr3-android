@@ -29,6 +29,11 @@
 #include "vk_context.h"
 #include "host/ffxm_gpu_timestamps.h"
 #include "gpu_profiler.h"
+#include "host/ffxm_opticalflow.h"
+#include "src/components/opticalflow/ffxm_opticalflow_private.h"
+#include "host/ffxm_frameinterpolation.h"
+#include "src/components/frameinterpolation/ffxm_frameinterpolation_private.h"
+#include "swapchain_frame_generator.h"
 
 #if defined(FFXM_HAS_VK_BACKEND)
 #include "host/backends/vk/ffxm_vk.h"
@@ -7259,6 +7264,380 @@ static void TestPhase4CadenceAndSurfaceFlingerPacingStabilization()
     std::cout << "PASS: Phase 4 Cadence & SurfaceFlinger Pacing Stabilization verified (P99 Jitter < 2.0 ms, 1-VSYNC GPU Lock)." << std::endl;
 }
 
+static void TestPhase5FrameGenerationArchitecture()
+{
+    std::cout << "--- Test Phase 5: Frame Generation Architecture Verification ---" << std::endl;
+
+    // 1. Optical Flow Parameter Validation & Incomplete Interface
+    {
+        FfxmOpticalflowContext ctx;
+        FfxmOpticalflowContextDescription desc = {};
+        FfxmInterface iface = {};
+        SetupMockInterface(&iface);
+        desc.resolution = { 1920, 1080 };
+        desc.backendInterface = iface;
+
+        TEST_CHECK(ffxmOpticalflowContextCreate(nullptr, &desc) == FFXM_ERROR_INVALID_POINTER);
+        TEST_CHECK(ffxmOpticalflowContextCreate(&ctx, nullptr) == FFXM_ERROR_INVALID_POINTER);
+
+        // Zero dimensions
+        desc.resolution = { 0, 1080 };
+        TEST_CHECK(ffxmOpticalflowContextCreate(&ctx, &desc) == FFXM_ERROR_INVALID_ARGUMENT);
+        desc.resolution = { 1920, 0 };
+        TEST_CHECK(ffxmOpticalflowContextCreate(&ctx, &desc) == FFXM_ERROR_INVALID_ARGUMENT);
+        desc.resolution = { 1920, 1080 };
+
+        // Incomplete interface
+        FfxmOpticalflowContextDescription badDesc = desc;
+        badDesc.backendInterface.fpGetDeviceCapabilities = nullptr;
+        TEST_CHECK(ffxmOpticalflowContextCreate(&ctx, &badDesc) == FFXM_ERROR_INCOMPLETE_INTERFACE);
+        badDesc = desc;
+        badDesc.backendInterface.fpCreateBackendContext = nullptr;
+        TEST_CHECK(ffxmOpticalflowContextCreate(&ctx, &badDesc) == FFXM_ERROR_INCOMPLETE_INTERFACE);
+        badDesc = desc;
+        badDesc.backendInterface.fpDestroyBackendContext = nullptr;
+        TEST_CHECK(ffxmOpticalflowContextCreate(&ctx, &badDesc) == FFXM_ERROR_INCOMPLETE_INTERFACE);
+
+        // Unsupported device (no FP16)
+        s_Fp16SupportMock = false;
+        TEST_CHECK(ffxmOpticalflowContextCreate(&ctx, &desc) == FFXM_ERROR_UNSUPPORTED_DEVICE);
+        s_Fp16SupportMock = true;
+    }
+
+    // 2. Optical Flow Creation, Allocation Rollback & Dispatch
+    {
+        ResetMockState();
+        FfxmOpticalflowContext ctx;
+        FfxmOpticalflowContextDescription desc = {};
+        FfxmInterface iface = {};
+        SetupMockInterface(&iface);
+        desc.resolution = { 1920, 1080 };
+        desc.backendInterface = iface;
+
+        // Transactional rollback on second resource failure
+        s_FailAtResourceIndex = 1; // 0 is opticalFlowPyramid, 1 is sceneChangeHist
+        TEST_CHECK(ffxmOpticalflowContextCreate(&ctx, &desc) == FFXM_ERROR_OUT_OF_MEMORY);
+        TEST_CHECK(s_DestroyBackendContextCalled == true);
+        s_FailAtResourceIndex = -1;
+
+        // Successful creation
+        ResetMockState();
+        TEST_CHECK(ffxmOpticalflowContextCreate(&ctx, &desc) == FFXM_OK);
+        auto* priv = reinterpret_cast<FfxmOpticalflowContext_Private*>(&ctx);
+        TEST_CHECK(priv->opticalFlowPyramid.internalIndex != -1);
+        TEST_CHECK(priv->sceneChangeHist.internalIndex != -1);
+        TEST_CHECK(priv->frameIndex == 0);
+        TEST_CHECK(priv->firstExecution == true);
+
+        // Dispatch validation
+        FfxmOpticalflowDispatchDescription dispDesc = {};
+        static int s_ColorDummy = 1;
+        static int s_OfVectorDummy = 2;
+        TEST_CHECK(ffxmOpticalflowContextDispatch(nullptr, &dispDesc) == FFXM_ERROR_INVALID_POINTER);
+        TEST_CHECK(ffxmOpticalflowContextDispatch(&ctx, nullptr) == FFXM_ERROR_INVALID_POINTER);
+        TEST_CHECK(ffxmOpticalflowContextDispatch(&ctx, &dispDesc) == FFXM_ERROR_INVALID_ARGUMENT); // Missing commandList
+
+        dispDesc.commandList = (FfxmCommandList)0x1234;
+        TEST_CHECK(ffxmOpticalflowContextDispatch(&ctx, &dispDesc) == FFXM_ERROR_INVALID_ARGUMENT); // Missing color
+        dispDesc.color.resource = &s_ColorDummy;
+        TEST_CHECK(ffxmOpticalflowContextDispatch(&ctx, &dispDesc) == FFXM_ERROR_INVALID_ARGUMENT); // Missing opticalFlowVector
+        dispDesc.opticalFlowVector.resource = &s_OfVectorDummy;
+
+        ResetDispatchTrackers();
+        TEST_CHECK(ffxmOpticalflowContextDispatch(&ctx, &dispDesc) == FFXM_OK);
+        TEST_CHECK(priv->frameIndex == 1);
+        TEST_CHECK(priv->firstExecution == false);
+        TEST_CHECK(s_ScheduledGpuJobs.size() == 1);
+        TEST_CHECK(s_ScheduledGpuJobs[0].jobType == FFXM_GPU_JOB_COMPUTE);
+        TEST_CHECK(s_ScheduledGpuJobs[0].computeJobDescriptor.dimensions[0] == (1920 + 7) / 8);
+        TEST_CHECK(s_ScheduledGpuJobs[0].computeJobDescriptor.dimensions[1] == (1080 + 7) / 8);
+        TEST_CHECK(s_ScheduledGpuJobs[0].computeJobDescriptor.dimensions[2] == 1);
+        TEST_CHECK(s_ExecuteGpuJobsCallCount == 1);
+        TEST_CHECK(s_UnregisterResourcesCallCount == 1);
+
+        // Destruction
+        int pyramidIdx = priv->opticalFlowPyramid.internalIndex;
+        int histIdx = priv->sceneChangeHist.internalIndex;
+        TEST_CHECK(ffxmOpticalflowContextDestroy(&ctx) == FFXM_OK);
+        TEST_CHECK(s_ResourceDestructionCounts[pyramidIdx] == 1);
+        TEST_CHECK(s_ResourceDestructionCounts[histIdx] == 1);
+        TEST_CHECK(s_DestroyBackendContextCalled == true);
+    }
+
+    // 3. Frame Interpolation Parameter Validation & Lifecycle
+    {
+        FfxmFrameInterpolationContext ctx;
+        FfxmFrameInterpolationContextDescription desc = {};
+        FfxmInterface iface = {};
+        SetupMockInterface(&iface);
+        desc.maxDisplaySize = { 3840, 2160 };
+        desc.backendInterface = iface;
+
+        TEST_CHECK(ffxmFrameInterpolationContextCreate(nullptr, &desc) == FFXM_ERROR_INVALID_POINTER);
+        TEST_CHECK(ffxmFrameInterpolationContextCreate(&ctx, nullptr) == FFXM_ERROR_INVALID_POINTER);
+
+        // Zero dimensions
+        desc.maxDisplaySize = { 0, 2160 };
+        TEST_CHECK(ffxmFrameInterpolationContextCreate(&ctx, &desc) == FFXM_ERROR_INVALID_ARGUMENT);
+        desc.maxDisplaySize = { 3840, 2160 };
+
+        // Unsupported device
+        s_Fp16SupportMock = false;
+        TEST_CHECK(ffxmFrameInterpolationContextCreate(&ctx, &desc) == FFXM_ERROR_UNSUPPORTED_DEVICE);
+        s_Fp16SupportMock = true;
+
+        // Transactional rollback on second resource failure
+        ResetMockState();
+        s_FailAtResourceIndex = 1; // 0 is historyColor, 1 is interpolatedStaging
+        TEST_CHECK(ffxmFrameInterpolationContextCreate(&ctx, &desc) == FFXM_ERROR_OUT_OF_MEMORY);
+        TEST_CHECK(s_DestroyBackendContextCalled == true);
+        s_FailAtResourceIndex = -1;
+
+        // Successful creation
+        ResetMockState();
+        TEST_CHECK(ffxmFrameInterpolationContextCreate(&ctx, &desc) == FFXM_OK);
+        auto* priv = reinterpret_cast<FfxmFrameInterpolationContext_Private*>(&ctx);
+        TEST_CHECK(priv->historyColor.internalIndex != -1);
+        TEST_CHECK(priv->interpolatedStaging.internalIndex != -1);
+
+        // Dispatch validation with all shared resources
+        static int s_Bb = 1, s_Io = 2, s_Of = 3, s_Dd = 4, s_Dmv = 5, s_Rnd = 6;
+        FfxmFrameInterpolationDispatchDescription fiDisp = {};
+        TEST_CHECK(ffxmFrameInterpolationContextDispatch(&ctx, &fiDisp) == FFXM_ERROR_INVALID_ARGUMENT); // No cmdList
+        fiDisp.commandList = (FfxmCommandList)0x5678;
+        TEST_CHECK(ffxmFrameInterpolationContextDispatch(&ctx, &fiDisp) == FFXM_ERROR_INVALID_ARGUMENT); // No backBuffer
+        fiDisp.currentBackBuffer.resource = &s_Bb;
+        TEST_CHECK(ffxmFrameInterpolationContextDispatch(&ctx, &fiDisp) == FFXM_ERROR_INVALID_ARGUMENT); // No output
+        fiDisp.currentInterpolatedOutput.resource = &s_Io;
+        TEST_CHECK(ffxmFrameInterpolationContextDispatch(&ctx, &fiDisp) == FFXM_ERROR_INVALID_ARGUMENT); // No opticalFlow
+        fiDisp.opticalFlowVector.resource = &s_Of;
+        TEST_CHECK(ffxmFrameInterpolationContextDispatch(&ctx, &fiDisp) == FFXM_ERROR_INVALID_ARGUMENT); // No dilatedDepth
+        fiDisp.dilatedDepth.resource = &s_Dd;
+        TEST_CHECK(ffxmFrameInterpolationContextDispatch(&ctx, &fiDisp) == FFXM_ERROR_INVALID_ARGUMENT); // No dilatedMv
+        fiDisp.dilatedMotionVectors.resource = &s_Dmv;
+        TEST_CHECK(ffxmFrameInterpolationContextDispatch(&ctx, &fiDisp) == FFXM_ERROR_INVALID_ARGUMENT); // No reconDepth
+        fiDisp.reconstructedPrevNearestDepth.resource = &s_Rnd;
+        fiDisp.interpolationTime = 0.5f;
+
+        ResetDispatchTrackers();
+        TEST_CHECK(ffxmFrameInterpolationContextDispatch(&ctx, &fiDisp) == FFXM_OK);
+        TEST_CHECK(priv->frameIndex == 1);
+        TEST_CHECK(s_ScheduledGpuJobs.size() == 1);
+        TEST_CHECK(s_ScheduledGpuJobs[0].jobType == FFXM_GPU_JOB_COMPUTE);
+        TEST_CHECK(s_ScheduledGpuJobs[0].computeJobDescriptor.dimensions[0] == (3840 + 7) / 8);
+        TEST_CHECK(s_ScheduledGpuJobs[0].computeJobDescriptor.dimensions[1] == (2160 + 7) / 8);
+        TEST_CHECK(s_ExecuteGpuJobsCallCount == 1);
+        TEST_CHECK(s_UnregisterResourcesCallCount == 1);
+
+        // Destruction
+        int historyIdx = priv->historyColor.internalIndex;
+        int stagingIdx = priv->interpolatedStaging.internalIndex;
+        TEST_CHECK(ffxmFrameInterpolationContextDestroy(&ctx) == FFXM_OK);
+        TEST_CHECK(s_ResourceDestructionCounts[historyIdx] == 1);
+        TEST_CHECK(s_ResourceDestructionCounts[stagingIdx] == 1);
+        TEST_CHECK(s_DestroyBackendContextCalled == true);
+    }
+
+    // 4. SwapchainFrameGenerator: 2:1 Presentation Cadence & Pacing Invariants
+    {
+        SwapchainSync sync;
+        VkDevice mockDevice = (VkDevice)0x10;
+        VkQueue mockQueue = (VkQueue)0x20;
+        VkSwapchainKHR mockSwapchain = (VkSwapchainKHR)0x30;
+        std::vector<VkImage> mockImages = { (VkImage)0x101, (VkImage)0x102, (VkImage)0x103 };
+        VkCommandBuffer mockCmds[2] = { (VkCommandBuffer)0x201, (VkCommandBuffer)0x202 };
+        VkSemaphore mockAcq[2] = { (VkSemaphore)0x301, (VkSemaphore)0x302 };
+        VkSemaphore mockRel[2] = { (VkSemaphore)0x401, (VkSemaphore)0x402 };
+        VkFence mockFences[2] = { (VkFence)0x501, (VkFence)0x502 };
+
+        sync.init(mockDevice, mockQueue, mockSwapchain, mockImages, mockCmds, mockAcq, mockRel, mockFences);
+
+        static uint64_t s_TimeNs = 1000000000ull;
+        static uint32_t s_SleepCalls = 0;
+        static uint64_t s_TotalSleptNs = 0;
+        s_TimeNs = 1000000000ull;
+        s_SleepCalls = 0;
+        s_TotalSleptNs = 0;
+
+        SwapchainSync::VulkanFunctions fn = {};
+        fn.vkWaitForFences = [](VkDevice, uint32_t, const VkFence*, VkBool32, uint64_t) -> VkResult { return VK_SUCCESS; };
+        fn.vkResetFences = [](VkDevice, uint32_t, const VkFence*) -> VkResult { return VK_SUCCESS; };
+        fn.vkResetCommandBuffer = [](VkCommandBuffer, VkCommandBufferResetFlags) -> VkResult { return VK_SUCCESS; };
+        fn.vkBeginCommandBuffer = [](VkCommandBuffer, const VkCommandBufferBeginInfo*) -> VkResult { return VK_SUCCESS; };
+        fn.vkEndCommandBuffer = [](VkCommandBuffer) -> VkResult { return VK_SUCCESS; };
+        fn.vkQueueSubmit = [](VkQueue, uint32_t, const VkSubmitInfo*, VkFence) -> VkResult { return VK_SUCCESS; };
+        fn.vkQueuePresentKHR = [](VkQueue, const VkPresentInfoKHR*) -> VkResult { return VK_SUCCESS; };
+        fn.vkAcquireNextImageKHR = [](VkDevice, VkSwapchainKHR, uint64_t, VkSemaphore, VkFence, uint32_t* pIndex) -> VkResult {
+            *pIndex = 0;
+            return VK_SUCCESS;
+        };
+        fn.getMonotonicTimeNs = []() -> uint64_t { return s_TimeNs; };
+        fn.sleepNs = [](uint64_t ns) {
+            s_SleepCalls++;
+            s_TotalSleptNs += ns;
+            s_TimeNs += ns;
+        };
+        sync.setVulkanFunctions(fn);
+
+        SwapchainFrameGenerator gen;
+        SwapchainFrameGenerator::Config cfg;
+        cfg.enabled = true;
+        cfg.targetDisplayFps = 120; // 8.333 ms interval
+        gen.init(&sync, nullptr, nullptr, cfg);
+
+        SwapchainFrameGenerator::TimingHooks hooks;
+        hooks.getMonotonicTimeNs = []() -> uint64_t { return s_TimeNs; };
+        hooks.sleepNs = [](uint64_t ns) {
+            s_SleepCalls++;
+            s_TotalSleptNs += ns;
+            s_TimeNs += ns;
+        };
+        gen.setTimingHooks(hooks);
+
+        // A. Frame 0 (First Frame): Only Real frame presented (no prior history)
+        SwapchainFrameGenerator::FrameInput inp = {};
+        inp.commandList = (FfxmCommandList)0x1;
+        static int s_Color = 1, s_Dd = 2, s_Dmv = 3, s_Rnd = 4, s_Out = 5, s_Of = 6;
+        inp.currentRealFrameColor.resource = &s_Color;
+        inp.dilatedDepth.resource = &s_Dd;
+        inp.dilatedMotionVectors.resource = &s_Dmv;
+        inp.reconstructedPrevNearestDepth.resource = &s_Rnd;
+        inp.interpolatedOutput.resource = &s_Out;
+        inp.opticalFlowOutput.resource = &s_Of;
+        inp.reset = false;
+
+        auto res0 = gen.processFrame(inp);
+        TEST_CHECK(res0.status == FFXM_OK);
+        TEST_CHECK(res0.realFramePresented == true);
+        TEST_CHECK(res0.interpolatedFramePresented == false);
+        TEST_CHECK(gen.stats().totalRealPresents == 1);
+        TEST_CHECK(gen.stats().totalInterpolatedPresents == 0);
+        TEST_CHECK(gen.stats().totalPresents == 1);
+
+        // B. Continuous 60 engine frames (frames 1 to 59): 2:1 presentation pacing!
+        for (int i = 1; i < 60; ++i) {
+            s_TimeNs += 7000000ull; // 7.0 ms engine GPU render time before presentation
+            auto res = gen.processFrame(inp);
+            TEST_CHECK(res.status == FFXM_OK);
+            TEST_CHECK(res.realFramePresented == true);
+            TEST_CHECK(res.interpolatedFramePresented == true);
+        }
+
+        const auto& stats = gen.stats();
+        TEST_CHECK(stats.totalSourceFrames == 60);
+        TEST_CHECK(stats.totalRealPresents == 60);
+        TEST_CHECK(stats.totalInterpolatedPresents == 59);
+        TEST_CHECK(stats.totalPresents == 119);
+        double realToInterpRatio = (double)stats.totalRealPresents / (double)stats.totalInterpolatedPresents;
+        TEST_CHECK(realToInterpRatio >= 1.0 && realToInterpRatio <= 1.02);
+
+        // C. Camera Cut / Reset Invariant: must present ONLY real frame on reset
+        inp.reset = true;
+        s_TimeNs += 16666666ull;
+        auto resReset = gen.processFrame(inp);
+        TEST_CHECK(resReset.status == FFXM_OK);
+        TEST_CHECK(resReset.realFramePresented == true);
+        TEST_CHECK(resReset.interpolatedFramePresented == false);
+        TEST_CHECK(gen.stats().totalRealPresents == 61);
+        TEST_CHECK(gen.stats().totalInterpolatedPresents == 59);
+        inp.reset = false;
+
+        // D. Disabled Mode Fallback: exactly 1:1 real presents
+        cfg.enabled = false;
+        gen.setConfig(cfg);
+        gen.resetState();
+        for (int i = 0; i < 20; ++i) {
+            s_TimeNs += 16666666ull;
+            auto res = gen.processFrame(inp);
+            TEST_CHECK(res.status == FFXM_OK);
+            TEST_CHECK(res.realFramePresented == true);
+            TEST_CHECK(res.interpolatedFramePresented == false);
+        }
+        TEST_CHECK(gen.stats().totalSourceFrames == 20);
+        TEST_CHECK(gen.stats().totalRealPresents == 20);
+        TEST_CHECK(gen.stats().totalInterpolatedPresents == 0);
+        TEST_CHECK(gen.stats().totalPresents == 20);
+    }
+
+    // 5. Invariant: HyperOS 5 Hz Jitter Resistance & Compute Overhead Bound (<= 4.5 ms)
+    {
+        SwapchainSync sync;
+        VkDevice mockDevice = (VkDevice)0x10;
+        VkQueue mockQueue = (VkQueue)0x20;
+        VkSwapchainKHR mockSwapchain = (VkSwapchainKHR)0x30;
+        std::vector<VkImage> mockImages = { (VkImage)0x101, (VkImage)0x102 };
+        VkCommandBuffer mockCmds[2] = { (VkCommandBuffer)0x201, (VkCommandBuffer)0x202 };
+        VkSemaphore mockAcq[2] = { (VkSemaphore)0x301, (VkSemaphore)0x302 };
+        VkSemaphore mockRel[2] = { (VkSemaphore)0x401, (VkSemaphore)0x402 };
+        VkFence mockFences[2] = { (VkFence)0x501, (VkFence)0x502 };
+
+        sync.init(mockDevice, mockQueue, mockSwapchain, mockImages, mockCmds, mockAcq, mockRel, mockFences);
+
+        static uint64_t s_SimTimeNs = 1000000000ull;
+        s_SimTimeNs = 1000000000ull;
+
+        SwapchainSync::VulkanFunctions fn = {};
+        fn.vkWaitForFences = [](VkDevice, uint32_t, const VkFence*, VkBool32, uint64_t) -> VkResult { return VK_SUCCESS; };
+        fn.vkResetFences = [](VkDevice, uint32_t, const VkFence*) -> VkResult { return VK_SUCCESS; };
+        fn.vkResetCommandBuffer = [](VkCommandBuffer, VkCommandBufferResetFlags) -> VkResult { return VK_SUCCESS; };
+        fn.vkBeginCommandBuffer = [](VkCommandBuffer, const VkCommandBufferBeginInfo*) -> VkResult { return VK_SUCCESS; };
+        fn.vkEndCommandBuffer = [](VkCommandBuffer) -> VkResult { return VK_SUCCESS; };
+        fn.vkQueueSubmit = [](VkQueue, uint32_t, const VkSubmitInfo*, VkFence) -> VkResult { return VK_SUCCESS; };
+        fn.vkQueuePresentKHR = [](VkQueue, const VkPresentInfoKHR*) -> VkResult { return VK_SUCCESS; };
+        fn.vkAcquireNextImageKHR = [](VkDevice, VkSwapchainKHR, uint64_t, VkSemaphore, VkFence, uint32_t* pIndex) -> VkResult {
+            *pIndex = 0;
+            return VK_SUCCESS;
+        };
+        fn.getMonotonicTimeNs = []() -> uint64_t { return s_SimTimeNs; };
+        fn.sleepNs = [](uint64_t ns) { s_SimTimeNs += ns; };
+        sync.setVulkanFunctions(fn);
+
+        SwapchainFrameGenerator gen;
+        SwapchainFrameGenerator::Config cfg;
+        cfg.enabled = true;
+        cfg.targetDisplayFps = 120; // 8.333 ms
+        gen.init(&sync, nullptr, nullptr, cfg);
+
+        SwapchainFrameGenerator::TimingHooks hooks;
+        hooks.getMonotonicTimeNs = []() -> uint64_t { return s_SimTimeNs; };
+        hooks.sleepNs = [](uint64_t ns) { s_SimTimeNs += ns; };
+        gen.setTimingHooks(hooks);
+
+        SwapchainFrameGenerator::FrameInput inp = {};
+        inp.commandList = (FfxmCommandList)0x1;
+        static int s_Color = 1, s_Dd = 2, s_Dmv = 3, s_Rnd = 4, s_Out = 5, s_Of = 6;
+        inp.currentRealFrameColor.resource = &s_Color;
+        inp.dilatedDepth.resource = &s_Dd;
+        inp.dilatedMotionVectors.resource = &s_Dmv;
+        inp.reconstructedPrevNearestDepth.resource = &s_Rnd;
+        inp.interpolatedOutput.resource = &s_Out;
+        inp.opticalFlowOutput.resource = &s_Of;
+
+        // Run 60 engine frames (119 presents) with injected preemption spikes
+        for (int frame = 0; frame < 60; ++frame) {
+            uint64_t computeTimeNs = 7000000ull; // 7.0 ms baseline render work
+            if (frame % 24 == 0) {
+                // Injected HyperOS SurfaceFlinger preemption spike (+0.92 ms)
+                computeTimeNs += 920000ull;
+            }
+            s_SimTimeNs += computeTimeNs;
+            auto res = gen.processFrame(inp);
+            TEST_CHECK(res.status == FFXM_OK);
+            TEST_CHECK(res.frameGenComputeOverheadMs <= 4.5);
+        }
+
+        const auto& stats = gen.stats();
+        TEST_CHECK(stats.totalPresents == 119);
+        TEST_CHECK(stats.meanPresentationIntervalMs >= 8.25 && stats.meanPresentationIntervalMs <= 8.45);
+        TEST_CHECK(stats.presentationVarianceMs2 < 0.05);
+        TEST_CHECK(stats.presentationStdDevMs < 0.25);
+        TEST_CHECK(stats.presentationP99JitterMs < 2.0); // Acceptance Invariant: P99 Jitter < 2.0 ms
+        TEST_CHECK(stats.maxComputeOverheadMs <= 4.5);   // Acceptance Invariant: Overhead <= 4.5 ms
+    }
+
+    std::cout << "PASS: Phase 5 Frame Generation Architecture verified (Optical Flow, Frame Interpolation, 2:1 Pacing)." << std::endl;
+}
+
 int main()
 {
     std::cout << "============================================================" << std::endl;
@@ -7304,6 +7683,7 @@ int main()
     TestM4VkContextQueryPoolLifecycle();
     TestPhase3MobileBandwidthReductionAndKernelFusion();
     TestPhase4CadenceAndSurfaceFlingerPacingStabilization();
+    TestPhase5FrameGenerationArchitecture();
 
     std::cout << "============================================================" << std::endl;
     std::cout << "Summary: " << g_TestPasses << " checks PASSED, " << g_TestFailures << " FAILED." << std::endl;
