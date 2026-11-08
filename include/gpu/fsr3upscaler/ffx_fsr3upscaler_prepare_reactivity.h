@@ -239,11 +239,26 @@ FfxFloat32 UpdateAccumulation(FfxInt32x2 iPxPos, FfxFloat32x2 fUv, FfxFloat32x2 
 
 FfxFloat32 ComputeShadingChange(FfxFloat32x2 fUv)
 {
-    // NOTE: Here we re-apply jitter, will be reverted again when sampled in accumulation pass
-    const FfxFloat32x2 fShadingChangeUv = ClampUv(fUv - Jitter() / RenderSize(), ShadingChangeRenderSize(), ShadingChangeMaxRenderSize());
-    const FfxFloat32 fShadingChange = ffxSaturate(SampleShadingChange(fShadingChangeUv));
+    // Mobile Bandwidth Reduction & Kernel Fusion (Phase 3):
+    // ShadingChange pass is fused directly into PrepareReactivity. Instead of writing
+    // an intermediate R8 texture to DRAM and sampling it back, we sample the SPD mip levels
+    // in-flight, eliminating 1 compute dispatch, 1 barrier, and all intermediate DRAM round-trip traffic.
+    const FfxFloat32x2 fMipUv = ClampUv(fUv, ShadingChangeRenderSize(), GetSPDMipDimensions(0));
+    const FfxFloat32 fScale = (1.0f + iShadingChangeMipStart / 3.0f) * ShadingChangeScale();
+    FfxFloat32 fShadingChange = 0.0f;
 
-    return fShadingChange;
+    FFX_UNROLL
+    for (FfxInt32 iMipLevel = iShadingChangeMipStart; iMipLevel < 3; iMipLevel++)
+    {
+        const FfxFloat32x2 fSample = SampleSPDMipLevel(fMipUv, iMipLevel);
+        const FfxFloat32 fVal = abs(fSample.x * fSample.y);
+        if (fVal > 0.0f)
+        {
+            fShadingChange = ffxMax(fShadingChange, fVal);
+        }
+    }
+
+    return ffxSaturate(fShadingChange * fScale);
 }
 
 void PrepareReactivity(FfxInt32x2 iPxPos)

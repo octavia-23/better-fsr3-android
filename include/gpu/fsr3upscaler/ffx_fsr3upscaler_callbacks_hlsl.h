@@ -191,6 +191,11 @@ FfxFloat32 MinDisocclusionAccumulation()
     return fMinDisocclusionAccumulation;
 }
 
+FfxFloat32 ShadingChangeScale()
+{
+    return fShadingChangeScale;
+}
+
 #endif // #if defined(FSR3UPSCALER_BIND_CB_FSR3UPSCALER)
 
 #define FFX_FSR3UPSCALER_ROOTSIG_STRINGIFY(p) FFX_FSR3UPSCALER_ROOTSIG_STR(p)

@@ -31,7 +31,7 @@
 #define FSR3UPSCALER_BIND_SRV_REACTIVE_MASK                                 3
 #define FSR3UPSCALER_BIND_SRV_TRANSPARENCY_AND_COMPOSITION_MASK             4
 #define FSR3UPSCALER_BIND_SRV_ACCUMULATION                                  5
-#define FSR3UPSCALER_BIND_SRV_SHADING_CHANGE                                6
+#define FSR3UPSCALER_BIND_SRV_SPD_MIPS                                      6
 #define FSR3UPSCALER_BIND_SRV_CURRENT_LUMA                                  7
 #define FSR3UPSCALER_BIND_SRV_INPUT_EXPOSURE                                8
 

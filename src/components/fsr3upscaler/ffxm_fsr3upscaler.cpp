@@ -1619,15 +1619,10 @@ FFXM_API FfxmErrorCode ffxmFsr3UpscalerContextDispatch(
             }
         }
 
-        // Schedule Compute Shading Change compute pass
-        if (dispatchResult == FFXM_OK) {
-            const int32_t threadGroupWorkRegionDim = 8;
-            const int32_t shadingChangeWidth = std::max(1, pendingConstants.renderSize[0] / 2);
-            const int32_t shadingChangeHeight = std::max(1, pendingConstants.renderSize[1] / 2);
-            const int32_t dispatchShadingChangeX = (shadingChangeWidth + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
-            const int32_t dispatchShadingChangeY = (shadingChangeHeight + (threadGroupWorkRegionDim - 1)) / threadGroupWorkRegionDim;
-            dispatchResult = scheduleDispatch(contextPrivate, pDispatchDescription, &contextPrivate->pipelineShadingChange, dispatchShadingChangeX, dispatchShadingChangeY);
-        }
+        // Phase 3: Mobile Bandwidth Reduction & Kernel Fusion
+        // Compute Shading Change pass is fused directly into PrepareReactivity pass.
+        // This eliminates 1 compute dispatch, 1 pipeline barrier, and the intermediate
+        // DRAM round-trip traffic of rw_shading_change.
 
         // Schedule Prepare Reactivity compute pass
         if (dispatchResult == FFXM_OK) {
